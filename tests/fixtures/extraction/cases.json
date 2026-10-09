@@ -915,5 +915,136 @@
     "timezone": "Asia/Shanghai",
     "sent_at": 1777536000000,
     "category": "calendar_boundary"
+  },
+  {
+    "id": "text-132",
+    "text": "高数考试不改到2026年10月13日，仍按原计划",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_negated_change"
+  },
+  {
+    "id": "text-133",
+    "text": "原定高数考试不会延期至明天",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_negated_change"
+  },
+  {
+    "id": "text-134",
+    "text": "高数考试不改至明天",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_negated_change"
+  },
+  {
+    "id": "text-135",
+    "text": "高数考试不会调整到明天",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_negated_change"
+  },
+  {
+    "id": "text-136",
+    "text": "高数考试不延期至明天",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_negated_change"
+  },
+  {
+    "id": "text-137",
+    "text": "高数考试不会调整至明天",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_negated_change"
+  },
+  {
+    "id": "text-138",
+    "text": "2026-10-123 09:00高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-139",
+    "text": "20266年10月12日09:00高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-140",
+    "text": "2026年10月12日109:00高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-141",
+    "text": "2026年10月12日09:000高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-142",
+    "text": "2026年10月12日9:00:30高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-143",
+    "text": "2026/10/123高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-144",
+    "text": "2026年110月12日高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-145",
+    "text": "2026年10月112日高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-146",
+    "text": "2026年10月12日09:00.5高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_malformed_numeric_token"
+  },
+  {
+    "id": "text-147",
+    "text": "2026年10月12日9:00高数考试，10:00英语考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_coordinated_positive"
+  },
+  {
+    "id": "text-148",
+    "text": "2026年10月12日9:00高数考试，以及研究生答辩",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_coordinated_positive"
+  },
+  {
+    "id": "text-149",
+    "text": "10月14日9:00高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review_create_reply_context",
+    "context": {
+      "text": "2026年10月12日高数考试",
+      "sent_at": 1791532800000,
+      "message_key": "00000000-0000-0000-0000-000000000010"
+    }
   }
 ]

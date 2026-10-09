@@ -370,7 +370,15 @@ fn text_quality_dataset_reports_actual_errors() {
         assert_eq!(case["id"], label["id"]);
         let mut e = envelope(case["text"].as_str().unwrap());
         e.sent_at = case["sent_at"].as_i64().unwrap();
-        let result = extract(&e, &[], &[], case["timezone"].as_str().unwrap()).unwrap();
+        let mut context = vec![];
+        if let Some(reference) = case.get("context") {
+            let mut original = envelope(reference["text"].as_str().unwrap());
+            original.message_key = reference["message_key"].as_str().unwrap().parse().unwrap();
+            original.sent_at = reference["sent_at"].as_i64().unwrap();
+            e.reply_to = Some(original.message_key);
+            context.push(original);
+        }
+        let result = extract(&e, &[], &context, case["timezone"].as_str().unwrap()).unwrap();
         let actual_events:Vec<Value>=result.candidates.iter().map(|c|json!({"kind":c.kind,"action":c.action,"precision":c.time.precision,"local_date":c.time.local_date,"start_at":c.time.start_at,"end_at":c.time.end_at,"target":c.target_message_key.is_some()})).collect();
         let mut remaining = label["events"].as_array().unwrap().clone();
         let mut case_tp = 0;
@@ -747,5 +755,262 @@ fn even_empty_batches_validate_source_timestamp_range() {
     assert_eq!(
         extract(&e, &[], &[], "Asia/Shanghai"),
         Err(AppError::InvalidInput)
+    );
+}
+
+#[test]
+fn review_f1_negated_reschedules_cannot_target_replied_event() {
+    let original = envelope("2026年10月12日高数考试");
+    for text in [
+        "高数考试不改到2026年10月13日，仍按原计划",
+        "原定高数考试不会延期至明天",
+        "高数考试不改至明天",
+        "高数考试不会调整到明天",
+        "高数考试不延期至明天",
+        "高数考试不会调整至明天",
+    ] {
+        let mut notice = envelope(text);
+        notice.message_key = MessageKey::from_uuid(Uuid::from_u128(90));
+        notice.reply_to = Some(original.message_key);
+        let b = extract(
+            &notice,
+            &[],
+            std::slice::from_ref(&original),
+            "Asia/Shanghai",
+        )
+        .unwrap();
+        assert!(b.candidates.is_empty(), "{text}");
+        assert_eq!(
+            parse_time(text, SENT, "Asia/Shanghai").unwrap().precision,
+            Precision::UnknownDate,
+            "{text}"
+        );
+    }
+    let mut valid = envelope("高数考试改到明天9:00");
+    valid.reply_to = Some(original.message_key);
+    let b = extract(&valid, &[], &[original], "Asia/Shanghai").unwrap();
+    assert_eq!(b.candidates[0].action, CandidateAction::Reschedule);
+    assert_eq!(b.candidates[0].time.precision, Precision::Exact);
+}
+#[test]
+fn review_f2_complete_numeric_tokens_are_required() {
+    for text in [
+        "2026-10-123 09:00高数考试",
+        "20266年10月12日09:00高数考试",
+        "2026年10月12日109:00高数考试",
+        "2026年10月12日09:000高数考试",
+        "2026年10月12日9:00:30高数考试",
+        "2026/10/123高数考试",
+        "2026年110月12日高数考试",
+        "2026年10月112日高数考试",
+        "2026年10月12日09:00.5高数考试",
+    ] {
+        let t = parse_time(text, SENT, "Asia/Shanghai").unwrap();
+        assert_eq!(t.precision, Precision::UnknownDate, "{text}");
+        assert_eq!(t.start_at, None);
+    }
+}
+fn inherited_notice() -> ExtractBatch {
+    let original = envelope("2026年10月12日高数考试");
+    let mut notice = envelope("原定高数考试改至10月14日9:00");
+    notice.message_key = MessageKey::from_uuid(Uuid::from_u128(9));
+    notice.reply_to = Some(original.message_key);
+    extract(&notice, &[], &[original], "Asia/Shanghai").unwrap()
+}
+fn review_part(text: &str, id: u128) -> PartResult {
+    let mut b = block(text);
+    b.part_id = PartId::from_uuid(Uuid::from_u128(id));
+    PartResult {
+        part_id: b.part_id,
+        status: PartStatus::Success,
+        blocks: vec![b],
+        reason_code: None,
+    }
+}
+#[test]
+fn review_f3_compatible_merge_preserves_inherited_current_time() {
+    let original = inherited_notice();
+    let c = &original.candidates[0];
+    assert_eq!(c.time.precision, Precision::Exact);
+    let merged = merge_parts(
+        &original,
+        &[review_part("高数考试改至2026年10月14日9:00", 3)],
+    )
+    .unwrap();
+    assert_eq!(merged.candidates[0].time, c.time);
+    assert_eq!(
+        merged.candidates[0].target_message_key,
+        c.target_message_key
+    );
+    assert_eq!(merged.candidates[0].candidate_key, c.candidate_key);
+    assert_eq!(merged.source_order, original.source_order);
+    let conflicting = merge_parts(
+        &original,
+        &[review_part("高数考试改至2026年10月15日9:00", 3)],
+    )
+    .unwrap();
+    assert_eq!(
+        conflicting.candidates[0].time.precision,
+        Precision::UnknownDate
+    );
+}
+#[test]
+fn review_f3_context_role_is_strict_and_bound_to_established_target() {
+    use shixu_core::notifications::extract::context_evidence_target;
+    let original = inherited_notice();
+    let historical = original.candidates[0].evidence.last().unwrap();
+    assert_eq!(
+        context_evidence_target(historical).unwrap(),
+        original.candidates[0].target_message_key
+    );
+    for role in [
+        "n6.body.utf8-bytes.1;n6_context_year_target=not-a-uuid",
+        "n6.body.utf8-bytes.1;n6_context_year_target=00000000-0000-0000-0000-000000000099",
+    ] {
+        let mut forged = original.clone();
+        forged.candidates[0]
+            .evidence
+            .last_mut()
+            .unwrap()
+            .engine_version = role.into();
+        assert!(merge_parts(&forged, &[review_part("高数考试改至2026年10月14日9:00", 3)]).is_err());
+    }
+    let mut unbound = original;
+    unbound.candidates[0].target_message_key = None;
+    assert!(
+        merge_parts(
+            &unbound,
+            &[review_part("高数考试改至2026年10月14日9:00", 3)]
+        )
+        .is_err()
+    );
+}
+#[test]
+fn review_f4_coordinated_positive_remainder_is_partial() {
+    for text in [
+        "2026年10月12日9:00高数考试，10:00英语考试",
+        "2026年10月12日9:00高数考试，以及研究生答辩",
+        "2026年10月12日9:00高数考试以及研究生答辩",
+    ] {
+        let b = batch(text);
+        assert_eq!(b.candidates[0].time.precision, Precision::Exact, "{text}");
+        assert!(
+            b.part_results
+                .iter()
+                .any(|p| p.status == PartStatus::PartialParse
+                    && p.blocks
+                        .iter()
+                        .any(|e| e.text == text
+                            && e.quality_flags.contains(&QualityFlag::PartialSource))),
+            "{text}"
+        );
+    }
+}
+#[test]
+fn review_f5_page_and_nontext_clause_occurrences_do_not_collapse() {
+    let first = block("2026年10月12日高数考试");
+    let mut second = block("2026年10月13日高数考试");
+    second.page_or_sheet = Some(PageOrSheet::Page { number: 2 });
+    assert_eq!(
+        extract(&envelope(""), &[first, second], &[], "Asia/Shanghai"),
+        Err(AppError::Conflict)
+    );
+    let duplicate = block("2026年10月12日高数考试；2026年10月13日高数考试");
+    assert_eq!(
+        extract(&envelope(""), &[duplicate], &[], "Asia/Shanghai"),
+        Err(AppError::Conflict)
+    );
+}
+#[test]
+fn review_f6_location_conflict_has_no_arrival_or_majority_winner() {
+    let original = batch("2026年10月12日高数考试，地点：A");
+    let b = review_part("2026年10月12日高数考试，地点：B", 3);
+    let another_b = review_part("2026年10月12日高数考试，地点：B", 4);
+    for parts in [[b.clone(), another_b.clone()], [another_b, b]] {
+        let merged = merge_parts(&original, &parts).unwrap();
+        assert_eq!(merged.candidates[0].location, None);
+    }
+    let empty = batch("2026年10月12日高数考试");
+    let merged = merge_parts(&empty, &[review_part("2026年10月12日高数考试，地点：A", 3)]).unwrap();
+    assert_eq!(merged.candidates[0].location.as_deref(), Some("A"));
+}
+
+#[test]
+fn review_create_reply_year_enrichment_is_explicitly_deferred() {
+    let original = envelope("2026年10月12日高数考试");
+    let mut notice = envelope("10月14日9:00高数考试");
+    notice.message_key = MessageKey::from_uuid(Uuid::from_u128(9));
+    notice.reply_to = Some(original.message_key);
+    let b = extract(&notice, &[], &[original], "Asia/Shanghai").unwrap();
+    assert_eq!(b.candidates[0].action, CandidateAction::Create);
+    assert_eq!(b.candidates[0].target_message_key, None);
+    assert_eq!(b.candidates[0].time.precision, Precision::UnknownDate);
+    assert!(
+        b.part_results
+            .iter()
+            .any(|p| p.status == PartStatus::PartialParse
+                && p.blocks.iter().any(|e| e.text == notice.text))
+    );
+}
+#[test]
+fn review_f3_forged_incoming_role_and_empty_merge_fail_closed() {
+    let original = inherited_notice();
+    let mut incoming = review_part("高数考试改至2026年10月14日9:00", 3);
+    incoming.blocks[0].engine_version =
+        "n6.body.utf8-bytes.1;n6_context_year_target=00000000-0000-0000-0000-000000000001".into();
+    assert!(merge_parts(&original, &[incoming]).is_err());
+    let mut tampered = original;
+    tampered.candidates[0].target_message_key = None;
+    assert_eq!(merge_parts(&tampered, &[]), Err(AppError::Conflict));
+}
+
+#[test]
+fn review_f3_year_role_does_not_authorize_conflicting_current_fragments() {
+    let original = envelope("2026年10月12日高数考试");
+    let mut notice = envelope("原定高数考试改至10月14日9:00");
+    notice.message_key = MessageKey::from_uuid(Uuid::from_u128(9));
+    notice.reply_to = Some(original.message_key);
+    let contradictory = block("高数考试改至10月15日9:00");
+    let b = extract(&notice, &[contradictory], &[original], "Asia/Shanghai").unwrap();
+    assert_eq!(b.candidates[0].time.precision, Precision::UnknownDate);
+}
+#[test]
+fn review_f3_bound_cancel_year_inheritance_stays_supported() {
+    let original = envelope("2026年10月12日高数考试");
+    let mut notice = envelope("取消10月14日高数考试");
+    notice.message_key = MessageKey::from_uuid(Uuid::from_u128(9));
+    notice.reply_to = Some(original.message_key);
+    let b = extract(&notice, &[], &[original], "Asia/Shanghai").unwrap();
+    assert_eq!(b.candidates[0].action, CandidateAction::Cancel);
+    assert_eq!(
+        b.candidates[0].time.local_date.as_deref(),
+        Some("2026-10-14")
+    );
+    let merged = merge_parts(&b, &[review_part("取消2026年10月14日高数考试", 3)]).unwrap();
+    assert_eq!(merged.candidates[0].time, b.candidates[0].time);
+}
+
+#[test]
+fn review_f4_event_word_in_location_is_metadata_not_extra_predicate() {
+    let b = batch("后天20:00线上会议，地点：线上会议室");
+    assert_eq!(b.candidates[0].location.as_deref(), Some("线上会议室"));
+    assert_eq!(b.candidates[0].time.precision, Precision::Exact);
+    assert!(
+        b.part_results
+            .iter()
+            .all(|p| p.status == PartStatus::Success)
+    );
+}
+#[test]
+fn review_f4_supported_prefix_survives_negated_coordinated_remainder() {
+    let text = "2026年10月12日9:00高数考试，后天不补考";
+    let b = batch(text);
+    assert_eq!(b.candidates.len(), 1);
+    assert_eq!(b.candidates[0].title, "高数考试");
+    assert_eq!(b.candidates[0].time.precision, Precision::Exact);
+    assert!(
+        b.part_results.iter().any(
+            |p| p.status == PartStatus::PartialParse && p.blocks.iter().any(|e| e.text == text)
+        )
     );
 }

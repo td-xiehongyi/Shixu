@@ -1,5 +1,5 @@
 //! Late evidence preserves the original revision and source chronology.
-use super::extract::{VERSION, from_block, reconcile};
+use super::extract::{VERSION, from_block, reconcile, validate_context_roles};
 use crate::contracts::{AppResult, error::AppError, notification::*};
 /// No envelope/reply context is available here. New evidence can contribute
 /// standalone candidates, but cannot invent reference linkage or inherited dates.
@@ -10,6 +10,9 @@ pub fn merge_parts(existing: &ExtractBatch, new_parts: &[PartResult]) -> AppResu
         .ok_or(AppError::InvalidInput)?;
     let _: chrono_tz::Tz = timezone.parse().map_err(|_| AppError::InvalidInput)?;
     let sent_at = i64::try_from(existing.source_order).map_err(|_| AppError::InvalidInput)?;
+    for candidate in &existing.candidates {
+        validate_context_roles(candidate)?;
+    }
     let mut result = existing.clone();
     for input in new_parts {
         let mut normalized = input.clone();

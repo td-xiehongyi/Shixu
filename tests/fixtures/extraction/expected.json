@@ -1728,5 +1728,233 @@
       }
     ],
     "unsupported": null
+  },
+  {
+    "id": "text-132",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-133",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-134",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-135",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-136",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-137",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-138",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-139",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-140",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-141",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-142",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-143",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-144",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-145",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-146",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-147",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791770400000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "shared-date coordinated second predicate unsupported; preserve partial"
+  },
+  {
+    "id": "text-148",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "coordinated unsupported defense; preserve partial"
+  },
+  {
+    "id": "text-149",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-14",
+        "start_at": 1791939600000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "Create reply year enrichment deferred under approved bound-role contract"
   }
 ]

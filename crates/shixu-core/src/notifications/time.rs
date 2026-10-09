@@ -51,7 +51,11 @@ pub(crate) fn temporal_stripped(text: &str) -> String {
 }
 pub(crate) fn inherit_year(text: &str, year: &str) -> Option<String> {
     let captures: Vec<_> = patterns().date.captures_iter(text).collect();
-    if captures.len() != 1 || captures[0].get(1).is_some() || captures[0].get(4).is_some() {
+    if captures.len() != 1
+        || captures[0].get(1).is_some()
+        || captures[0].get(4).is_some()
+        || !complete_date_token(text, captures[0].get(0)?)
+    {
         return None;
     }
     let found = captures[0].get(0)?;
@@ -62,6 +66,27 @@ pub(crate) fn inherit_year(text: &str, year: &str) -> Option<String> {
         &text[found.start()..]
     ))
 }
+pub(crate) fn negated_change(text: &str) -> bool {
+    static GRAMMAR: OnceLock<Regex> = OnceLock::new();
+    GRAMMAR.get_or_init(||Regex::new(r"(?:不|未|没有|并非)(?:会|再|要|是|予以|进行|已|曾)*\s*(?:改至|改到|调整至|调整到|延期至)").expect("static negated change grammar")).is_match(text)
+}
+fn complete_date_token(text: &str, found: regex::Match<'_>) -> bool {
+    let before = text[..found.start()].chars().next_back();
+    let after = text[found.end()..].chars().next();
+    !before.is_some_and(|c| c.is_numeric())
+        && !(found.as_str().ends_with(|c: char| c.is_numeric())
+            && after.is_some_and(|c| c.is_numeric() || c == '/' || c == '-'))
+}
+fn complete_clock_token(text: &str, found: regex::Match<'_>) -> bool {
+    !text[..found.start()]
+        .chars()
+        .next_back()
+        .is_some_and(|c| c.is_numeric() || [':', '：', '.'].contains(&c))
+        && !text[found.end()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_numeric() || [':', '：', '.', '秒'].contains(&c))
+}
 /// `raw_time_text` is the unmodified source fragment (UTF-8), including ambiguity.
 /// Invalid dates, competing dates, gap/fold instants and inverted ranges stay unknown.
 pub fn parse_time(text: &str, sent_at: UtcMillis, timezone: &str) -> AppResult<TimeValue> {
@@ -71,6 +96,9 @@ pub fn parse_time(text: &str, sent_at: UtcMillis, timezone: &str) -> AppResult<T
         .with_timezone(&tz)
         .date_naive();
     let mut result = unknown(text, timezone);
+    if negated_change(text) {
+        return Ok(result);
+    }
     let selected = ["改至", "改到", "调整至", "调整到", "延期至"]
         .iter()
         .filter_map(|marker| text.find(marker).map(|i| &text[i + marker.len()..]))
@@ -84,6 +112,12 @@ pub fn parse_time(text: &str, sent_at: UtcMillis, timezone: &str) -> AppResult<T
     }
     let p = patterns();
     let dates: Vec<_> = p.date.captures_iter(selected).collect();
+    if dates
+        .iter()
+        .any(|c| !complete_date_token(selected, c.get(0).expect("date capture")))
+    {
+        return Ok(result);
+    }
     let relative: Vec<_> = [("今天", 0i64), ("明天", 1), ("后天", 2), ("昨天", -1)]
         .into_iter()
         .filter(|(word, _)| selected.contains(word))
@@ -136,6 +170,13 @@ pub fn parse_time(text: &str, sent_at: UtcMillis, timezone: &str) -> AppResult<T
     result.local_date = Some(date.format("%Y-%m-%d").to_string());
     result.precision = Precision::DateOnly;
     let clocks: Vec<_> = p.clock.captures_iter(selected).collect();
+    if clocks
+        .iter()
+        .any(|c| !complete_clock_token(selected, c.get(0).expect("clock capture")))
+    {
+        clear_time(&mut result);
+        return Ok(result);
+    }
     if clocks.is_empty() {
         if selected.contains("全天") || selected.contains("整天") {
             result.precision = Precision::ExplicitAllDay
