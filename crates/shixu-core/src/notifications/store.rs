@@ -100,6 +100,11 @@ impl MessageStore {
                     }).transpose()?;
                     tx.execute("UPDATE messages SET revision=?2,payload=?3 WHERE message_key=?1", params![identity.key.to_string(),envelope.revision as i64,payload]).map_err(storage_error)?;
                     tx.execute("UPDATE part_results SET revision=?2 WHERE message_key=?1 AND revision=?3", params![identity.key.to_string(),envelope.revision as i64,revision]).map_err(storage_error)?;
+                    // Preserve queued retry deadlines and terminal outcomes. A
+                    // running row keeps its slot but invalidates its lease; the old revision
+                    // cannot finish it; supervisor-confirmed recovery requeues
+                    // that same row after its former child has stopped.
+                    tx.execute("UPDATE attachment_tasks SET revision=?2,lease=NULL WHERE message_key=?1 AND revision=?3", params![identity.key.to_string(),envelope.revision as i64,revision]).map_err(storage_error)?;
                 }
                 if let Some(cursor) = cursor {
                     tx.execute("UPDATE sources SET cursor=?2 WHERE namespace=?1", params![ns,cursor]).map_err(storage_error)?;

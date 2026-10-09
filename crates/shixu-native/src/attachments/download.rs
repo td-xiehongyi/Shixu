@@ -107,6 +107,26 @@ impl ProtectedCache {
                 Err(e) => return Err(io_error(e)),
             };
             lock.try_lock().map_err(|_| AppError::Conflict)?;
+            // Only unpublished staging names are reclaimable. A final blob may
+            // already be linked by the message store; never remove it here.
+            for entry in std::fs::read_dir(root).map_err(io_error)? {
+                let entry = entry.map_err(io_error)?;
+                let pending = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| n.strip_prefix(".pending-"))
+                    .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok());
+                if pending {
+                    let m = std::fs::symlink_metadata(entry.path()).map_err(io_error)?;
+                    if !m.is_file() || m.file_type().is_symlink() {
+                        return Err(AppError::InvalidInput);
+                    }
+                    std::fs::remove_file(entry.path()).map_err(io_error)?;
+                }
+            }
+            File::open(root)
+                .and_then(|f| f.sync_all())
+                .map_err(io_error)?;
             Ok(Self {
                 root: root.to_owned(),
                 protector,
@@ -129,8 +149,58 @@ impl ProtectedCache {
         if sealed.len() < plain.len() {
             return Err(PartReason::RecognitionFailed);
         }
+        // Bind identity to the authenticated native reference tuple and actual
+        // content, never an ephemeral endpoint or clear native reference name.
+        use sha2::{Digest, Sha256};
+        let binding = Zeroizing::new(
+            serde_json::to_vec(&(
+                reference.message_key,
+                reference.part_id,
+                &reference.source_file_ref,
+            ))
+            .map_err(|_| PartReason::RecognitionFailed)?,
+        );
+        let mut digest = Sha256::new();
+        digest.update((binding.len() as u64).to_be_bytes());
+        digest.update(&binding);
+        digest.update(plain);
+        let identity = digest
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let path = self.root.join(format!(
+            "{}.{}.{identity}.blob",
+            reference.message_key, reference.part_id
+        ));
+        match std::fs::symlink_metadata(&path) {
+            Ok(m) => {
+                if !m.is_file() || m.file_type().is_symlink() || m.len() != sealed.len() as u64 {
+                    return Err(PartReason::RecognitionFailed);
+                }
+                let mut existing = Zeroizing::new(Vec::new());
+                File::open(&path)
+                    .and_then(|f| f.take(sealed.len() as u64 + 1).read_to_end(&mut existing))
+                    .map_err(|_| PartReason::PermissionDenied)?;
+                if existing.len() != sealed.len() {
+                    return Err(PartReason::RecognitionFailed);
+                }
+                let decoded = Zeroizing::new(
+                    self.protector
+                        .unprotect(&existing)
+                        .map_err(|_| PartReason::RecognitionFailed)?,
+                );
+                if decoded.as_slice() != plain {
+                    return Err(PartReason::RecognitionFailed);
+                }
+                // Idempotent reuse allocates neither bytes nor another part.
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return Err(PartReason::PermissionDenied),
+        }
         let prefix = format!("{}.", reference.message_key);
-        let mut message_sizes = Vec::new();
+        let mut message_sizes = std::collections::HashMap::<String, u64>::new();
         let mut used = 0u64;
         for entry in std::fs::read_dir(&self.root).map_err(|_| PartReason::PermissionDenied)? {
             let entry = entry.map_err(|_| PartReason::PermissionDenied)?;
@@ -147,7 +217,19 @@ impl ProtectedCache {
                 .to_str()
                 .is_some_and(|n| n.starts_with(&prefix))
             {
-                message_sizes.push(m.len());
+                let name = entry.file_name();
+                let pid = name
+                    .to_str()
+                    .and_then(|n| n.strip_prefix(&prefix))
+                    .and_then(|n| n.split('.').next())
+                    .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+                    .ok_or(PartReason::PermissionDenied)?;
+                // Retained versions use global cache space, but represent one
+                // logical part. The maximum is conservative for any revision.
+                message_sizes
+                    .entry(pid.to_owned())
+                    .and_modify(|size| *size = (*size).max(m.len()))
+                    .or_insert(m.len());
             }
             used = used.checked_add(m.len()).ok_or(PartReason::StorageFull)?;
         }
@@ -158,12 +240,12 @@ impl ProtectedCache {
                     .ok_or(PartReason::StorageFull)?,
             )
             .map_err(|_| PartReason::StorageFull)?;
-        message_sizes.push(sealed.len() as u64);
-        limits.check_message(&message_sizes)?;
-        let path = self.root.join(format!(
-            "{}.{}.blob",
-            reference.message_key, reference.part_id
-        ));
+        message_sizes
+            .entry(reference.part_id.to_string())
+            .and_modify(|size| *size = (*size).max(sealed.len() as u64))
+            .or_insert(sealed.len() as u64);
+        limits.check_message(&message_sizes.values().copied().collect::<Vec<_>>())?;
+        let pending = self.root.join(format!(".pending-{}", uuid::Uuid::new_v4()));
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -172,11 +254,19 @@ impl ProtectedCache {
             options.mode(0o600);
         }
         let mut file = options
-            .open(&path)
+            .open(&pending)
             .map_err(|_| PartReason::PermissionDenied)?;
-        if let Err(e) = file.write_all(&sealed).and_then(|_| file.sync_all()) {
-            drop(file);
-            let _ = std::fs::remove_file(&path);
+        let published = file
+            .write_all(&sealed)
+            .and_then(|_| file.sync_all())
+            .and_then(|_| std::fs::hard_link(&pending, &path))
+            .and_then(|_| File::open(&self.root)?.sync_all());
+        drop(file);
+        // Final files are immutable. A crash before unlink is safe: startup
+        // removes only the extra pending name, preserving the published link.
+        let cleanup =
+            std::fs::remove_file(&pending).and_then(|_| File::open(&self.root)?.sync_all());
+        if let Err(e) = published.and(cleanup) {
             return Err(if e.kind() == std::io::ErrorKind::StorageFull {
                 PartReason::StorageFull
             } else {

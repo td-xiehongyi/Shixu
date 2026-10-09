@@ -429,3 +429,141 @@ fn padded_declared_compressed_size_cannot_weaken_ratio_accounting() {
     }
     assert!(inspect_container(&bytes, &ParserLimits::v01()).is_err());
 }
+
+#[test]
+fn review_cache_reacquisition_after_reopen_reuses_exact_complete_original() {
+    let t = Temp::new();
+    let r = reference();
+    let body = b"%PDF-1.7 SYNTHETIC";
+    let mut s = service(&t, vec![Ok(Response::Body(Box::new(Cursor::new(body))))]);
+    let first = s.fetch_detailed(&r, &ParserLimits::v01()).unwrap();
+    drop(s);
+    // Simulates publication completed before task completion was durable.
+    let before = std::fs::read(&first).unwrap();
+    let mut s = service(&t, vec![Ok(Response::Body(Box::new(Cursor::new(body))))]);
+    assert_eq!(
+        s.fetch_detailed(&r, &ParserLimits::v01()),
+        Ok(first.clone())
+    );
+    assert_eq!(std::fs::read(first).unwrap(), before);
+}
+#[test]
+fn review_cache_reused_part_edit_keeps_old_original_and_identifies_new_content() {
+    let t = Temp::new();
+    let mut r = reference();
+    let mut s = service(
+        &t,
+        vec![
+            Ok(Response::Body(Box::new(Cursor::new(b"%PDF-1.7 OLD")))),
+            Ok(Response::Body(Box::new(Cursor::new(b"%PDF-1.7 NEW")))),
+            Ok(Response::Body(Box::new(Cursor::new(b"%PDF-1.7 NEW")))),
+        ],
+    );
+    let old = s.fetch_detailed(&r, &ParserLimits::v01()).unwrap();
+    let old_bytes = std::fs::read(&old).unwrap();
+    r.source_file_ref = Some("edited-trusted-ref".to_owned().try_into().unwrap());
+    let new = s.fetch_detailed(&r, &ParserLimits::v01()).unwrap();
+    assert_ne!(old, new);
+    assert_eq!(std::fs::read(&old).unwrap(), old_bytes);
+    assert_eq!(
+        SyntheticProtector
+            .unprotect(&std::fs::read(&new).unwrap())
+            .unwrap(),
+        b"%PDF-1.7 NEW"
+    );
+    assert_eq!(s.fetch_detailed(&r, &ParserLimits::v01()), Ok(new));
+}
+#[test]
+fn review_cache_reuse_does_not_consume_sixth_part_or_add_cache_bytes() {
+    let t = Temp::new();
+    let mut r = reference();
+    let body = b"%PDF-1.7";
+    let mut s = service(
+        &t,
+        (0..6)
+            .map(|_| {
+                Ok(Response::Body(
+                    Box::new(Cursor::new(body)) as Box<dyn std::io::Read>
+                ))
+            })
+            .collect(),
+    );
+    let mut last = PathBuf::new();
+    for _ in 0..5 {
+        r.part_id = PartId::from_uuid(Uuid::new_v4());
+        last = s.fetch_detailed(&r, &ParserLimits::v01()).unwrap();
+    }
+    let pad = std::fs::File::create(t.0.join("reserved.blob")).unwrap();
+    pad.set_len(1024 * 1024 * 1024 - 5 * body.len() as u64)
+        .unwrap();
+    assert_eq!(s.fetch_detailed(&r, &ParserLimits::v01()), Ok(last));
+}
+#[test]
+fn review_cache_recovers_unpublished_partial_and_keeps_published_original() {
+    let t = Temp::new();
+    let r = reference();
+    let body = b"%PDF-1.7 ORIGINAL";
+    let mut s = service(&t, vec![Ok(Response::Body(Box::new(Cursor::new(body))))]);
+    let original = s.fetch_detailed(&r, &ParserLimits::v01()).unwrap();
+    drop(s);
+    let partial = t.0.join(format!(".pending-{}", Uuid::new_v4()));
+    std::fs::write(&partial, b"synthetic incomplete protected write").unwrap();
+    let published_pending = t.0.join(format!(".pending-{}", Uuid::new_v4()));
+    std::fs::hard_link(&original, &published_pending).unwrap();
+    let mut s = service(&t, vec![Ok(Response::Body(Box::new(Cursor::new(body))))]);
+    assert!(!partial.exists());
+    assert!(!published_pending.exists());
+    assert!(original.exists());
+    assert_eq!(s.fetch_detailed(&r, &ParserLimits::v01()), Ok(original));
+}
+#[test]
+fn review_cache_never_blindly_reuses_a_corrupted_complete_blob() {
+    let t = Temp::new();
+    let r = reference();
+    let body = b"%PDF-1.7 ORIGINAL";
+    let mut s = service(
+        &t,
+        vec![
+            Ok(Response::Body(Box::new(Cursor::new(body)))),
+            Ok(Response::Body(Box::new(Cursor::new(body)))),
+        ],
+    );
+    let original = s.fetch_detailed(&r, &ParserLimits::v01()).unwrap();
+    std::fs::write(&original, vec![0u8; body.len()]).unwrap();
+    assert_eq!(
+        s.fetch_detailed(&r, &ParserLimits::v01()),
+        Err(PartReason::RecognitionFailed)
+    );
+    assert!(original.exists());
+}
+
+#[test]
+fn review_cache_edit_at_five_logical_parts_preserves_all_prior_originals() {
+    let t = Temp::new();
+    let mut r = reference();
+    let body = b"%PDF-1.7";
+    let mut responses: Vec<_> = (0..5)
+        .map(|_| {
+            Ok(Response::Body(
+                Box::new(Cursor::new(body)) as Box<dyn std::io::Read>
+            ))
+        })
+        .collect();
+    responses.push(Ok(Response::Body(Box::new(Cursor::new(b"%PDF-1.7 EDIT")))));
+    let mut s = service(&t, responses);
+    let mut originals = Vec::new();
+    for _ in 0..5 {
+        r.part_id = PartId::from_uuid(Uuid::new_v4());
+        originals.push(s.fetch_detailed(&r, &ParserLimits::v01()).unwrap());
+    }
+    r.source_file_ref = Some(
+        "new-trusted-ref-sensitive-marker"
+            .to_owned()
+            .try_into()
+            .unwrap(),
+    );
+    let edited = s.fetch_detailed(&r, &ParserLimits::v01()).unwrap();
+    assert!(!originals.contains(&edited));
+    assert!(originals.iter().all(|p| p.exists()));
+    assert!(!edited.to_string_lossy().contains("sensitive-marker"));
+}

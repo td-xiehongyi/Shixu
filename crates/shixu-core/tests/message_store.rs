@@ -930,3 +930,249 @@ fn attachment_startup_recovery_invalidates_old_lease_and_preserves_new_completio
     assert_eq!(revision, 1);
     assert_eq!(results[0].blocks[0].text, "new lease");
 }
+
+#[test]
+fn review_equal_revision_preserves_queued_retry_terminal_and_running_tasks() {
+    use shixu_core::notifications::parts::TaskQueue;
+    for state in ["queued", "retry", "terminal", "running"] {
+        let t = TempDir::new();
+        let s = store(&t);
+        let mut c = config();
+        c.capability_set.push(SourceCapability::Edits);
+        let mut m = message_with_two_parts(&c);
+        m.parts.truncate(1);
+        let key = message_identity(&c, &m).unwrap().key;
+        s.append(&c, m.clone()).unwrap();
+        let limits = ParserLimits::v01();
+        let q = TaskQueue::new(Arc::new(
+            Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+        ));
+        q.enqueue(&key, 1, 0, &limits).unwrap();
+        let mut old = if state != "queued" {
+            q.claim(0, &limits).unwrap()
+        } else {
+            None
+        };
+        if state == "retry" || state == "terminal" {
+            let job = old.as_ref().unwrap();
+            q.finish(
+                job,
+                PartResult {
+                    part_id: job.part.part_id,
+                    status: PartStatus::DownloadFailed,
+                    blocks: vec![],
+                    reason_code: Some(if state == "retry" {
+                        PartReason::DownloadUnavailable
+                    } else {
+                        PartReason::AuthRequired
+                    }),
+                },
+                true,
+                0,
+            )
+            .unwrap();
+        }
+        m.revision = 2;
+        assert_eq!(s.append(&c, m), Ok(AppendOutcome::Duplicate));
+        // Re-enqueueing must neither reset retries/deadlines nor resurrect auth failures.
+        assert_eq!(q.enqueue(&key, 2, 123, &limits), Ok(0), "{state}");
+        if state == "running" {
+            assert!(q.claim(0, &limits).unwrap().is_none());
+            let job = old.as_ref().unwrap();
+            assert_eq!(
+                q.finish(
+                    job,
+                    successful_result(job.part.part_id, "old running evidence"),
+                    false,
+                    0
+                ),
+                Err(AppError::Conflict)
+            );
+            // The old opaque lease must be invalid even if a caller refreshes
+            // the public descriptive revision field after the duplicate edit.
+            let old_job = old.as_mut().unwrap();
+            old_job.revision = 2;
+            assert_eq!(
+                q.finish(
+                    old_job,
+                    successful_result(old_job.part.part_id, "relabeled old lease"),
+                    false,
+                    0
+                ),
+                Err(AppError::Conflict)
+            );
+            assert_eq!(count(&t, "part_results"), 0);
+            assert_eq!(q.recover_after_children_stopped(), Ok(1));
+        }
+        if state == "retry" {
+            assert!(q.claim(59_999, &limits).unwrap().is_none());
+        }
+        let current = q
+            .claim(if state == "retry" { 60_000 } else { 0 }, &limits)
+            .unwrap();
+        if state == "terminal" {
+            assert!(current.is_none());
+            assert!(q.claim(i64::MAX, &limits).unwrap().is_none());
+        } else {
+            let job = current.unwrap_or_else(|| panic!("stranded {state}"));
+            assert_eq!(job.revision, 2);
+            q.finish(
+                &job,
+                successful_result(job.part.part_id, "current evidence"),
+                false,
+                60_000,
+            )
+            .unwrap();
+        }
+        let conn = rusqlite::Connection::open(t.db()).unwrap();
+        let row: (i64, i64) = conn
+            .query_row("SELECT revision,retries FROM attachment_tasks", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(row, (2, i64::from(state == "retry")));
+    }
+}
+
+#[test]
+fn review_retry_caps_zero_one_persist_across_reopen_and_recovery() {
+    use shixu_core::notifications::parts::TaskQueue;
+    for cap in [0, 1] {
+        let t = TempDir::new();
+        let s = store(&t);
+        let c = config();
+        let mut m = message_with_two_parts(&c);
+        m.parts.truncate(1);
+        let key = message_identity(&c, &m).unwrap().key;
+        s.append(&c, m).unwrap();
+        let mut limits = ParserLimits::v01();
+        limits.max_download_retries = cap;
+        {
+            let q = TaskQueue::new(Arc::new(
+                Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+            ));
+            q.enqueue(&key, 1, 0, &limits).unwrap();
+        }
+        // Reopening with default settings cannot loosen a task's accepted policy.
+        let q = TaskQueue::new(Arc::new(
+            Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+        ));
+        let defaults = ParserLimits::v01();
+        let old = q.claim(0, &defaults).unwrap().unwrap();
+        q.recover_after_children_stopped().unwrap();
+        let mut job = q.claim(0, &defaults).unwrap().unwrap();
+        assert_eq!(
+            q.finish(&old, successful_result(old.part.part_id, "old"), false, 0),
+            Err(AppError::Conflict)
+        );
+        for attempt in 0..=cap {
+            q.finish(
+                &job,
+                PartResult {
+                    part_id: job.part.part_id,
+                    status: PartStatus::DownloadFailed,
+                    blocks: vec![],
+                    reason_code: Some(PartReason::DownloadUnavailable),
+                },
+                true,
+                i64::from(attempt) * 60_000,
+            )
+            .unwrap();
+            let next = q.claim(i64::MAX, &defaults).unwrap();
+            if attempt == cap {
+                assert!(next.is_none(), "cap {cap}");
+            } else {
+                job = next.unwrap();
+            }
+        }
+    }
+}
+#[test]
+fn review_claim_can_tighten_but_never_raise_persisted_retry_policy() {
+    use shixu_core::notifications::parts::TaskQueue;
+    let t = TempDir::new();
+    let s = store(&t);
+    let c = config();
+    let mut m = message_with_two_parts(&c);
+    m.parts.truncate(1);
+    let key = message_identity(&c, &m).unwrap().key;
+    s.append(&c, m).unwrap();
+    let q = TaskQueue::new(Arc::new(
+        Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+    ));
+    let mut l = ParserLimits::v01();
+    q.enqueue(&key, 1, 0, &l).unwrap();
+    l.max_download_retries = 0;
+    let j = q.claim(0, &l).unwrap().unwrap();
+    q.finish(
+        &j,
+        PartResult {
+            part_id: j.part.part_id,
+            status: PartStatus::DownloadFailed,
+            blocks: vec![],
+            reason_code: Some(PartReason::DownloadUnavailable),
+        },
+        true,
+        0,
+    )
+    .unwrap();
+    assert!(q.claim(i64::MAX, &ParserLimits::v01()).unwrap().is_none());
+}
+#[test]
+fn review_schema3_upgrade_preserves_existing_retry_task() {
+    use shixu_core::notifications::parts::TaskQueue;
+    let t = TempDir::new();
+    let s = store(&t);
+    let c = config();
+    let mut m = message_with_two_parts(&c);
+    m.parts.truncate(1);
+    let key = message_identity(&c, &m).unwrap().key;
+    s.append(&c, m).unwrap();
+    let l = ParserLimits::v01();
+    let q = TaskQueue::new(Arc::new(
+        Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+    ));
+    q.enqueue(&key, 1, 0, &l).unwrap();
+    let j = q.claim(0, &l).unwrap().unwrap();
+    q.finish(
+        &j,
+        PartResult {
+            part_id: j.part.part_id,
+            status: PartStatus::DownloadFailed,
+            blocks: vec![],
+            reason_code: Some(PartReason::DownloadUnavailable),
+        },
+        true,
+        0,
+    )
+    .unwrap();
+    drop(q);
+    drop(s);
+    let conn = rusqlite::Connection::open(t.db()).unwrap();
+    let has:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('attachment_tasks') WHERE name='retry_limit')",[],|r|r.get(0)).unwrap();
+    if has {
+        conn.execute_batch("ALTER TABLE attachment_tasks DROP COLUMN retry_limit;")
+            .unwrap();
+    }
+    conn.execute_batch("PRAGMA user_version=3;").unwrap();
+    drop(conn);
+    let q = TaskQueue::new(Arc::new(
+        Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+    ));
+    let conn = rusqlite::Connection::open(t.db()).unwrap();
+    assert_eq!(
+        conn.query_row::<i64, _, _>("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap(),
+        4
+    );
+    let row: (i64, i64, i64) = conn
+        .query_row(
+            "SELECT retries,due_at,retry_limit FROM attachment_tasks",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(row, (1, 60_000, 3));
+    assert!(q.claim(59_999, &l).unwrap().is_none());
+    assert!(q.claim(60_000, &l).unwrap().is_some());
+}

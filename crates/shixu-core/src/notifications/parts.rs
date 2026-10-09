@@ -62,8 +62,9 @@ impl TaskQueue {
    tx.execute("DELETE FROM attachment_tasks WHERE state!='running' AND EXISTS(SELECT 1 FROM messages m WHERE m.message_key=attachment_tasks.message_key AND (m.revision!=attachment_tasks.revision OR m.revoked=1))",[]).map_err(storage_error)?;
    let mut added=0;
    for p in parts {
-    added+=tx.execute("INSERT OR IGNORE INTO attachment_tasks(message_key,revision,part_id,state,due_at) VALUES (?1,?2,?3,'queued',?4)",params![key.to_string(),revision as i64,p.part_id.to_string(),now]).map_err(storage_error)?;
+    added+=tx.execute("INSERT OR IGNORE INTO attachment_tasks(message_key,revision,part_id,state,due_at,retry_limit) VALUES (?1,?2,?3,'queued',?4,?5)",params![key.to_string(),revision as i64,p.part_id.to_string(),now,limits.max_download_retries.min(3)]).map_err(storage_error)?;
    }
+   tx.execute("UPDATE attachment_tasks SET retry_limit=MIN(retry_limit,?3) WHERE message_key=?1 AND revision=?2",params![key.to_string(),revision as i64,limits.max_download_retries.min(3)]).map_err(storage_error)?;
    let count:i64=tx.query_row("SELECT count(*) FROM attachment_tasks WHERE state!='done'",[],|r|r.get(0)).map_err(storage_error)?;
    limits.check(Resource::PendingTasks,count as u64).map_err(|_|AppError::StorageFull)?;
    Ok(added as u32)
@@ -73,6 +74,8 @@ impl TaskQueue {
         self.db.transaction(|tx| {
    let active:i64=tx.query_row("SELECT count(*) FROM attachment_tasks WHERE state='running'",[],|r|r.get(0)).map_err(storage_error)?;
    if limits.check(Resource::ConcurrentParsers,active as u64+1).is_err(){return Ok(None);}
+   tx.execute("UPDATE attachment_tasks SET retry_limit=MIN(retry_limit,?1) WHERE state='queued'",[limits.max_download_retries.min(3)]).map_err(storage_error)?;
+   tx.execute("UPDATE attachment_tasks SET state='done' WHERE state='queued' AND retries>retry_limit",[]).map_err(storage_error)?;
    let row:Option<(String,i64,String,Vec<u8>)>=tx.query_row("SELECT t.message_key,t.revision,t.part_id,m.payload FROM attachment_tasks t JOIN messages m ON m.message_key=t.message_key AND m.revision=t.revision WHERE t.state='queued' AND t.due_at<=?1 AND m.revoked=0 AND m.payload IS NOT NULL ORDER BY t.due_at,t.message_key,t.part_id LIMIT 1",[now],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage_error)?;
    let Some((key,revision,pid,payload))=row else {return Ok(None);};
    let m:MessageEnvelope=self.db.unprotect(&payload)?;
@@ -93,11 +96,11 @@ impl TaskQueue {
             return Err(AppError::InvalidInput);
         }
         self.db.transaction(|tx| {
-   let retries:Option<u32>=tx.query_row("SELECT retries FROM attachment_tasks WHERE message_key=?1 AND revision=?2 AND part_id=?3 AND state='running' AND lease=?4",params![job.message_key.to_string(),job.revision as i64,job.part.part_id.to_string(),job.token],|r|r.get(0)).optional().map_err(storage_error)?;
-   let retries=retries.ok_or(AppError::Conflict)?;
+   let policy:Option<(u32,u32)>=tx.query_row("SELECT retries,retry_limit FROM attachment_tasks WHERE message_key=?1 AND revision=?2 AND part_id=?3 AND state='running' AND lease=?4",params![job.message_key.to_string(),job.revision as i64,job.part.part_id.to_string(),job.token],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage_error)?;
+   let (retries,retry_limit)=policy.ok_or(AppError::Conflict)?;
    // Only a transient acquisition failure is automatically retried. Auth,
    // expired references, unsupported input and partial originals are terminal.
-   let retry=retryable && result.status==PartStatus::DownloadFailed && result.reason_code==Some(PartReason::DownloadUnavailable) && retries<3;
+   let retry=retryable && result.status==PartStatus::DownloadFailed && result.reason_code==Some(PartReason::DownloadUnavailable) && retries<retry_limit.min(3);
    let due=if retry {now.checked_add(i64::from(ParserLimits::v01().download_retry_delays_secs[retries as usize])*1000).ok_or(AppError::InvalidInput)?}else{now};
    MessageStore::new(self.db.clone()).record_parts_tx(tx,&job.message_key,job.revision,vec![result])?;
    tx.execute("UPDATE attachment_tasks SET state=?5,lease=NULL,retries=?6,due_at=?7 WHERE message_key=?1 AND revision=?2 AND part_id=?3 AND lease=?4",params![job.message_key.to_string(),job.revision as i64,job.part.part_id.to_string(),job.token,if retry {"queued"}else{"done"},retries+u32::from(retry),due]).map_err(storage_error)?;
