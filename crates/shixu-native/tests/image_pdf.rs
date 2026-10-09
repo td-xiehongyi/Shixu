@@ -71,8 +71,10 @@ fn malformed_and_oversize_image_are_rejected_by_rust() {
         image::extract_with_engine(b"not an image", ID, &ParserLimits::default(), &mut engine)
             .unwrap();
     assert_eq!(result.status, PartStatus::Unsupported);
-    let mut limits = ParserLimits::default();
-    limits.max_image_bytes = 3;
+    let limits = ParserLimits {
+        max_image_bytes: 3,
+        ..ParserLimits::default()
+    };
     assert_eq!(
         image::extract_with_engine(b"1234", ID, &limits, &mut engine)
             .unwrap()
@@ -400,8 +402,10 @@ fn overlapping_observations_are_not_joined_into_false_sentences() {
 #[test]
 fn character_budget_includes_inserted_word_spaces() {
     let mut engine = Observations(vec![word("Workshop", 10, 99.), word("Room", 95, 99.)]);
-    let mut limits = ParserLimits::default();
-    limits.max_extracted_chars = 12;
+    let limits = ParserLimits {
+        max_extracted_chars: 12,
+        ..ParserLimits::default()
+    };
     assert_eq!(
         image::observe(
             &::image::RgbImage::new(500, 100),
@@ -418,7 +422,7 @@ fn character_budget_includes_inserted_word_spaces() {
 struct Reader(std::cell::Cell<u32>);
 impl pdf::PdfReader for Reader {
     type Document<'a> = Pages;
-    fn open<'a>(&'a self, _: &[u8]) -> Result<Pages, AppError> {
+    fn open(&self, _: &[u8]) -> Result<Pages, AppError> {
         self.0.set(self.0.get() + 1);
         Ok(Pages(1))
     }
@@ -427,8 +431,10 @@ impl pdf::PdfReader for Reader {
 fn pdf_byte_limits_and_magic_are_checked_before_engine_open() {
     let reader = Reader(std::cell::Cell::new(0));
     let mut engine = Observations(vec![]);
-    let mut limits = ParserLimits::default();
-    limits.max_file_bytes = 8;
+    let limits = ParserLimits {
+        max_file_bytes: 8,
+        ..ParserLimits::default()
+    };
     assert_eq!(
         pdf::extract_with_reader(b"%PDF-1.7\n", ID, &limits, &reader, &mut engine)
             .unwrap()

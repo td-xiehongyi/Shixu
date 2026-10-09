@@ -42,6 +42,7 @@ A complete region contains its entire manually specified fictional string after 
 ## Verification and remaining gates
 
 - `cargo test -p shixu-native --test image_pdf`: **14 passed**, including behavioral RED→GREEN evidence for table geometry, date-quality flags, mixed pages, page/byte limits, coherent regions, ambiguous layout and inserted-space character budgets.
+- `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all -- --check`: **exit 0** after test-only initializer/lifetime lint fixes.
 - `cargo test --workspace`: **171 passed, 0 failed, 3 ignored**. Ignored cases are two real Windows DPAPI/ACL cases and one real Windows parser-isolation gate; they are not acceptance passes.
 - `cargo test -p shixu-native --test parser_isolation -- --ignored`: **exit 101**, `parser_has_no_network_or_vault_access` fails explicitly BLOCKED. No Windows restricted token/AppContainer, ACL handoff, Job Object memory/process cap, or real network/vault denial is implemented/exercised.
 - `strace -f -e trace=%file,%network ... pdf_actions_never_execute --exact`: exit 0; **0 open/exec calls** to the attacker-referenced synthetic canary path, **0 connect/send calls** in the action/embedded/XFA fixture run. Four canary existence-stat calls belong to the test. Libraries/fonts are expected non-input reads. This tests those fixtures' behavior, **not OS denial or a blanket zero-filesystem-access claim**.
