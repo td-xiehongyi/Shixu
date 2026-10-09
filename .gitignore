@@ -1,0 +1,40 @@
+# Build output and task workspace.
+/target/
+/.superpowers/
+/node_modules/
+/dist/
+
+# Local evidence and real runtime configuration.
+/docs/verification/local/
+.env
+.env.*
+*.local.json
+*.local.toml
+/config/
+/data/
+/cache/
+/tmp/
+*.log
+
+# Databases, vaults, keys and temporary plaintext are never repository fixtures.
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.kdbx
+*.kdbx.*
+*.key
+*.keyx
+*.pem
+*.pfx
+*.decrypted*
+*.plaintext*
+
+# Only explicitly reviewed synthetic fixture paths may be tracked.
+/tests/fixtures/*
+!/tests/fixtures/manifest.json
+!/tests/fixtures/contracts/
+/tests/fixtures/contracts/*
+!/tests/fixtures/contracts/event.json

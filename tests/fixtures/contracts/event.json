@@ -1,0 +1,15 @@
+{
+  "event_id": "00000000-0000-4000-8000-000000000002",
+  "title": "合成高数考试",
+  "kind": "exam",
+  "time_precision": "date_only",
+  "local_date": "2026-10-12",
+  "start_at": null,
+  "end_at": null,
+  "timezone": "Asia/Shanghai",
+  "raw_time_text": "2026年10月12日考试",
+  "location": null,
+  "status": "active",
+  "revision": 1,
+  "user_overrides": []
+}
