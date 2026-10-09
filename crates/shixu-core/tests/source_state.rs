@@ -263,15 +263,15 @@ fn durable_recovery_anchor_progress_and_epoch_are_independent_of_live_cursor() {
     s.begin_recovery(&c, 20).unwrap();
     let resumed = s.recoveries(&c).unwrap().remove(0);
     assert_eq!(resumed.anchor.as_deref(), Some("c1"));
-    assert_eq!(resumed.recovery_cursor.as_deref(), Some("c2"));
+    assert_eq!(resumed.recovery_cursor.as_deref(), Some("c1"));
     assert_eq!(resumed.since, 10);
     assert!(resumed.epoch > first.epoch);
     assert_eq!(
-        s.advance_recovery(&c, "g", first.epoch, "c2", "c4", true),
+        s.advance_recovery(&c, "g", first.epoch, "c1", "c4", true),
         Err(AppError::Conflict)
     );
     assert_eq!(s.cursor(&c, "g").unwrap().as_deref(), Some("c3"));
-    s.advance_recovery(&c, "g", resumed.epoch, "c2", "c4", true)
+    s.advance_recovery(&c, "g", resumed.epoch, "c1", "c4", true)
         .unwrap();
     s.begin_recovery(&c, 30).unwrap();
     let next = s.recoveries(&c).unwrap().remove(0);

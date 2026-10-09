@@ -78,12 +78,14 @@ pub trait QQAdapter {
     fn health(&self) -> SourceHealth;
     fn next_message(&mut self) -> AppResult<Option<MessageEnvelope>>;
     /// Adapter-defined source/group/epoch recovery handle, or an unambiguous
-    /// recovery progress cursor. A live cursor is not a missing-interval anchor.
+    /// original recovery anchor. Live/partial result cursors cannot prove coverage.
     fn backfill(&mut self, cursor: &str) -> AppResult<Vec<MessageEnvelope>>;
 }
 
-/// Durable per-group interval proof. Live acknowledgments never change anchor or
-/// recovery_cursor. An absent anchor means no verified recovery starting point.
+/// Durable per-group interval proof. The anchor is authoritative while unresolved;
+/// incomplete batches and live acknowledgments cannot establish prefix coverage.
+/// recovery_cursor is diagnostic after complete proof, never a new recovery start.
+/// An absent anchor means no verified recovery starting point.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupRecovery {
     pub group_id: String,

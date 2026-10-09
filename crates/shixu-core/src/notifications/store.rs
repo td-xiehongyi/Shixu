@@ -188,8 +188,9 @@ impl MessageStore {
             Ok(false)
         })
     }
-    /// Start/invalidate an interval proof. Keep incomplete original anchors and
-    /// recovery progress; completed groups begin again at the last live cursor.
+    /// Start/invalidate an interval proof. Keep incomplete original anchors;
+    /// completed groups begin again at the last live cursor. Historical partial
+    /// recovery_cursor metadata never replaces an unresolved anchor.
     /// Epoch change invalidates every previously issued handle/completion.
     pub fn begin_recovery(&self, config: &SourceConfig, since: UtcMillis) -> AppResult<()> {
         self.bind_source(config)?;
@@ -215,7 +216,9 @@ impl MessageStore {
             rows.map(|r|r.map_err(storage_error)).collect()
         })
     }
-    /// Record contiguous backfill progress only after every delivery persisted.
+    /// Acknowledge exhaustive recovery only from the immutable original anchor,
+    /// after every returned delivery persisted. Incomplete batches establish no
+    /// coverage: retain/reset recovery_cursor to anchor, ignoring their last ID.
     /// CAS protects against stale epoch/completion from another receive owner.
     pub fn advance_recovery(
         &self,
@@ -237,7 +240,7 @@ impl MessageStore {
         }
         self.bind_source(config)?;
         self.db.transaction(|tx|{
-            let updated=tx.execute("UPDATE source_recovery SET recovery_cursor=?5,complete=?6 WHERE source_id=?1 AND group_id=?2 AND epoch=?3 AND recovery_cursor=?4 AND complete=0",params![config.source_id.to_string(),group,epoch as i64,from,next,complete]).map_err(storage_error)?;
+            let updated=tx.execute("UPDATE source_recovery SET recovery_cursor=CASE WHEN ?6 THEN ?5 ELSE anchor END,complete=?6 WHERE source_id=?1 AND group_id=?2 AND epoch=?3 AND anchor=?4 AND complete=0",params![config.source_id.to_string(),group,epoch as i64,from,next,complete]).map_err(storage_error)?;
             if updated!=1{return Err(AppError::Conflict);}Ok(())
         })
     }

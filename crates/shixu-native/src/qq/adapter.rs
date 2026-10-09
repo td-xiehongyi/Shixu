@@ -236,8 +236,9 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
         {
             return Err(AppError::Unsupported);
         }
-        // Recovery progress is independent of the live cursor. A handle selects
-        // one group/epoch even when opaque cursor strings collide across groups.
+        // Only the original anchor defines missing-interval coverage. Partial
+        // results may omit earlier messages; their last ID proves no prefix.
+        // A handle selects a group/epoch even when opaque cursor strings collide.
         let recoveries = self.store.recoveries(&c)?;
         let owners: Vec<_> = recoveries
             .into_iter()
@@ -246,7 +247,7 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
                     && if cursor.starts_with("recovery-v1-") {
                         r.handle(c.source_id) == cursor
                     } else {
-                        r.recovery_cursor.as_deref() == Some(cursor)
+                        r.anchor.as_deref() == Some(cursor)
                     }
             })
             .collect();
@@ -255,10 +256,7 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
         }
         let recovery = &owners[0];
         let group = &recovery.group_id;
-        let from = recovery
-            .recovery_cursor
-            .as_deref()
-            .ok_or(AppError::Unsupported)?;
+        let from = recovery.anchor.as_deref().ok_or(AppError::Unsupported)?;
         let batch = match self.transport.backfill(group, from) {
             Ok(b) => b,
             Err(e) => {
@@ -291,7 +289,9 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
             match self.store.append(&c, d.message.clone()) {
                 Ok(AppendOutcome::Stored | AppendOutcome::Duplicate) => {
                     self.health.persisted((self.now)());
-                    next = d.cursor;
+                    if batch.complete {
+                        next = d.cursor;
+                    }
                     messages.push(d.message);
                 }
                 Ok(_) => {

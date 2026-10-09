@@ -284,7 +284,8 @@ fn only_complete_scoped_backfill_clears_gap() {
     assert_eq!(a.backfill("foreign"), Err(AppError::InvalidInput));
     assert_eq!(a.backfill("c1").unwrap().len(), 1);
     assert!(!a.health().gaps.is_empty());
-    assert_eq!(a.backfill("c2").unwrap().len(), 1);
+    assert_eq!(a.backfill("c2"), Err(AppError::InvalidInput));
+    assert_eq!(a.backfill("c1").unwrap().len(), 1);
     assert!(a.health().gaps.is_empty());
     assert!(!a.health().ordinary_group_verified);
 }
@@ -527,7 +528,7 @@ fn live_cursor_does_not_skip_original_missing_interval() {
     assert!(a.health().gaps.is_empty());
 }
 #[test]
-fn partial_recovery_and_live_receive_keep_recovery_progress() {
+fn partial_recovery_and_live_receive_keep_original_recovery_start() {
     let (mut a, _, _) = connected(
         vec![
             Ok(Some(delivery("c1"))),
@@ -560,7 +561,8 @@ fn partial_recovery_and_live_receive_keep_recovery_progress() {
     a.persist_pending().unwrap();
     assert_eq!(a.backfill("c4"), Err(AppError::InvalidInput));
     assert!(!a.health().gaps.is_empty());
-    a.backfill("c2").unwrap();
+    assert_eq!(a.backfill("c2"), Err(AppError::InvalidInput));
+    a.backfill("c1").unwrap();
     assert!(a.health().gaps.is_empty());
 }
 #[test]
@@ -768,6 +770,102 @@ fn pending_retry_cannot_advance_live_cursor_before_failed_gap_write_recovers() {
             .query_row("SELECT anchor FROM source_recovery", [], |r| r.get(0))
             .unwrap();
         assert_eq!(anchor, "c1");
+    }
+    std::fs::remove_file(path).unwrap();
+}
+fn recovery_adapter_at(
+    path: &std::path::Path,
+    events: Vec<AppResult<Option<Delivery>>>,
+    batches: Vec<AppResult<BackfillBatch>>,
+) -> NativeQQAdapter<SyntheticTransport> {
+    let db = Database::open(
+        path,
+        Arc::new(SyntheticProtection(Arc::new(AtomicBool::new(false)))),
+    )
+    .unwrap();
+    let t = SyntheticTransport {
+        caps: config().capability_set,
+        events: events.into(),
+        batches: batches.into(),
+        calls: Arc::new(AtomicUsize::new(0)),
+        auth_fail: false,
+    };
+    NativeQQAdapter::new(
+        t,
+        LoopbackEndpoint::parse("127.0.0.1:3001").unwrap(),
+        MessageStore::new(Arc::new(db)),
+        || 100,
+    )
+}
+#[test]
+fn noncontiguous_partial_replays_original_interval_after_reopen_and_live_arrival() {
+    let path = std::env::temp_dir().join(format!("shixu-n2-noncontiguous-{}.db", Uuid::new_v4()));
+    {
+        let mut c3 = delivery("c3");
+        c3.message.native_message_id = "n3".into();
+        let mut a = recovery_adapter_at(
+            &path,
+            vec![Ok(Some(delivery("c1"))), Err(AppError::Disconnected)],
+            vec![Ok(BackfillBatch {
+                group_id: "synthetic-group".into(),
+                deliveries: vec![c3],
+                complete: false,
+            })],
+        );
+        a.connect(config(), token()).unwrap();
+        a.next_message().unwrap();
+        a.persist_pending().unwrap();
+        a.next_message().unwrap_err();
+        a.connect(config(), token()).unwrap();
+        assert_eq!(a.backfill("c1").unwrap().len(), 1);
+        assert!(!a.health().gaps.is_empty());
+        let sql = rusqlite::Connection::open(&path).unwrap();
+        let count: i64 = sql
+            .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+        let start: String = sql
+            .query_row("SELECT recovery_cursor FROM source_recovery", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(start, "c1");
+        // Simulate already persisted round1 partial metadata. Reopen must use
+        // anchor c1 even if this historical diagnostic cursor was advanced.
+        sql.execute("UPDATE source_recovery SET recovery_cursor='c3'", [])
+            .unwrap();
+        // Persisting n3 proves no coverage for the omitted n2. Close/reopen must not
+        // permit a truthfully complete suffix after c3 to stand in for the old interval.
+    }
+    {
+        let mut c4 = delivery("c4");
+        c4.message.native_message_id = "n4".into();
+        let mut c2 = delivery("c2");
+        c2.message.native_message_id = "n2".into();
+        let mut c3 = delivery("c3");
+        c3.message.native_message_id = "n3".into();
+        let mut a = recovery_adapter_at(
+            &path,
+            vec![Ok(Some(c4))],
+            vec![Ok(BackfillBatch {
+                group_id: "synthetic-group".into(),
+                deliveries: vec![c2, c3],
+                complete: true,
+            })],
+        );
+        a.connect(config(), token()).unwrap();
+        a.next_message().unwrap();
+        a.persist_pending().unwrap();
+        assert_eq!(a.backfill("c3"), Err(AppError::InvalidInput));
+        assert_eq!(a.backfill("c4"), Err(AppError::InvalidInput));
+        assert!(!a.health().gaps.is_empty());
+        assert_eq!(a.backfill("c1").unwrap().len(), 2);
+        assert!(a.health().gaps.is_empty());
+        let sql = rusqlite::Connection::open(&path).unwrap();
+        let count: i64 = sql
+            .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 4);
     }
     std::fs::remove_file(path).unwrap();
 }
