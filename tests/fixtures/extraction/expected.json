@@ -1956,5 +1956,143 @@
       }
     ],
     "unsupported": "Create reply year enrichment deferred under approved bound-role contract"
+  },
+  {
+    "id": "text-150",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-151",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-152",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-153",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-154",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-155",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "simple-conjunction defense remains unsupported; preserve partial"
+  },
+  {
+    "id": "text-156",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "simple-conjunction defense remains unsupported; preserve partial"
+  },
+  {
+    "id": "text-157",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-11",
+        "start_at": 1791720000000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
   }
 ]

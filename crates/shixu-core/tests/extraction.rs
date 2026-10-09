@@ -1014,3 +1014,85 @@ fn review_f4_supported_prefix_survives_negated_coordinated_remainder() {
         )
     );
 }
+
+#[test]
+fn review2_date_decimal_tail_and_sentence_dot_are_distinct() {
+    for text in ["2026-10-12.5 09:00高数考试", "2026/10/12.5 09:00高数考试"] {
+        let t = parse_time(text, SENT, "Asia/Shanghai").unwrap();
+        assert_eq!(t.precision, Precision::UnknownDate, "{text}");
+        assert_eq!(t.start_at, None);
+        assert_eq!(t.raw_time_text, text);
+        let b = batch(text);
+        assert_eq!(b.candidates[0].time.precision, Precision::UnknownDate);
+        let ev = &b.candidates[0].evidence[0];
+        let Some(EvidenceLocation::TextSpan { start, end }) = ev.cell_range_or_bbox else {
+            panic!("missing source span")
+        };
+        assert_eq!(
+            text.get(start as usize..end as usize),
+            Some(ev.text.as_str())
+        );
+    }
+    let valid = parse_time("2026-10-12.高数考试", SENT, "Asia/Shanghai").unwrap();
+    assert_eq!(valid.precision, Precision::DateOnly);
+    assert_eq!(valid.local_date.as_deref(), Some("2026-10-12"));
+}
+#[test]
+fn review2_clock_sentence_dot_does_not_admit_fraction_or_seconds() {
+    for text in [
+        "高数考试2026年10月12日9:00.",
+        "高数考试2026年10月12日9:00.地点：A301",
+    ] {
+        let t = parse_time(text, SENT, "Asia/Shanghai").unwrap();
+        assert_eq!(t.precision, Precision::Exact, "{text}");
+        assert_eq!(t.start_at, Some(1_791_766_800_000));
+        assert_eq!(t.raw_time_text, text);
+    }
+    for text in [
+        "高数考试2026年10月12日9:00.5",
+        "高数考试2026年10月12日9:00:30",
+        "高数考试2026年10月12日9:000",
+    ] {
+        assert_eq!(
+            parse_time(text, SENT, "Asia/Shanghai").unwrap().precision,
+            Precision::UnknownDate,
+            "{text}"
+        );
+    }
+}
+#[test]
+fn review2_simple_conjunctions_preserve_leading_event_and_partial_body() {
+    for text in [
+        "2026年10月12日9:00高数考试和研究生答辩",
+        "2026年10月12日9:00高数考试及研究生答辩",
+        "2026年10月12日9:00协和高数考试和研究生答辩",
+    ] {
+        let b = batch(text);
+        assert_eq!(b.candidates.len(), 1);
+        assert_eq!(b.candidates[0].time.precision, Precision::Exact);
+        assert_eq!(b.candidates[0].time.start_at, Some(1_791_766_800_000));
+        assert_eq!(b.candidates[0].target_message_key, None);
+        assert!(
+            b.part_results
+                .iter()
+                .any(|p| p.status == PartStatus::PartialParse
+                    && p.reason_code == Some(PartReason::PartialSource)
+                    && p.blocks
+                        .iter()
+                        .any(|e| e.text == text
+                            && e.quality_flags.contains(&QualityFlag::PartialSource))),
+            "{text}"
+        );
+    }
+}
+#[test]
+fn review2_conjunction_within_explicit_location_remains_metadata() {
+    let b = batch("后天20:00线上会议，地点：协和会议室");
+    assert_eq!(b.candidates[0].location.as_deref(), Some("协和会议室"));
+    assert_eq!(b.candidates[0].time.precision, Precision::Exact);
+    assert!(
+        b.part_results
+            .iter()
+            .all(|p| p.status == PartStatus::Success)
+    );
+}

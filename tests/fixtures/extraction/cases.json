@@ -1046,5 +1046,61 @@
       "sent_at": 1791532800000,
       "message_key": "00000000-0000-0000-0000-000000000010"
     }
+  },
+  {
+    "id": "text-150",
+    "text": "2026-10-12.5 09:00高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review2_date_fraction_boundary"
+  },
+  {
+    "id": "text-151",
+    "text": "2026/10/12.5 09:00高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review2_date_fraction_boundary"
+  },
+  {
+    "id": "text-152",
+    "text": "高数考试2026年10月12日9:00.",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review2_clock_punctuation_control"
+  },
+  {
+    "id": "text-153",
+    "text": "高数考试2026年10月12日9:00.地点：A301",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review2_clock_punctuation_control"
+  },
+  {
+    "id": "text-154",
+    "text": "2026-10-12.高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review2_date_punctuation_control"
+  },
+  {
+    "id": "text-155",
+    "text": "2026年10月12日9:00高数考试和研究生答辩",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review2_simple_coordinated_positive"
+  },
+  {
+    "id": "text-156",
+    "text": "2026年10月12日9:00高数考试及研究生答辩",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review2_simple_coordinated_positive"
+  },
+  {
+    "id": "text-157",
+    "text": "后天20:00线上会议，地点：协和会议室",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "review2_location_conjunction_control"
   }
 ]

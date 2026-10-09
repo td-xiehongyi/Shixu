@@ -142,12 +142,20 @@ fn coordinated_remainder(text: &str) -> Option<usize> {
         .filter(|(_, c)| ['，', ','].contains(c))
         .map(|(i, c)| (i, i + c.len_utf8()))
         .chain(
-            ["以及", "同时", "并且"]
+            ["以及", "同时", "并且", "和", "及"]
                 .iter()
-                .filter_map(|m| text.find(m).map(|i| (i, i + m.len()))),
+                .flat_map(|m| text.match_indices(m).map(move |(i, _)| (i, i + m.len()))),
         )
         .filter(|(i, end)| {
             event_token(&text[..*i]).is_some()
+                && !["地点：", "地点:"].iter().any(|m| {
+                    text[..*i]
+                        .rsplit(['，', ','])
+                        .next()
+                        .unwrap_or("")
+                        .trim_start()
+                        .starts_with(m)
+                })
                 && !["地点：", "地点:"]
                     .iter()
                     .any(|m| text[*end..].trim_start().starts_with(m))

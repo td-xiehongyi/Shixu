@@ -70,22 +70,33 @@ pub(crate) fn negated_change(text: &str) -> bool {
     static GRAMMAR: OnceLock<Regex> = OnceLock::new();
     GRAMMAR.get_or_init(||Regex::new(r"(?:不|未|没有|并非)(?:会|再|要|是|予以|进行|已|曾)*\s*(?:改至|改到|调整至|调整到|延期至)").expect("static negated change grammar")).is_match(text)
 }
+// A dot continues the captured numeric token only when followed by a digit.
+// Sentence punctuation must not erase a fully grounded date/clock.
+fn numeric_tail(tail: &str) -> bool {
+    let mut chars = tail.chars();
+    match chars.next() {
+        Some(c) if c.is_numeric() => true,
+        Some('.') => chars.next().is_some_and(char::is_numeric),
+        _ => false,
+    }
+}
 fn complete_date_token(text: &str, found: regex::Match<'_>) -> bool {
     let before = text[..found.start()].chars().next_back();
     let after = text[found.end()..].chars().next();
     !before.is_some_and(|c| c.is_numeric())
         && !(found.as_str().ends_with(|c: char| c.is_numeric())
-            && after.is_some_and(|c| c.is_numeric() || c == '/' || c == '-'))
+            && (numeric_tail(&text[found.end()..]) || after.is_some_and(|c| c == '/' || c == '-')))
 }
 fn complete_clock_token(text: &str, found: regex::Match<'_>) -> bool {
     !text[..found.start()]
         .chars()
         .next_back()
         .is_some_and(|c| c.is_numeric() || [':', '：', '.'].contains(&c))
+        && !numeric_tail(&text[found.end()..])
         && !text[found.end()..]
             .chars()
             .next()
-            .is_some_and(|c| c.is_numeric() || [':', '：', '.', '秒'].contains(&c))
+            .is_some_and(|c| [':', '：', '秒'].contains(&c))
 }
 /// `raw_time_text` is the unmodified source fragment (UTF-8), including ambiguity.
 /// Invalid dates, competing dates, gap/fold instants and inverted ranges stay unknown.
