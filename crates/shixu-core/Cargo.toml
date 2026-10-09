@@ -7,7 +7,7 @@ publish.workspace = true
 
 [dependencies]
 serde.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 zeroize.workspace = true
 
 [dev-dependencies]

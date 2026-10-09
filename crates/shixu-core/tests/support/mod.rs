@@ -3,6 +3,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[allow(dead_code)]
+pub mod fake_vault;
+
 pub fn fixture_bytes(name: &str) -> Vec<u8> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
     load_fixture(&root, name).expect("read allowlisted synthetic fixture")
