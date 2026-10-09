@@ -236,6 +236,11 @@ export default function App() {
           </button>
         </div>
         <footer className="sidebar-footer">
+          {demo && module !== "calendar" && (
+            <p>
+              <span className="demo-badge">演示数据</span>
+            </p>
+          )}
           <p>
             <LockSimple size={19} />
             <span>密码库已锁定</span>
