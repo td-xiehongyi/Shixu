@@ -450,3 +450,181 @@ fn pdf_byte_limits_and_magic_are_checked_before_engine_open() {
     );
     assert_eq!(reader.0.get(), 0);
 }
+
+#[test]
+fn alpha_is_composited_over_white_before_ocr() {
+    struct Capture(bool);
+    impl OcrEngine for Capture {
+        fn version(&self) -> &str {
+            "alpha-capture/1"
+        }
+        fn recognize(&mut self, pixels: &::image::RgbImage) -> Result<Vec<Word>, AppError> {
+            self.0 = true;
+            assert_eq!(pixels.get_pixel(0, 0).0, [255, 255, 255]);
+            assert_eq!(pixels.get_pixel(10, 10).0, [0, 0, 0]);
+            assert_eq!(pixels.get_pixel(11, 10).0, [127, 127, 127]);
+            assert_eq!(pixels.get_pixel(12, 10).0, [255, 255, 255]);
+            Ok(vec![])
+        }
+    }
+    let mut rgba = ::image::RgbaImage::from_pixel(300, 100, ::image::Rgba([0, 0, 0, 0]));
+    rgba.put_pixel(10, 10, ::image::Rgba([0, 0, 0, 255]));
+    rgba.put_pixel(11, 10, ::image::Rgba([0, 0, 0, 128]));
+    rgba.put_pixel(12, 10, ::image::Rgba([200, 20, 30, 0]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    ::image::DynamicImage::ImageRgba8(rgba)
+        .write_to(&mut png, ::image::ImageFormat::Png)
+        .unwrap();
+    let mut capture = Capture(false);
+    image::extract_with_engine(png.get_ref(), ID, &ParserLimits::default(), &mut capture).unwrap();
+    assert!(capture.0);
+}
+#[test]
+fn alpha_fixture_visible_notice_survives_real_ocr() {
+    let _lock = engines::NATIVE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    engines::verify_engines();
+    let bytes = engines::approved_bytes("image", "alpha.png");
+    let rgba = ::image::load_from_memory(&bytes).unwrap().to_rgba8();
+    assert_eq!(rgba.pixels().map(|p| p.0[3]).min(), Some(0));
+    assert_eq!(rgba.pixels().map(|p| p.0[3]).max(), Some(255));
+    let result = image::extract_with_engine(
+        &bytes,
+        ID,
+        &ParserLimits::default(),
+        &mut engines::Tesseract,
+    )
+    .unwrap();
+    assert!(
+        result
+            .blocks
+            .iter()
+            .any(|b| b.text == "Workshop 2026-11-20")
+    );
+    assert!(result.blocks.iter().any(|b| b.text == "Room 42"));
+}
+
+fn modest_gutter_grid() -> Vec<Word> {
+    [
+        ("Workshop", 10, 10),
+        ("Lecture", 130, 10),
+        ("Monday", 10, 50),
+        ("Tuesday", 135, 50),
+    ]
+    .into_iter()
+    .map(|(text, x, y)| Word {
+        text: text.into(),
+        x,
+        y,
+        width: 70,
+        height: 20,
+        confidence: 99.,
+    })
+    .collect()
+}
+fn assert_grid_stays_separate(result: &PartResult) {
+    assert_eq!(result.status, PartStatus::PartialParse);
+    assert_eq!(
+        result
+            .blocks
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>(),
+        ["Workshop", "Lecture", "Monday", "Tuesday"]
+    );
+    assert!(
+        result
+            .blocks
+            .iter()
+            .all(|b| b.quality_flags.contains(&QualityFlag::AmbiguousLayout))
+    );
+}
+#[test]
+fn recurring_modest_gutters_do_not_merge_ocr_columns() {
+    let pixels = ::image::RgbImage::from_fn(300, 100, |x, y| {
+        ::image::Rgb([if (x + y) % 2 == 0 { 255 } else { 0 }; 3])
+    });
+    let result = image::observe(
+        &pixels,
+        ID,
+        1,
+        &ParserLimits::default(),
+        &mut Observations(modest_gutter_grid()),
+    )
+    .unwrap();
+    assert_grid_stays_separate(&result);
+}
+#[test]
+fn recurring_modest_gutters_do_not_merge_native_pdf_columns() {
+    struct Grid;
+    impl pdf::PdfDocument for Grid {
+        fn page_count(&self) -> u32 {
+            1
+        }
+        fn page_size(&self, _: u32) -> Result<(u32, u32), AppError> {
+            Ok((300, 100))
+        }
+        fn native_text(&self, _: u32, _: u32) -> Result<Vec<pdf::TextRegion>, AppError> {
+            Ok(modest_gutter_grid()
+                .into_iter()
+                .map(|w| pdf::TextRegion {
+                    text: w.text,
+                    x: w.x,
+                    y: w.y,
+                    width: w.width,
+                    height: w.height,
+                })
+                .collect())
+        }
+        fn render(&self, _: u32, _: u32, _: u32) -> Result<::image::RgbImage, AppError> {
+            panic!("native page must not render")
+        }
+        fn version(&self) -> &str {
+            "grid-observations/1"
+        }
+    }
+    let result = pdf::extract_document(
+        &Grid,
+        ID,
+        &ParserLimits::default(),
+        &mut Observations(vec![]),
+    )
+    .unwrap();
+    assert_grid_stays_separate(&result);
+}
+#[test]
+fn nonrecurring_word_gap_can_form_a_coherent_line() {
+    let pixels = ::image::RgbImage::new(300, 100);
+    let result = image::observe(
+        &pixels,
+        ID,
+        1,
+        &ParserLimits::default(),
+        &mut Observations(vec![word("Workshop", 10, 99.), word("Monday", 130, 99.)]),
+    )
+    .unwrap();
+    assert_eq!(result.blocks.len(), 1);
+    assert_eq!(result.blocks[0].text, "Workshop Monday");
+    assert!(
+        !result.blocks[0]
+            .quality_flags
+            .contains(&QualityFlag::AmbiguousLayout)
+    );
+}
+
+#[test]
+fn jpeg_scan_contains_actual_encoded_dct_image() {
+    let jpeg = engines::approved_bytes("image", "notice.jpg");
+    let scan = engines::approved_bytes("pdf", "jpeg_scan.pdf");
+    let lossless = engines::approved_bytes("pdf", "scan.pdf");
+    assert_ne!(
+        scan, lossless,
+        "JPEG PDF must not duplicate the lossless scan"
+    );
+    assert!(
+        scan.windows(b"/Filter /DCTDecode".len())
+            .any(|w| w == b"/Filter /DCTDecode")
+    );
+    assert!(scan.windows(jpeg.len()).any(|w| w == jpeg.as_slice()));
+}

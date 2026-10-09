@@ -73,7 +73,21 @@ pub fn extract_with_engine(
     reader.limits(decode_limits);
     match reader.decode() {
         Ok(decoded) if decoded.width() == w && decoded.height() == h => {
-            observe(&decoded.to_rgb8(), part_id, 1, limits, engine)
+            // Document OCR uses an explicit white background. Hidden RGB in a
+            // transparent pixel must not become visible text when alpha is removed.
+            let pixels = if decoded.color().has_alpha() {
+                let rgba = decoded.into_rgba8();
+                ::image::RgbImage::from_fn(w, h, |x, y| {
+                    let p = rgba.get_pixel(x, y).0;
+                    let alpha = u32::from(p[3]);
+                    ::image::Rgb(std::array::from_fn(|i| {
+                        ((u32::from(p[i]) * alpha + 255 * (255 - alpha) + 127) / 255) as u8
+                    }))
+                })
+            } else {
+                decoded.into_rgb8()
+            };
+            observe(&pixels, part_id, 1, limits, engine)
         }
         _ => failure(
             part_id,
@@ -279,9 +293,13 @@ pub(crate) fn assemble(mut input: Vec<EvidenceBlock>) -> (Vec<EvidenceBlock>, bo
             rows.push(vec![block]);
         }
     }
-    let mut result = vec![];
-    for mut row in rows {
+    for row in &mut rows {
         row.sort_by_key(|b| rect(b).0);
+    }
+    let column_boundaries = recurring_gutters(&rows);
+    let recurring_columns = column_boundaries.iter().any(|b| !b.is_empty());
+    let mut result = vec![];
+    for (row_index, row) in rows.into_iter().enumerate() {
         let overlap = row.windows(2).any(|b| {
             let (x, _, w, _) = rect(&b[0]);
             let (nx, _, nw, _) = rect(&b[1]);
@@ -299,7 +317,7 @@ pub(crate) fn assemble(mut input: Vec<EvidenceBlock>) -> (Vec<EvidenceBlock>, bo
             if let Some(mut run) = current.take() {
                 let (rx, ry, rw, rh) = rect(&run);
                 let gap = x.saturating_sub(previous.0 + previous.2);
-                if gap > 3 * previous.3.max(h) {
+                if gap > 3 * previous.3.max(h) || column_boundaries[row_index].contains(&x) {
                     result.push(run);
                     current = Some(block);
                 } else {
@@ -335,10 +353,41 @@ pub(crate) fn assemble(mut input: Vec<EvidenceBlock>) -> (Vec<EvidenceBlock>, bo
     for block in &mut result {
         block.text = block.text.trim().to_owned();
     }
+    ambiguous |= recurring_columns;
     if ambiguous {
         for block in &mut result {
             block.quality_flags.push(QualityFlag::AmbiguousLayout);
         }
     }
     (result, ambiguous)
+}
+
+/// A whitespace corridor at least one text height wide, recurring on different
+/// rows with aligned right-hand starts, is evidence for competing column order.
+/// Retain its boundary rather than interpreting row adjacency as a sentence.
+/// Matching sorted neighboring candidates avoids a quadratic gap comparison.
+fn recurring_gutters(rows: &[Vec<EvidenceBlock>]) -> Vec<std::collections::BTreeSet<u32>> {
+    let mut boundaries = vec![std::collections::BTreeSet::new(); rows.len()];
+    let mut gaps = vec![];
+    for (row_index, row) in rows.iter().enumerate() {
+        for pair in row.windows(2) {
+            let (x, _, w, h) = rect(&pair[0]);
+            let (next_x, _, _, next_h) = rect(&pair[1]);
+            let height = h.max(next_h);
+            if next_x.saturating_sub(x + w) >= height {
+                gaps.push((row_index, x + w, next_x, height));
+            }
+        }
+    }
+    gaps.sort_unstable_by_key(|gap| gap.2);
+    for pair in gaps.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let height = a.3.max(b.3);
+        let shared_width = a.2.min(b.2).saturating_sub(a.1.max(b.1));
+        if a.0 != b.0 && a.2.abs_diff(b.2) <= height / 2 && shared_width >= height {
+            boundaries[a.0].insert(a.2);
+            boundaries[b.0].insert(b.2);
+        }
+    }
+    boundaries
 }

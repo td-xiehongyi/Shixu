@@ -17,12 +17,17 @@ def canvas(lines,size=(1000,360)):
     return im,regions
 lines=[('Workshop 2026-11-20',50,50),('Room 42',50,140)]
 def record(name,b,kind,regions=None,expected='readable',**kw):
-    (ROOT/name).write_bytes(b)
+    path=ROOT/name
+    if not path.exists() or path.read_bytes()!=b: path.write_bytes(b)
     item={'file':name,'sha256':hashlib.sha256(b).hexdigest(),'expected':expected,'regions':regions or [],**kw}
     (images if kind=='image' else pdfs).append(item)
 def image_case(name,lines=lines,fmt='PNG',mode=None,blur=0,crop=False,size=(1000,360),expected='readable'):
     im,regions=canvas(lines,size)
-    if mode: im=im.convert(mode)
+    if mode=='RGBA':
+        # Opaque black ink with antialiased alpha on a transparent black canvas.
+        alpha=im.convert('L').point(lambda value:255-value)
+        im=Image.new('RGBA',im.size,(0,0,0,0));im.putalpha(alpha)
+    elif mode: im=im.convert(mode)
     if blur: im=im.filter(ImageFilter.GaussianBlur(blur))
     if crop:
         im=im.crop((140,0,1000,360)); regions=[{'text':'2026-11-20','bbox':[0,40,700,120]},{'text':'42','bbox':[0,135,200,200]}]
@@ -53,8 +58,14 @@ def pdf_bytes(pages,extra=b'',special=[]):
         num=len(objects)+1; kids.append(f'{num} 0 R'); objects.extend([b'',b''])
         w,h=spec.get('size',(1000,360)); res='<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>'
         if 'image' in spec:
-            im=canvases[spec['image']];w,h=im.size; raw=zlib.compress(im.tobytes());imnum=len(objects)+1
-            objects.append(f'<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length {len(raw)} >>\nstream\n'.encode()+raw+b'\nendstream')
+            im=canvases[spec['image']];w,h=im.size;imnum=len(objects)+1
+            if spec['image'].endswith('.jpg'):
+                # Preserve the actual JPEG stream, including its compression artifacts.
+                raw=(ROOT/spec['image']).read_bytes();pdf_filter='DCTDecode'
+                with Image.open(io.BytesIO(raw)) as encoded: w,h=encoded.size
+            else:
+                raw=zlib.compress(im.tobytes());pdf_filter='FlateDecode'
+            objects.append(f'<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /{pdf_filter} /Length {len(raw)} >>\nstream\n'.encode()+raw+b'\nendstream')
             res=f'<< /XObject << /Im0 {imnum} 0 R >> >>'; stream=f'q {w} 0 0 {h} 0 0 cm /Im0 Do Q'.encode()
             regs=next(x['regions'] for x in images if x['file']==spec['image'])
         else:
@@ -97,5 +108,6 @@ wr._ID=ArrayObject([ByteStringObject(b'SYNTHETIC-N4-001'),ByteStringObject(b'SYN
 record('encrypted.pdf',out.getvalue(),'pdf',expected='auth_required')
 for kind,data in [('image',images),('pdf',pdfs)]:
     assert len(data)>=20
-    (ROOT/(kind+'_manifest.json')).write_text(json.dumps({'synthetic_only':True,'schema':1,'fixtures':data},ensure_ascii=False,indent=2)+'\n')
+    path=ROOT/(kind+'_manifest.json');text=json.dumps({'synthetic_only':True,'schema':1,'fixtures':data},ensure_ascii=False,indent=2)+'\n'
+    if not path.exists() or path.read_text()!=text: path.write_text(text)
 print('generated',len(images),'images',len(pdfs),'PDFs')

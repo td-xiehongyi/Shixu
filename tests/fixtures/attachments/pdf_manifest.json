@@ -270,7 +270,7 @@
     },
     {
       "file": "jpeg_scan.pdf",
-      "sha256": "99f9d7435612c4cadd988ce68b0f6d56270ac338990688675e0933552a128c18",
+      "sha256": "7f948d34f13b81b3bd5fb5ceee513e4d44c58de220be83a00abb4df6f2faffbb",
       "expected": "readable",
       "regions": [
         {

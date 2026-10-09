@@ -299,7 +299,7 @@
     },
     {
       "file": "alpha.png",
-      "sha256": "223df8bd6ee0de2661a7c816ed8e5552684751a2712f6bc10da872f61703aa56",
+      "sha256": "e4eaacabfccfc1ce4da80869024d7ab5a8d2d2fc5e39e3efb765612c124aff42",
       "expected": "readable",
       "regions": [
         {
