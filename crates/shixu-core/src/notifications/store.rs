@@ -28,7 +28,15 @@ impl MessageStore {
     pub fn append(
         &self,
         config: &SourceConfig,
+        envelope: MessageEnvelope,
+    ) -> AppResult<AppendOutcome> {
+        self.append_inner(config, envelope, None)
+    }
+    fn append_inner(
+        &self,
+        config: &SourceConfig,
         mut envelope: MessageEnvelope,
+        cursor: Option<&str>,
     ) -> AppResult<AppendOutcome> {
         // Authorization MUST precede identity derivation, protection and all writes.
         if !config.enabled
@@ -93,6 +101,9 @@ impl MessageStore {
                     tx.execute("UPDATE messages SET revision=?2,payload=?3 WHERE message_key=?1", params![identity.key.to_string(),envelope.revision as i64,payload]).map_err(storage_error)?;
                     tx.execute("UPDATE part_results SET revision=?2 WHERE message_key=?1 AND revision=?3", params![identity.key.to_string(),envelope.revision as i64,revision]).map_err(storage_error)?;
                 }
+                if let Some(cursor) = cursor {
+                    tx.execute("UPDATE sources SET cursor=?2 WHERE namespace=?1", params![ns,cursor]).map_err(storage_error)?;
+                }
                 return Ok(AppendOutcome::Duplicate);
             }
             let allowed_change = if envelope.revoked && !revoked { config.capability_set.contains(&SourceCapability::Revocations) } else { config.capability_set.contains(&SourceCapability::Edits) && !revoked };
@@ -106,8 +117,46 @@ impl MessageStore {
         tx.execute("INSERT INTO messages VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,received_at=excluded.received_at,processing_state=excluded.processing_state,revoked=excluded.revoked,payload=excluded.payload,content_digest=excluded.content_digest", params![identity.key.to_string(),ns,native_id,identity.degraded,envelope.revision as i64,envelope.received_at,state_name(envelope.processing_state),envelope.revoked,payload,protected_digest]).map_err(storage_error)?;
         tx.execute("DELETE FROM part_results WHERE message_key=?1", [identity.key.to_string()]).map_err(storage_error)?;
         if envelope.revoked { tx.execute("INSERT OR IGNORE INTO suppressions VALUES (?1,'source_revoked')", [identity.key.to_string()]).map_err(storage_error)?; }
+        if let Some(cursor) = cursor {
+            tx.execute("UPDATE sources SET cursor=?2 WHERE namespace=?1", params![ns,cursor]).map_err(storage_error)?;
+        }
         Ok(AppendOutcome::Stored)
     })
+    }
+    /// Append and acknowledge an opaque, non-secret delivery cursor in the same
+    /// SQLite transaction. Only Stored/Duplicate advance it. The receive worker
+    /// must consume deliveries serially in transport order; cursors are opaque
+    /// and cannot be compared to detect out-of-order acknowledgment.
+    pub fn append_with_cursor(
+        &self,
+        config: &SourceConfig,
+        envelope: MessageEnvelope,
+        cursor: &str,
+    ) -> AppResult<AppendOutcome> {
+        if cursor.is_empty()
+            || cursor.len() > 4096
+            || cursor.contains(['/', '\\', ':'])
+            || cursor.chars().any(char::is_control)
+        {
+            return Err(AppError::InvalidInput);
+        }
+        self.append_inner(config, envelope, Some(cursor))
+    }
+    pub fn cursor(&self, config: &SourceConfig, group: &str) -> AppResult<Option<String>> {
+        if !config.enabled || !config.allowed_group_ids.iter().any(|g| g == group) {
+            return Err(AppError::InvalidInput);
+        }
+        let ns = namespace(config, group);
+        self.db.transaction(|tx| {
+            tx.query_row(
+                "SELECT NULLIF(cursor,'') FROM sources WHERE namespace=?1",
+                [ns],
+                |r| r.get(0),
+            )
+            .optional()
+            .map(|v| v.flatten())
+            .map_err(storage_error)
+        })
     }
     pub fn pending(&self, limit: u32) -> AppResult<Vec<MessageEnvelope>> {
         self.db.transaction(|tx| {
@@ -116,6 +165,11 @@ impl MessageStore {
         rows.map(|row| { let (payload,state) = row.map_err(storage_error)?; let mut message: MessageEnvelope = self.db.unprotect(&payload)?; message.processing_state = serde_json::from_value(serde_json::Value::String(state)).map_err(|_| AppError::ParseFailed)?; Ok(message) }).collect()
     })
     }
+    /// Preconditions for asynchronous callers (N3): hold message-generation
+    /// coordination spanning job dispatch through completion, including edits,
+    /// revocations and retries; reject stale completions before calling this API.
+    /// This API has no expected_revision argument. The SQL operation mutex alone
+    /// does NOT serialize a whole parse job or prevent stale evidence writes.
     pub fn record_parts(&self, key: &MessageKey, parts: Vec<PartResult>) -> AppResult<()> {
         self.db.transaction(|tx| {
         let data: Option<Vec<u8>> = tx.query_row("SELECT payload FROM messages WHERE message_key=?1 AND payload IS NOT NULL AND revoked=0", [key.to_string()], |r| r.get(0)).optional().map_err(storage_error)?;

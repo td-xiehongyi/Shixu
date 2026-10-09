@@ -307,7 +307,9 @@ dependencies = [
 name = "shixu-native"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "shixu-core",
+ "uuid",
  "windows-sys",
 ]
 

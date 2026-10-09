@@ -2,6 +2,8 @@
   "schema_version": 1,
   "synthetic_only": true,
   "fixtures": [
-    "contracts/event.json"
+    "contracts/event.json",
+    "qq/messages.json",
+    "qq/capabilities.json"
   ]
 }

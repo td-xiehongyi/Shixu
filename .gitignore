@@ -38,3 +38,8 @@
 !/tests/fixtures/contracts/
 /tests/fixtures/contracts/*
 !/tests/fixtures/contracts/event.json
+
+!/tests/fixtures/qq/
+/tests/fixtures/qq/*
+!/tests/fixtures/qq/messages.json
+!/tests/fixtures/qq/capabilities.json
