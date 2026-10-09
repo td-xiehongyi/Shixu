@@ -1,0 +1,195 @@
+import { describe, expect, it } from "vitest";
+import {
+  canonicalRevision,
+  createMainBridge,
+  createVaultBridge,
+  decodeEvent,
+  decodeSummary,
+} from "./bridge";
+import fixture from "../../src-tauri/tests/fixtures/event.json";
+
+describe("strict native bridge contract", () => {
+  it("main_window_cannot_call_vault", () => {
+    const bridge = createMainBridge(async () => undefined);
+    expect((bridge as Record<string, unknown>).vaultReveal).toBeUndefined();
+    expect(Object.keys(bridge).sort()).toEqual(
+      [
+        "calendarEdit",
+        "calendarQuery",
+        "calendarUndo",
+        "showVaultWindow",
+      ].sort(),
+    );
+  });
+  it("dto_roundtrip_matches_rust_fixture", () => {
+    expect(decodeEvent(fixture).revision).toBe("9007199254740993");
+    expect(JSON.parse(JSON.stringify(decodeEvent(fixture)))).toEqual(fixture);
+    expect(() =>
+      decodeEvent({ ...fixture, revision: 9007199254740992 }),
+    ).toThrow("INVALID_INPUT");
+  });
+  it("payload_limits_and_revision_are_checked before invoking", async () => {
+    let calls = 0;
+    const bridge = createMainBridge(async () => {
+      calls++;
+      return fixture;
+    });
+    for (const value of [
+      "01",
+      "+1",
+      "-1",
+      "1.0",
+      " 1",
+      "18446744073709551616",
+      9007199254740992,
+    ]) {
+      expect(() => canonicalRevision(value)).toThrow("INVALID_INPUT");
+    }
+    await expect(
+      bridge.calendarEdit(fixture.event_id, "01", {
+        event_id: fixture.event_id,
+        expected_revision: "01",
+        title: null,
+        time: null,
+        location: null,
+        status: null,
+      }),
+    ).rejects.toThrow("INVALID_INPUT");
+    expect(calls).toBe(0);
+  });
+  it("summary rejects secrets and unsafe timestamps", () => {
+    const summary = {
+      entry_id: fixture.event_id,
+      channel: "演示",
+      account: "synthetic",
+      revision: "9007199254740993",
+      created_at: 0,
+      updated_at: 1,
+    };
+    expect(decodeSummary(summary)).not.toHaveProperty("password");
+    expect(() =>
+      decodeSummary({ ...summary, password: "synthetic-only" }),
+    ).toThrow("INVALID_INPUT");
+    expect(() =>
+      decodeSummary({ ...summary, updated_at: 9007199254740992 }),
+    ).toThrow("INVALID_INPUT");
+  });
+  it("errors never expose arbitrary native messages", async () => {
+    const bridge = createMainBridge(async () => {
+      throw "raw-sensitive-native-detail";
+    });
+    await expect(
+      bridge.calendarQuery({
+        from_date: null,
+        through_date: null,
+        statuses: [],
+        include_pending: false,
+      }),
+    ).rejects.toThrow("UNSUPPORTED");
+  });
+  it("vault mutations reject oversized synthetic bytes before transport", async () => {
+    let calls = 0;
+    const bridge = createVaultBridge(async () => {
+      calls++;
+      return null;
+    });
+    await expect(
+      bridge.vaultApply({
+        operation: "create",
+        channel: "演示",
+        account: "synthetic",
+        password: new Uint8Array(65537),
+      }),
+    ).rejects.toThrow("INVALID_INPUT");
+    expect(calls).toBe(0);
+  });
+});
+
+it("strict bridge rejects malformed IDs, nested DTOs and unknown payload fields", async () => {
+  let calls = 0;
+  const bridge = createMainBridge(async () => {
+    calls++;
+    return fixture;
+  });
+  const patch = {
+    event_id: fixture.event_id,
+    expected_revision: "9007199254740993",
+    title: null,
+    time: null,
+    location: null,
+    status: null,
+  };
+  await expect(
+    bridge.calendarEdit("../vault", patch.expected_revision, patch),
+  ).rejects.toThrow("INVALID_INPUT");
+  await expect(
+    bridge.calendarEdit(fixture.event_id, patch.expected_revision, {
+      ...patch,
+      title: "x".repeat(4097),
+    }),
+  ).rejects.toThrow("INVALID_INPUT");
+  await expect(
+    bridge.calendarEdit(fixture.event_id, "1", patch),
+  ).rejects.toThrow("INVALID_INPUT");
+  await expect(
+    bridge.calendarUndo({
+      change_id: fixture.event_id,
+      expected_revision: "+1",
+    }),
+  ).rejects.toThrow("INVALID_INPUT");
+  await expect(
+    bridge.calendarQuery({
+      from_date: "2026-02-30",
+      through_date: null,
+      statuses: [],
+      include_pending: false,
+    }),
+  ).rejects.toThrow("INVALID_INPUT");
+  expect(calls).toBe(0);
+  expect(() => decodeEvent({ ...fixture, session_id: "forged" })).toThrow(
+    "INVALID_INPUT",
+  );
+});
+
+it("successful command reception preserves every revision above 2^53", async () => {
+  const commands: string[] = [];
+  const bridge = createMainBridge(async (command) => {
+    commands.push(command);
+    return command === "calendar_query" ? [fixture] : fixture;
+  });
+  const patch = {
+    event_id: fixture.event_id,
+    expected_revision: fixture.revision,
+    title: null,
+    time: null,
+    location: null,
+    status: null,
+  };
+  expect(
+    (
+      await bridge.calendarQuery({
+        from_date: null,
+        through_date: null,
+        statuses: [],
+        include_pending: false,
+      })
+    )[0].revision,
+  ).toBe(fixture.revision);
+  expect(
+    (await bridge.calendarEdit(fixture.event_id, fixture.revision, patch))
+      .revision,
+  ).toBe(fixture.revision);
+  expect(
+    (
+      await bridge.calendarUndo({
+        change_id: fixture.event_id,
+        expected_revision: fixture.revision,
+      })
+    ).revision,
+  ).toBe(fixture.revision);
+  expect(commands).toEqual([
+    "calendar_query",
+    "calendar_edit",
+    "calendar_undo",
+  ]);
+});

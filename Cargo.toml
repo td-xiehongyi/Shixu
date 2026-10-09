@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/shixu-core", "crates/shixu-native"]
+members = ["crates/shixu-core", "crates/shixu-native", "src-tauri"]
 resolver = "3"
 
 [workspace.package]

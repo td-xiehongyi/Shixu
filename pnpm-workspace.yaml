@@ -1,0 +1,5 @@
+minimumReleaseAgeExclude:
+  - '@tauri-apps/api@2.12.2'
+  - vite@8.3.4
+# Checks should use the already installed lockfile; install dependencies explicitly.
+verifyDepsBeforeRun: false

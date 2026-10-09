@@ -1,0 +1,12 @@
+{
+  "identifier": "main",
+  "description": "Calendar main window only",
+  "local": true,
+  "windows": ["main"],
+  "permissions": [
+    "allow-calendar-query",
+    "allow-calendar-edit",
+    "allow-calendar-undo",
+    "allow-show-vault-window"
+  ]
+}

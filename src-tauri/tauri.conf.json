@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "拾序",
+  "version": "0.1.0",
+  "identifier": "app.shixu.desktop",
+  "build": {
+    "beforeBuildCommand": "pnpm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "拾序",
+        "url": "index.html",
+        "width": 1487,
+        "height": 1058,
+        "minWidth": 760,
+        "minHeight": 600,
+        "create": false
+      }
+    ],
+    "security": {
+      "capabilities": ["main", "vault"],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

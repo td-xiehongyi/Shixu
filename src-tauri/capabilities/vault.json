@@ -1,0 +1,13 @@
+{
+  "identifier": "vault",
+  "description": "Dedicated vault window only; engine currently unsupported",
+  "local": true,
+  "windows": ["vault"],
+  "permissions": [
+    "allow-vault-unlock",
+    "allow-vault-list",
+    "allow-vault-apply",
+    "allow-vault-reveal",
+    "allow-vault-lock"
+  ]
+}
