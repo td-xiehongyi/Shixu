@@ -30,7 +30,11 @@ pub struct Lifecycle {
 impl Lifecycle {
     pub fn handle_lifecycle(&self, event: LifecycleEvent, now: i64) -> AppResult<()> {
         match event {
-            LifecycleEvent::WindowClose => self.desktop.hide_main(),
+            LifecycleEvent::WindowClose => {
+                let locked = self.vault.lock(LockReason::Manual);
+                let hidden = self.desktop.hide_main();
+                locked.and(hidden)
+            }
             LifecycleEvent::SecondInstance => self.desktop.focus_main(),
             LifecycleEvent::SessionLock => self.vault.lock(LockReason::SessionLock),
             LifecycleEvent::Suspend => {

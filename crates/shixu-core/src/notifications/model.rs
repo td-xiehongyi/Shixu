@@ -31,6 +31,16 @@ pub struct PreparedRequest {
     request: ModelRequest,
     attachment: bool,
 }
+impl PreparedRequest {
+    /// Bind durable queued authorization to this immutable prepared request.
+    /// Dispatch checks this same revision under the consent lock through send.
+    pub(crate) fn require_consent_revision(self, expected: u64) -> AppResult<Self> {
+        if self.consent_revision != expected {
+            return Err(AppError::Conflict);
+        }
+        Ok(self)
+    }
+}
 pub struct ModelResult {
     pub batch: ExtractBatch,
     pub request_id: String,

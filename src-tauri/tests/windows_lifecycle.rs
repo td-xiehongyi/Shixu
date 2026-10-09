@@ -104,8 +104,31 @@ fn receive(l: &Lifecycle, c: &SourceConfig) {
 }
 #[test]
 fn close_to_tray_vs_exit() {
-    let (_, _, v, d, l) = fixture();
+    let (db, c, v, d, l) = fixture();
+    let session = {
+        let mut vault = v.0.lock().unwrap();
+        vault.lock(LockReason::Manual).unwrap();
+        vault
+            .unlock(SecretBytes::new(b"synthetic-only".to_vec()), 0)
+            .unwrap()
+    };
+    assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Unlocked);
     l.handle_lifecycle(LifecycleEvent::WindowClose, 10).unwrap();
+    assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Locked);
+    assert!(v.0.lock().unwrap().list(&session, 11).is_err());
+    receive(&l, &c);
+    assert_eq!(
+        EventService::new(db)
+            .query(EventQuery {
+                from_date: None,
+                through_date: None,
+                statuses: vec![],
+                include_pending: true
+            })
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(*d.0.lock().unwrap(), vec!["hide"]);
     assert!(l.supervisor.status().running);
     l.handle_lifecycle(LifecycleEvent::Exit, 20).unwrap();
@@ -162,4 +185,16 @@ fn actual_windows_lifecycle_acceptance() {
     panic!(
         "BLOCKED: real Windows lifecycle hooks, vault engine, QQ/parser/provider and OS acceptance not available; portable ports do not satisfy this gate"
     );
+}
+
+#[test]
+fn close_to_tray_reports_lock_failure_and_keeps_background_running() {
+    let (_, _, _, desktop, mut lifecycle) = fixture();
+    lifecycle.vault = Arc::new(UnavailableVault);
+    assert_eq!(
+        lifecycle.handle_lifecycle(LifecycleEvent::WindowClose, 10),
+        Err(AppError::Unsupported)
+    );
+    assert_eq!(*desktop.0.lock().unwrap(), vec!["hide"]);
+    assert!(lifecycle.supervisor.status().running);
 }

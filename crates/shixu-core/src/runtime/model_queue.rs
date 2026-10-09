@@ -116,7 +116,9 @@ pub(super) fn run(
             consent,
             transport: &admission,
         };
-        let prepared = service.prepare(&m, &[], &context, &source)?;
+        let prepared = service
+            .prepare(&m, &[], &context, &source)?
+            .require_consent_revision(consent_revision as u64)?;
         let result = service.dispatch(prepared)?;
         EventService::new(db.clone()).apply_model(result.batch)?;
         Ok(result.retryable)

@@ -649,3 +649,169 @@ fn attachment_queue_pressure_is_visible_and_does_not_block_text_rules() {
             .any(|m| m.parts[0].parse_state == PartStatus::LimitExceeded)
     );
 }
+
+struct AdmissionBarrierProtector {
+    armed: AtomicBool,
+    entered: std::sync::mpsc::Sender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+impl DataProtector for AdmissionBarrierProtector {
+    fn protect(&self, p: &[u8]) -> AppResult<Vec<u8>> {
+        Ok(p.iter().map(|b| b ^ 0xa5).collect())
+    }
+    fn unprotect(&self, p: &[u8]) -> AppResult<Vec<u8>> {
+        let plain: Vec<u8> = p.iter().map(|b| b ^ 0xa5).collect();
+        if String::from_utf8_lossy(&plain).contains("message_key")
+            && self.armed.swap(false, Ordering::SeqCst)
+        {
+            self.entered.send(()).unwrap();
+            self.release
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(3))
+                .unwrap();
+        }
+        Ok(plain)
+    }
+}
+#[test]
+fn queued_model_cannot_adopt_regranted_consent_provider() {
+    let (entered, rx) = std::sync::mpsc::channel();
+    let (release, unblock) = std::sync::mpsc::channel();
+    let p = Arc::new(AdmissionBarrierProtector {
+        armed: AtomicBool::new(false),
+        entered,
+        release: Mutex::new(unblock),
+    });
+    let db = Arc::new(Database::open(std::path::Path::new(":memory:"), p.clone()).unwrap());
+    let c = config();
+    let consent = enabled_consent();
+    let s = Arc::new(Supervisor::new(db.clone(), consent.clone()));
+    s.start(vec![c.clone()]).unwrap();
+    s.receive(message(&c), "one").unwrap();
+    s.process_pending(1).unwrap();
+    s.schedule_models(1).unwrap();
+    assert_eq!(s.status().model_queue, 1);
+    p.armed.store(true, Ordering::SeqCst);
+    struct Providers(Mutex<Vec<String>>);
+    impl ModelTransport for Providers {
+        fn send(&self, r: &ModelRequest) -> AppResult<String> {
+            self.0.lock().unwrap().push(r.provider_id.clone());
+            Ok("[]".into())
+        }
+    }
+    let t = Arc::new(Providers(Mutex::new(vec![])));
+    let worker_s = s.clone();
+    let worker_t = t.clone();
+    let worker = std::thread::spawn(move || worker_s.process_model(1, worker_t.as_ref()));
+    rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+    // Queue revision was checked, but prepare has not yet captured its own revision.
+    consent.replace(1, ModelConsent::default()).unwrap();
+    consent
+        .replace(
+            2,
+            ModelConsent {
+                enabled: true,
+                provider_id: Some("different-provider".into()),
+                allowed_group_ids: vec!["g".into()],
+                allow_attachment_text: false,
+                revision: 0,
+            },
+        )
+        .unwrap();
+    release.send(()).unwrap();
+    let outcome = worker.join().unwrap();
+    assert_eq!(outcome, Ok(true));
+    println!(
+        "outcome={outcome:?}, sent_to={:?}, live_consent_revision={}",
+        t.0.lock().unwrap(),
+        consent.snapshot().unwrap().revision
+    );
+    assert!(
+        t.0.lock().unwrap().is_empty(),
+        "old queue consent revision must be pinned through actual send admission"
+    );
+}
+
+#[test]
+fn restarted_status_keeps_durable_gap_through_online_until_proven_complete() {
+    let db = database();
+    let c = config();
+    let old = Supervisor::new(db.clone(), consent());
+    old.start(vec![c.clone()]).unwrap();
+    old.receive(message(&c), "one").unwrap();
+    old.suspend(100).unwrap();
+    assert!(!old.status().sources[0].1.gaps.is_empty());
+    let store = MessageStore::new(db.clone());
+    assert!(store.recoveries(&c).unwrap().iter().any(|r| !r.complete));
+    let next = Arc::new(Supervisor::new(db.clone(), consent()));
+    next.start(vec![c.clone()]).unwrap();
+    println!(
+        "persisted_incomplete_recoveries={}, projected_gaps={}",
+        store
+            .recoveries(&c)
+            .unwrap()
+            .iter()
+            .filter(|r| !r.complete)
+            .count(),
+        next.status().sources[0].1.gaps.len()
+    );
+    assert!(
+        !next.status().sources[0].1.gaps.is_empty(),
+        "durable unresolved gap must remain visible after supervisor restart"
+    );
+
+    struct Online(Option<shixu_core::runtime::workers::Delivery>);
+    impl shixu_core::runtime::workers::ReceivePort for Online {
+        fn poll(&mut self) -> AppResult<Option<shixu_core::runtime::workers::Delivery>> {
+            Ok(self.0.take())
+        }
+        fn acknowledge(&mut self, _: &str) -> AppResult<()> {
+            Ok(())
+        }
+        fn disconnect(&mut self) -> AppResult<()> {
+            Ok(())
+        }
+    }
+    let workers = next
+        .spawn_workers(shixu_core::runtime::workers::WorkerPorts {
+            receiver: Some(Box::new(Online(Some(
+                shixu_core::runtime::workers::Delivery {
+                    message: message(&c),
+                    cursor: "online".into(),
+                },
+            )))),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(wait_for(|| {
+        next.status().sources[0].1.connection_state
+            == shixu_core::notifications::source::ConnectionState::Connected
+    }));
+    assert!(!next.status().sources[0].1.gaps.is_empty());
+    assert!(!next.status().sources[0].1.ordinary_group_verified);
+    next.refresh_sources().unwrap();
+    assert!(!next.status().sources[0].1.gaps.is_empty());
+    let recovery = store.recoveries(&c).unwrap().remove(0);
+    assert!(!recovery.complete);
+    assert_eq!(recovery.anchor.as_deref(), Some("one"));
+    store
+        .advance_recovery(&c, "g", recovery.epoch, "one", "verified", false)
+        .unwrap();
+    assert!(!next.status().sources[0].1.gaps.is_empty());
+    store
+        .advance_recovery(&c, "g", recovery.epoch, "one", "verified", true)
+        .unwrap();
+    assert!(next.status().sources[0].1.gaps.is_empty());
+    workers.stop().unwrap();
+    // Refresh must also restore later durable recovery created outside Supervisor.
+    store.begin_recovery(&c, 200).unwrap();
+    next.refresh_sources().unwrap();
+    assert_eq!(next.status().sources[0].1.gaps[0].since, 200);
+    let mut disabled = c.clone();
+    disabled.enabled = false;
+    disabled.allowed_group_ids.clear();
+    SettingsStore::new(db).save_source(disabled).unwrap();
+    next.refresh_sources().unwrap();
+    assert!(!next.status().sources[0].1.gaps.is_empty());
+}

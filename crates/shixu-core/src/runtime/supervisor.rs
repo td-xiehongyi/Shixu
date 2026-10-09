@@ -7,7 +7,7 @@ use crate::{
         consent::ConsentStore,
         parts::{TaskLease, TaskQueue},
         settings::{SettingsStore, current},
-        source::SourceHealth,
+        source::{Gap, GroupRecovery, SourceHealth},
     },
     storage::{Database, coordinator::PauseGuard, database::storage_error},
 };
@@ -35,7 +35,34 @@ pub struct Supervisor {
     model: Mutex<()>,
     attachment: Mutex<Option<TaskLease>>,
 }
+fn merge_recoveries(health: &mut SourceHealth, states: &[GroupRecovery]) {
+    // An in-memory failure without durable proof remains conservative. Only
+    // complete proofs for every group at its anchor may remove a known gap.
+    health.gaps.retain(|gap| {
+        !states.iter().any(|r| r.since == gap.since)
+            || states.iter().any(|r| r.since == gap.since && !r.complete)
+    });
+    for state in states.iter().filter(|r| !r.complete) {
+        let gap = Gap { since: state.since };
+        if !health.gaps.contains(&gap) {
+            health.gaps.push(gap);
+        }
+    }
+}
 impl Supervisor {
+    fn recovery_snapshot(&self) -> AppResult<Vec<(SourceId, Vec<GroupRecovery>)>> {
+        let store = MessageStore::new(self.db.clone());
+        SettingsStore::new(self.db.clone())
+            .sources()?
+            .into_iter()
+            .map(|s| {
+                Ok((
+                    s.config.source_id,
+                    store.recovery_states(s.config.source_id)?,
+                ))
+            })
+            .collect()
+    }
     pub fn new(db: Arc<Database>, consent: Arc<ConsentStore>) -> Self {
         Self {
             workers_owned: std::sync::atomic::AtomicBool::new(false),
@@ -90,17 +117,22 @@ impl Supervisor {
             }
             TaskQueue::new(self.db.clone()).recover_after_children_stopped()?;
             self.db.transaction(|tx|{tx.execute("UPDATE model_attempts SET state='done' WHERE consent_session!=?1",[&self.consent.instance_id]).map_err(storage_error)?;tx.execute("UPDATE model_attempts SET state=CASE WHEN attempts>=3 THEN 'done' ELSE 'queued' END WHERE state='running'",[]).map_err(storage_error)?;Ok(())})?;
+            let recoveries = self.recovery_snapshot()?;
             let mut status = self.status.lock().map_err(|_| AppError::Disconnected)?;
             status.running = true;
             let prior = status.sources.clone();
             status.sources = configs
                 .into_iter()
                 .map(|c| {
-                    let health = prior
+                    let mut health = prior
                         .iter()
                         .find(|(id, _)| *id == c.source_id)
                         .map(|(_, h)| h.clone())
                         .unwrap_or_default();
+                    if let Some((_, states)) = recoveries.iter().find(|(id, _)| *id == c.source_id)
+                    {
+                        merge_recoveries(&mut health, states);
+                    }
                     (c.source_id, health)
                 })
                 .collect();
@@ -129,6 +161,7 @@ impl Supervisor {
     }
     pub fn refresh_sources(&self) -> AppResult<()> {
         let configs = SettingsStore::new(self.db.clone()).sources()?;
+        let recoveries = self.recovery_snapshot()?;
         let mut status = self.status.lock().map_err(|_| AppError::Disconnected)?;
         let prior = std::mem::take(&mut status.sources);
         status.sources = configs
@@ -141,6 +174,11 @@ impl Supervisor {
                     .unwrap_or_default();
                 if !s.config.enabled {
                     health.failed(AppError::Disconnected, health.last_received_at.unwrap_or(0));
+                }
+                if let Some((_, states)) =
+                    recoveries.iter().find(|(id, _)| *id == s.config.source_id)
+                {
+                    merge_recoveries(&mut health, states);
                 }
                 (s.config.source_id, health)
             })
@@ -194,6 +232,22 @@ impl Supervisor {
         }
     }
     pub fn status(&self) -> RuntimeStatus {
+        let recoveries = self.recovery_snapshot();
+        {
+            let mut current = self.status.lock().unwrap_or_else(|p| p.into_inner());
+            match recoveries {
+                Ok(recoveries) => {
+                    for (id, states) in recoveries {
+                        if let Some((_, health)) =
+                            current.sources.iter_mut().find(|(source, _)| *source == id)
+                        {
+                            merge_recoveries(health, &states);
+                        }
+                    }
+                }
+                Err(error) => current.last_error = Some(error),
+            }
+        }
         let mut status = self
             .status
             .lock()

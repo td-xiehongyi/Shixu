@@ -934,3 +934,130 @@ fn d5_native_receive_port_retains_delivery_until_database_commit() {
         Some("cursor-one".into())
     );
 }
+
+#[test]
+fn d5_native_ack_uses_authoritative_commit_after_source_edit() {
+    use shixu_core::{
+        notifications::{
+            consent::{ConsentStore, ModelConsent},
+            settings::SettingsStore,
+        },
+        runtime::{Supervisor, workers::ReceivePort},
+    };
+    let mut c = config();
+    let fail = Arc::new(AtomicBool::new(false));
+    let db = Arc::new(
+        Database::open(
+            std::path::Path::new(":memory:"),
+            Arc::new(SyntheticProtection(fail)),
+        )
+        .unwrap(),
+    );
+    SettingsStore::new(db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let transport = SyntheticTransport {
+        caps: c.capability_set.clone(),
+        events: vec![
+            Ok(Some(delivery("cursor-one"))),
+            Ok(Some(delivery("cursor-two"))),
+        ]
+        .into(),
+        batches: VecDeque::new(),
+        calls: calls.clone(),
+        auth_fail: false,
+    };
+    let mut adapter = NativeQQAdapter::new(
+        transport,
+        LoopbackEndpoint::parse("127.0.0.1:3001").unwrap(),
+        MessageStore::new(db.clone()),
+        || 100,
+    );
+    QQAdapter::connect(&mut adapter, c.clone(), token()).unwrap();
+    let supervisor = Supervisor::new(
+        db.clone(),
+        Arc::new(ConsentStore::new(ModelConsent::default())),
+    );
+    supervisor.start(vec![c.clone()]).unwrap();
+    let first = ReceivePort::poll(&mut adapter).unwrap().unwrap();
+    c.timezone = "Asia/Shanghai".into();
+    SettingsStore::new(db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    supervisor.refresh_sources().unwrap();
+    assert_eq!(
+        supervisor
+            .receive(first.message.clone(), &first.cursor)
+            .unwrap(),
+        AppendOutcome::Stored
+    );
+    assert_eq!(
+        MessageStore::new(db.clone())
+            .cursor(&c, &first.message.group_id)
+            .unwrap(),
+        Some("cursor-one".into())
+    );
+    assert_eq!(
+        ReceivePort::acknowledge(&mut adapter, "wrong-cursor"),
+        Err(AppError::Conflict)
+    );
+    c.allowed_group_ids = vec!["other-group".into()];
+    SettingsStore::new(db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    assert_eq!(
+        ReceivePort::acknowledge(&mut adapter, &first.cursor),
+        Err(AppError::Conflict)
+    );
+    assert_eq!(
+        ReceivePort::poll(&mut adapter).unwrap().unwrap().cursor,
+        first.cursor
+    );
+    c.allowed_group_ids = vec![first.message.group_id.clone()];
+    c.enabled = false;
+    SettingsStore::new(db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    assert_eq!(
+        ReceivePort::acknowledge(&mut adapter, &first.cursor),
+        Err(AppError::Conflict)
+    );
+    c.enabled = true;
+    SettingsStore::new(db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    let ack = ReceivePort::acknowledge(&mut adapter, &first.cursor);
+    let next = ReceivePort::poll(&mut adapter).unwrap();
+    println!(
+        "ack={ack:?}, still_same_pending={}, transport_polls={}",
+        next.as_ref().is_some_and(|d| d.cursor == first.cursor),
+        calls.load(Ordering::SeqCst)
+    );
+    assert_eq!(
+        ack,
+        Ok(()),
+        "successful authoritative commit must not become permanently unacknowledgeable after source settings edit"
+    );
+    let next = next.expect("advance to next delivery after authoritative acknowledgment");
+    assert_eq!(next.cursor, "cursor-two");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        ReceivePort::acknowledge(&mut adapter, &next.cursor),
+        Err(AppError::Conflict)
+    );
+    assert_eq!(
+        supervisor
+            .receive(next.message.clone(), &next.cursor)
+            .unwrap(),
+        AppendOutcome::Duplicate
+    );
+    ReceivePort::acknowledge(&mut adapter, &next.cursor).unwrap();
+    assert!(ReceivePort::poll(&mut adapter).unwrap().is_none());
+    assert_eq!(
+        MessageStore::new(db)
+            .cursor(&c, &next.message.group_id)
+            .unwrap(),
+        Some("cursor-two".into())
+    );
+}

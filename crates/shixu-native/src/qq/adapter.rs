@@ -358,13 +358,23 @@ impl<T: ReceiveTransport> shixu_core::runtime::workers::ReceivePort for NativeQQ
             }))
     }
     fn acknowledge(&mut self, cursor: &str) -> AppResult<()> {
-        if self.pending.as_ref().is_none_or(|d| d.cursor != cursor) {
+        let delivery = self.pending.as_ref().ok_or(AppError::Conflict)?;
+        if delivery.cursor != cursor {
             return Err(AppError::Conflict);
         }
-        match self.persist_pending()? {
-            AppendOutcome::Stored | AppendOutcome::Duplicate => Ok(()),
-            _ => Err(AppError::Conflict),
+        let current = self.store.verify_committed_delivery(
+            self.config.as_ref().ok_or(AppError::Disconnected)?,
+            &delivery.message,
+            cursor,
+        )?;
+        if self.recovery_write_failed {
+            self.store.begin_recovery(&current, (self.now)())?;
+            self.recovery_write_failed = false;
         }
+        self.config = Some(current);
+        self.pending = None;
+        self.health.persisted((self.now)());
+        Ok(())
     }
     fn disconnect(&mut self) -> AppResult<()> {
         QQAdapter::disconnect(self)

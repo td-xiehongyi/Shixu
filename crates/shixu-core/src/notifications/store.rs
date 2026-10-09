@@ -180,6 +180,45 @@ impl MessageStore {
             .map_err(storage_error)
         })
     }
+    /// Verify a worker's already committed delivery without re-appending it under
+    /// the receiver's cached settings. Current authorization and durable content /
+    /// cursor are checked atomically; only then may the receiver release pending.
+    pub fn verify_committed_delivery(
+        &self,
+        receiver: &SourceConfig,
+        envelope: &MessageEnvelope,
+        cursor: &str,
+    ) -> AppResult<SourceConfig> {
+        self.db.transaction(|tx| {
+            let (_, current) = super::settings::current(&self.db, tx, receiver.source_id)?
+                .ok_or(AppError::Conflict)?;
+            if !current.enabled
+                || current.adapter_type != receiver.adapter_type
+                || current.account_id != receiver.account_id
+                || envelope.source_id != current.source_id
+                || envelope.account_id != current.account_id
+                || !current.allowed_group_ids.contains(&envelope.group_id)
+                || !current.capability_set.contains(&SourceCapability::LiveMessages)
+            {
+                return Err(AppError::Conflict);
+            }
+            let identity = message_identity(&current, envelope)?;
+            if identity.key != envelope.message_key {
+                return Err(AppError::Conflict);
+            }
+            let row: Option<(Vec<u8>, String)> = tx.query_row(
+                "SELECT m.content_digest,s.cursor FROM messages m JOIN sources s USING(namespace) WHERE m.message_key=?1 AND m.namespace=?2",
+                params![identity.key.to_string(), namespace(&current, &envelope.group_id)],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            ).optional().map_err(storage_error)?;
+            let (sealed_digest, saved_cursor) = row.ok_or(AppError::Conflict)?;
+            let digest: Vec<u8> = self.db.unprotect(&sealed_digest)?;
+            if saved_cursor != cursor || digest != content_digest(envelope)? {
+                return Err(AppError::Conflict);
+            }
+            Ok(current)
+        })
+    }
     /// Bind immutable technical identity once. Group membership is a canonical
     /// set, independent of ordering; capabilities/enabled are runtime settings.
     /// Returns true if this source already existed (resume requires recovery).
@@ -233,9 +272,17 @@ impl MessageStore {
         config: &SourceConfig,
     ) -> AppResult<Vec<super::source::GroupRecovery>> {
         self.bind_source(config)?;
+        self.recovery_states(config.source_id)
+    }
+    /// Internal status projection of existing authority, including disabled
+    /// sources with empty current group lists. This never binds or changes proof.
+    pub(crate) fn recovery_states(
+        &self,
+        source: SourceId,
+    ) -> AppResult<Vec<super::source::GroupRecovery>> {
         self.db.transaction(|tx|{
             let mut stmt=tx.prepare("SELECT group_id,epoch,since,anchor,recovery_cursor,complete FROM source_recovery WHERE source_id=?1 ORDER BY group_id").map_err(storage_error)?;
-            let rows=stmt.query_map([config.source_id.to_string()],|r|Ok(super::source::GroupRecovery{group_id:r.get(0)?,epoch:r.get::<_,i64>(1)? as u64,since:r.get(2)?,anchor:r.get(3)?,recovery_cursor:r.get(4)?,complete:r.get(5)?})).map_err(storage_error)?;
+            let rows=stmt.query_map([source.to_string()],|r|Ok(super::source::GroupRecovery{group_id:r.get(0)?,epoch:r.get::<_,i64>(1)? as u64,since:r.get(2)?,anchor:r.get(3)?,recovery_cursor:r.get(4)?,complete:r.get(5)?})).map_err(storage_error)?;
             rows.map(|r|r.map_err(storage_error)).collect()
         })
     }
