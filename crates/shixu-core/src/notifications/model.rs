@@ -342,6 +342,34 @@ fn current_subject_identity(text: &str) -> Option<String> {
     }
     Some(subject(title))
 }
+/// Qualifiers change whether the entire statement asserts an event, even when
+/// they appear after the location label. Keep this catalog shared; conjunctions
+/// that only rule out coordinated predicates belong to the assertion grammar.
+fn semantic_rejection(text: &str) -> bool {
+    super::extract::rejection(text)
+        || [
+            "不",
+            "未",
+            "取消",
+            "改至",
+            "改到",
+            "调整",
+            "延期",
+            "似乎",
+            "大概",
+            "估计",
+            "传闻",
+            "示例",
+            "举例",
+            "例如",
+            "已完成",
+            "已经完成",
+            "已结束",
+            "已经结束",
+        ]
+        .iter()
+        .any(|word| text.contains(word))
+}
 /// A closed tail grammar: end, an optional exact affirmative occurrence verb,
 /// and optionally a single explicit location label. Unknown suffixes are data,
 /// not proof that an exam/defense takes place. No second predicate/date/action
@@ -373,27 +401,8 @@ fn statement_tail(tail: &str) -> AppResult<Option<String>> {
                 || ['-', '_', '·', '(', ')', '（', '）'].contains(&c)
         })
         || super::time::date_expression(location)
-        || super::extract::rejection(location)
         || [
-            "不",
-            "未",
-            "取消",
-            "调整",
-            "改至",
-            "改到",
-            "延期",
-            "测验",
-            "答辩",
-            "举行",
-            "进行",
-            "安排",
-            "定于",
-            "将于",
-            "原定",
-            "已完成",
-            "已经完成",
-            "已结束",
-            "已经结束",
+            "测验", "答辩", "举行", "进行", "安排", "定于", "将于", "原定",
         ]
         .iter()
         .any(|word| location.contains(word))
@@ -410,47 +419,21 @@ pub(crate) fn grounded_candidate(
     zone: &str,
 ) -> AppResult<Candidate> {
     let text = &e.text;
-    if text.is_empty() || text.len() > 16384 || context_evidence_target(e)?.is_some() {
+    if text.is_empty()
+        || text.len() > 16384
+        || context_evidence_target(e)?.is_some()
+        || semantic_rejection(text)
+    {
         return Err(AppError::InvalidInput);
     }
     let (token, kind, token_start) = single_predicate(text).ok_or(AppError::InvalidInput)?;
     let token_end = token_start + token.len();
     let assertion = &text[..token_end];
-    if super::extract::rejection(assertion)
-        || [
-            "不",
-            "未",
-            "取消",
-            "改至",
-            "改到",
-            "调整",
-            "延期",
-            "和",
-            "及",
-            "同时",
-            "并且",
-            "似乎",
-            "大概",
-            "估计",
-            "传闻",
-            "示例",
-            "举例",
-            "例如",
-            "已完成",
-            "已经完成",
-            "已结束",
-            "已经结束",
-            "考试",
-            "补考",
-            "会议",
-            "开会",
-            "班会",
-            "活动",
-            "讲座",
-            "截止",
-        ]
-        .iter()
-        .any(|s| assertion.contains(s))
+    if [
+        "和", "及", "同时", "并且", "考试", "补考", "会议", "开会", "班会", "活动", "讲座", "截止",
+    ]
+    .iter()
+    .any(|s| assertion.contains(s))
         || assertion
             .chars()
             .any(|c| ['；', ';', '\n', '。', '?', '？'].contains(&c))

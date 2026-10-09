@@ -2336,3 +2336,119 @@ fn n7_fix1_plain_literal_affirmative_control() {
         assert_eq!(f.events()[0].time_precision, Precision::Exact);
     }
 }
+
+fn n7_fix2_location_batches(
+    f: &Fixture,
+    m: &MessageEnvelope,
+    location: &str,
+) -> (ExtractBatch, ExtractBatch) {
+    use shixu_core::notifications::{
+        consent::{ConsentStore, ModelConsent},
+        model::{ModelRequest, ModelService, ModelTransport},
+    };
+    // Obtain the canonical N7 candidate identity without the location tail,
+    // then present the complete actual source and faithful model fields to
+    // calendar directly. This path must not rely on dispatch rejecting first.
+    let mut clean = m.clone();
+    clean.text = m.text.split('，').next().unwrap().into();
+    let mut direct = n7_model(f, &clean);
+    assert_eq!(direct.candidates.len(), 1);
+    let candidate = &mut direct.candidates[0];
+    candidate.time =
+        shixu_core::notifications::time::parse_time(&m.text, m.sent_at, &f.config.timezone)
+            .unwrap();
+    candidate.location = Some(location.into());
+    candidate.evidence = vec![n7_fix1_body(m)];
+    direct.part_results = f.batch(m, &[]).part_results;
+    struct Fake(Candidate);
+    impl ModelTransport for Fake {
+        fn send(&self, _: &ModelRequest) -> AppResult<String> {
+            Ok(serde_json::to_string(&vec![self.0.clone()]).unwrap())
+        }
+    }
+    let fake = Fake(direct.candidates[0].clone());
+    let consent = ConsentStore::new(ModelConsent {
+        enabled: true,
+        provider_id: Some("synthetic".into()),
+        allowed_group_ids: vec!["g1".into()],
+        allow_attachment_text: false,
+        revision: 1,
+    });
+    let service = ModelService {
+        consent: &consent,
+        transport: &fake,
+    };
+    let dispatched = service
+        .dispatch(service.prepare(m, &[], &[], &f.config).unwrap())
+        .unwrap()
+        .batch;
+    (direct, dispatched)
+}
+#[test]
+fn n7_fix2_semantic_location_qualifiers_block_dispatch_and_durable_calendar() {
+    let mut unexpected = vec![];
+    for qualifier in [
+        "只是示例",
+        "仅举例",
+        "例如",
+        "似乎",
+        "大概",
+        "估计",
+        "传闻",
+        "已完成",
+        "已经完成",
+        "已结束",
+        "已经结束",
+    ] {
+        let f = Fixture::new();
+        let location = format!("A301{qualifier}");
+        let m = f.msg(
+            &format!("2026年10月12日9:00高数测验，地点：{location}"),
+            1791504000000,
+            None,
+        );
+        let (direct, dispatched) = n7_fix2_location_batches(&f, &m, &location);
+        let applied = f.service().apply_model(direct);
+        if applied != Err(AppError::InvalidInput) || !f.events().is_empty() {
+            unexpected.push(format!("durable {qualifier}: {applied:?}"));
+        }
+        if !dispatched.candidates.is_empty() {
+            unexpected.push(format!(
+                "dispatch {qualifier}: accepted {}",
+                dispatched.candidates.len()
+            ));
+        }
+        f.service().apply_model(dispatched).unwrap();
+    }
+    assert!(unexpected.is_empty(), "{}", unexpected.join("; "));
+}
+#[test]
+fn n7_fix2_plain_locations_keep_exact_and_unknown_dates() {
+    for (date, precision, expected_date) in [
+        ("2026年10月12日9:00", Precision::Exact, Some("2026-10-12")),
+        ("10月12日9:00", Precision::UnknownDate, None),
+    ] {
+        for location in ["A301", "协和楼A301"] {
+            let f = Fixture::new();
+            let m = f.msg(
+                &format!("{date}高数测验，地点：{location}"),
+                1791504000000,
+                None,
+            );
+            let (direct, dispatched) = n7_fix2_location_batches(&f, &m, location);
+            assert_eq!(direct.candidates.len(), 1);
+            assert_eq!(dispatched.candidates, direct.candidates);
+            assert_eq!(f.service().apply_model(direct).unwrap().created, 1);
+            assert_eq!(f.service().apply_model(dispatched).unwrap().created, 0);
+            let events = f.events();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].location.as_deref(), Some(location));
+            assert_eq!(events[0].time_precision, precision);
+            assert_eq!(events[0].local_date.as_deref(), expected_date);
+            if precision == Precision::UnknownDate {
+                assert!(events[0].start_at.is_none());
+                assert!(events[0].end_at.is_none());
+            }
+        }
+    }
+}
