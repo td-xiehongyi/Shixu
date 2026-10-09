@@ -87,6 +87,14 @@ impl From<&VaultRecord> for VaultSummary {
 }
 
 /// Internal command: secrets cannot accidentally be logged or serialized.
+/// ```compile_fail
+/// use shixu_core::contracts::vault::VaultMutation;
+/// fn log_mutation(mutation: &VaultMutation) { println!("{:?}", mutation); }
+/// ```
+/// ```compile_fail
+/// use shixu_core::contracts::vault::VaultMutation;
+/// fn send_mutation(mutation: &VaultMutation) { let _ = serde_json::to_string(mutation); }
+/// ```
 pub enum VaultMutation {
     Create {
         channel: String,

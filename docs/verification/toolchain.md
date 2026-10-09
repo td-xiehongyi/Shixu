@@ -79,3 +79,16 @@ Direct dependency declarations use exact versions: serde 1.0.229 (derive), uuid 
 Final F0 results: **22/22 contract integration tests and 5/5 compile-fail doctests pass**. Both workspace crates build in the full suite; the native crate has no integration implementation/tests yet. Formatting and strict clippy passed. No tests were ignored. The contract suite requires no QQ or KeePassXC installation, no `.env`, and no credentials.
 
 Implementation evidence, red/green runs and self-review notes are in the controller's ignored `.superpowers/sdd/shixu-v0.1/task-F0-report.md`. Windows/QQ/password-engine gates remain unexecuted and must not be inferred from this Linux result.
+
+## V1 dependency update
+
+The F0 dependency table above is historical baseline evidence. V1 enabled `uuid/v4` for session ID generation; the current `Cargo.toml` and `Cargo.lock` are authoritative for the present dependency graph. Versions, licenses and upstream repositories for the V1 randomness dependency set are:
+
+| Package | Version | Declared license | Upstream repository |
+| --- | --- | --- | --- |
+| uuid | 1.27.0 | Apache-2.0 OR MIT | [uuid](https://github.com/uuid-rs/uuid) |
+| getrandom | 0.4.3 | MIT OR Apache-2.0 | [getrandom](https://github.com/rust-random/getrandom) |
+| libc | 0.2.190 | MIT OR Apache-2.0 | [libc](https://github.com/rust-lang/libc) |
+| r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | [r-efi](https://github.com/r-efi/r-efi) |
+
+These packages resolved from `registry+https://github.com/rust-lang/crates.io-index`. `r-efi` is a target-specific transitive dependency; this Linux verification does not test a Windows or EFI backend. This provenance note records declared metadata and does not imply a security audit.
