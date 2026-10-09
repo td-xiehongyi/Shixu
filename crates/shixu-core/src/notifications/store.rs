@@ -84,6 +84,12 @@ impl MessageStore {
         self.db.transaction(|tx| {
         let existing: Option<StoredMessage> = tx.query_row("SELECT revision,content_digest,payload,revoked FROM messages WHERE message_key=?1", [identity.key.to_string()], |r| Ok(StoredMessage {revision:r.get(0)?,sealed_digest:r.get(1)?,existing_payload:r.get(2)?,revoked:r.get(3)?})).optional().map_err(storage_error)?;
         if let Some(StoredMessage { revision, sealed_digest, existing_payload, revoked }) = existing {
+            // Stable native identity keeps its original source-time anchor, even
+            // when an edit arrives before calendar extraction or changes content.
+            if !identity.degraded && let Some(sealed)=&existing_payload {
+                let original:MessageEnvelope=self.db.unprotect(sealed)?;
+                if original.sent_at!=envelope.sent_at {return Ok(AppendOutcome::RevisionConflict)}
+            }
             let old_digest: Vec<u8> = self.db.unprotect(&sealed_digest)?;
             if old_digest == digest {
                 let trusted_revision = !identity.degraded &&
@@ -342,10 +348,15 @@ impl MessageStore {
             .checked_sub(super::retention::NON_EVENT_RETENTION_MILLIS)
             .ok_or(AppError::InvalidInput)?;
         self.db.transaction(|tx| {
-        tx.execute("DELETE FROM part_results WHERE message_key IN (SELECT message_key FROM messages WHERE payload IS NOT NULL AND processing_state='non_event' AND received_at<=?1)", [cutoff]).map_err(storage_error)?;
-        let removed = tx.execute("UPDATE messages SET payload=NULL WHERE payload IS NOT NULL AND processing_state='non_event' AND received_at<=?1", [cutoff]).map_err(storage_error)?;
-        Ok(removed as u64)
-    })
+            // Calendar batches contain a second protected copy of body/parser
+            // content. Expire all copies together, keeping linked source/history
+            // and suppression records regardless of their current classification.
+            let eligible="SELECT message_key FROM messages WHERE processing_state='non_event' AND received_at<=?1 AND NOT EXISTS(SELECT 1 FROM calendar_sources WHERE calendar_sources.message_key=messages.message_key)";
+            tx.execute(&format!("DELETE FROM calendar_batches WHERE message_key IN ({eligible})"),[cutoff]).map_err(storage_error)?;
+            tx.execute(&format!("DELETE FROM part_results WHERE message_key IN ({eligible})"),[cutoff]).map_err(storage_error)?;
+            let removed=tx.execute(&format!("UPDATE messages SET payload=NULL WHERE payload IS NOT NULL AND message_key IN ({eligible})"),[cutoff]).map_err(storage_error)?;
+            Ok(removed as u64)
+        })
     }
 }
 pub(crate) fn state_name(state: ProcessingState) -> &'static str {

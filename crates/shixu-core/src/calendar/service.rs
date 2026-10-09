@@ -1,6 +1,9 @@
 use super::{
     changes::*,
-    match_event::{message, validate, validate_time},
+    match_event::{
+        explicit_reference, extract_current, identifier, message, validate, validate_time,
+        without_reply_context,
+    },
 };
 use crate::{
     contracts::{AppResult, calendar::*, error::AppError, notification::*},
@@ -106,39 +109,204 @@ impl EventService {
         self.db.transaction(|tx| Ok(self.event(tx, id)?.origin))
     }
     pub fn apply(&self, batch: ExtractBatch) -> AppResult<ApplySummary> {
-        self.db.transaction(|tx|{
-  let(m,canonical)=validate(&self.db,tx,&batch)?;
-  let mut summary=ApplySummary{created:0,updated:0,cancelled:0,pending:0,conflicts:0,change_ids:vec![]};
-  if m.revoked {for mut s in self.sources_tx(tx)?.into_iter().filter(|s|s.message_key==m.message_key){s.outcome=SourceOutcome::Revoked;s.message_revision=m.revision;self.source(tx,&s)?;}tx.execute("UPDATE messages SET processing_state='source_revoked' WHERE message_key=?1",[m.message_key.to_string()]).map_err(storage_error)?;return Ok(summary)}
-  let previous=self.sources_tx(tx)?;
-  let ambiguous_edit=previous.iter().any(|p|p.message_key==m.message_key&&p.message_revision<m.revision&&p.candidate.action==CandidateAction::Create&&!batch.candidates.iter().any(|c|c.candidate_key==p.candidate.candidate_key));
-  for c in &batch.candidates {
-   if ambiguous_edit&&c.action==CandidateAction::Create&&!previous.iter().any(|p|p.candidate.candidate_key==c.candidate_key) {
-    self.source(tx,&EventSource{message_key:m.message_key,message_revision:m.revision,source_order:batch.source_order,source_id:m.source_id,account_id:m.account_id.clone(),group_id:m.group_id.clone(),candidate:c.clone(),event_id:None,outcome:SourceOutcome::Conflict})?;summary.conflicts+=1;
-   }else{self.apply_candidate(tx,&m,batch.source_order,c,&mut summary)?;}
-  }
-  // Retry explicitly linked notices when their original source event arrived later.
-  let pending:Vec<_>=self.sources_tx(tx)?.into_iter().filter(|s|s.outcome==SourceOutcome::Pending&&s.message_key!=m.message_key&&s.candidate.target_message_key==Some(m.message_key)).collect();
-  for mut s in pending {
-   let current=message(&self.db,tx,s.message_key)?;
-   let saved:Option<Vec<u8>>=tx.query_row("SELECT payload FROM calendar_batches WHERE message_key=?1",[s.message_key.to_string()],|r|r.get(0)).optional().map_err(storage_error)?;
-   let saved:Option<BatchRecord>=saved.map(|v|self.db.unprotect(&v)).transpose()?;
-   if current.revision==s.message_revision&&!current.revoked {
-    let valid=match saved.as_ref().map(|saved|validate(&self.db,tx,&saved.batch)) {
-     Some(Ok(_))=>true,Some(Err(AppError::InvalidInput|AppError::Conflict))|None=>false,Some(Err(error))=>return Err(error),
-    };
-    if valid {
-     self.apply_candidate(tx,&current,s.source_order,&s.candidate,&mut summary)?;
-    }else{s.outcome=SourceOutcome::Conflict;self.source(tx,&s)?;summary.conflicts+=1;}
-    self.refresh_state(tx,current.message_key)?;
-   }
-  }
-  let partial=canonical.part_results.iter().any(|p|p.status!=PartStatus::Success)||canonical.candidates.len()!=batch.candidates.len();
-  let incomplete=partial||canonical.candidates.len()!=batch.candidates.len();
-  tx.execute("INSERT INTO calendar_batches VALUES (?1,?2) ON CONFLICT(message_key) DO UPDATE SET payload=excluded.payload",params![m.message_key.to_string(),self.db.protect(&BatchRecord{batch:batch.clone(),incomplete})?]).map_err(storage_error)?;
-  self.refresh_state(tx,m.message_key)?;
-  Ok(summary)
- })
+        self.db.transaction(|tx| {
+            let (m, canonical) = validate(&self.db, tx, &batch)?;
+            let mut summary = ApplySummary {
+                created: 0,
+                updated: 0,
+                cancelled: 0,
+                pending: 0,
+                conflicts: 0,
+                change_ids: vec![],
+            };
+            if m.revoked {
+                for mut source in self
+                    .sources_tx(tx)?
+                    .into_iter()
+                    .filter(|s| s.message_key == m.message_key)
+                {
+                    source.outcome = SourceOutcome::Revoked;
+                    source.message_revision = m.revision;
+                    self.source(tx, &source)?;
+                }
+                tx.execute(
+                    "UPDATE messages SET processing_state='source_revoked' WHERE message_key=?1",
+                    [m.message_key.to_string()],
+                )
+                .map_err(storage_error)?;
+                return Ok(summary);
+            }
+            let previous = self.sources_tx(tx)?;
+            let ambiguous_edit = previous.iter().any(|p| {
+                p.message_key == m.message_key
+                    && p.message_revision < m.revision
+                    && p.candidate.action == CandidateAction::Create
+                    && !batch
+                        .candidates
+                        .iter()
+                        .any(|c| c.candidate_key == p.candidate.candidate_key)
+            });
+            for candidate in &batch.candidates {
+                if ambiguous_edit
+                    && candidate.action == CandidateAction::Create
+                    && !previous
+                        .iter()
+                        .any(|p| p.candidate.candidate_key == candidate.candidate_key)
+                {
+                    self.source(
+                        tx,
+                        &EventSource {
+                            message_key: m.message_key,
+                            message_revision: m.revision,
+                            source_order: batch.source_order,
+                            source_id: m.source_id,
+                            account_id: m.account_id.clone(),
+                            group_id: m.group_id.clone(),
+                            candidate: candidate.clone(),
+                            event_id: None,
+                            outcome: SourceOutcome::Conflict,
+                        },
+                    )?;
+                    summary.conflicts += 1;
+                } else {
+                    self.apply_candidate(tx, &m, batch.source_order, candidate, &mut summary)?;
+                }
+            }
+            // An omitted pending candidate is not authority to replay the old
+            // source interpretation when another message arrives later.
+            for mut source in previous.into_iter().filter(|s| {
+                s.message_key == m.message_key
+                    && s.outcome == SourceOutcome::Pending
+                    && !batch
+                        .candidates
+                        .iter()
+                        .any(|c| c.candidate_key == s.candidate.candidate_key)
+            }) {
+                source.outcome = SourceOutcome::Conflict;
+                self.source(tx, &source)?;
+                summary.conflicts += 1;
+            }
+            let incomplete = canonical
+                .part_results
+                .iter()
+                .any(|p| p.status != PartStatus::Success)
+                || canonical.candidates.len() != batch.candidates.len();
+            self.save_batch(
+                tx,
+                &BatchRecord {
+                    batch: batch.clone(),
+                    incomplete,
+                },
+            )?;
+            self.refresh_state(tx, m.message_key)?;
+            self.retry_pending(tx, &m, &mut summary)?;
+            Ok(summary)
+        })
+    }
+    fn save_batch(&self, tx: &Transaction<'_>, record: &BatchRecord) -> AppResult<()> {
+        tx.execute("INSERT INTO calendar_batches VALUES (?1,?2) ON CONFLICT(message_key) DO UPDATE SET payload=excluded.payload",
+            params![record.batch.message_key.to_string(),self.db.protect(record)?]).map_err(storage_error)?;
+        Ok(())
+    }
+    fn retry_pending(
+        &self,
+        tx: &Transaction<'_>,
+        arrived: &MessageEnvelope,
+        summary: &mut ApplySummary,
+    ) -> AppResult<()> {
+        let pending: Vec<_> = self
+            .sources_tx(tx)?
+            .into_iter()
+            .filter(|s| s.outcome == SourceOutcome::Pending && s.message_key != arrived.message_key)
+            .collect();
+        for mut source in pending {
+            let current = message(&self.db, tx, source.message_key)?;
+            // The persisted reply relationship survives extraction before the
+            // original message itself was available. Targetless snapshots do not.
+            if current.reply_to != Some(arrived.message_key)
+                && source.candidate.target_message_key != Some(arrived.message_key)
+            {
+                continue;
+            }
+            if current.revoked {
+                continue;
+            }
+            let saved: Option<Vec<u8>> = tx
+                .query_row(
+                    "SELECT payload FROM calendar_batches WHERE message_key=?1",
+                    [source.message_key.to_string()],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(storage_error)?;
+            let saved: Option<BatchRecord> = saved.map(|v| self.db.unprotect(&v)).transpose()?;
+            let Some(mut record) = saved else { continue };
+            if current.revision != record.batch.message_revision
+                || current.revision != source.message_revision
+            {
+                continue;
+            }
+            let recomputed = extract_current(&self.db, tx, source.message_key);
+            let fresh = match recomputed {
+                Ok((_, fresh)) => fresh,
+                Err(AppError::InvalidInput | AppError::Conflict) => {
+                    source.outcome = SourceOutcome::Conflict;
+                    self.source(tx, &source)?;
+                    summary.conflicts += 1;
+                    self.refresh_state(tx, current.message_key)?;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let supplied = record
+                .batch
+                .candidates
+                .iter()
+                .position(|c| c.candidate_key == source.candidate.candidate_key);
+            let grounded = fresh
+                .candidates
+                .iter()
+                .find(|c| c.candidate_key == source.candidate.candidate_key);
+            let accepted = match (supplied, grounded) {
+                (Some(index), Some(candidate)) => {
+                    let saved = &record.batch.candidates[index];
+                    if saved == candidate {
+                        Some((index, candidate.clone()))
+                    } else if saved.target_message_key.is_none()
+                        && candidate.target_message_key.is_some()
+                        && candidate.target_message_key == current.reply_to
+                    {
+                        let independent = without_reply_context(&current, &fresh)?;
+                        if independent.candidates.iter().any(|c| c == saved) {
+                            Some((index, candidate.clone()))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some((index, candidate)) = accepted {
+                // Apply this exact freshly grounded value, not source.candidate.
+                self.apply_candidate(tx, &current, fresh.source_order, &candidate, summary)?;
+                record.batch.candidates[index] = candidate;
+                record.batch.part_results = fresh.part_results.clone();
+                record.incomplete = fresh
+                    .part_results
+                    .iter()
+                    .any(|p| p.status != PartStatus::Success)
+                    || fresh.candidates.len() != record.batch.candidates.len();
+                self.save_batch(tx, &record)?;
+            } else {
+                source.outcome = SourceOutcome::Conflict;
+                self.source(tx, &source)?;
+                summary.conflicts += 1;
+            }
+            self.refresh_state(tx, current.message_key)?;
+        }
+        Ok(())
     }
     fn refresh_state(&self, tx: &Transaction<'_>, key: MessageKey) -> AppResult<()> {
         let payload: Option<Vec<u8>> = tx
@@ -164,7 +332,15 @@ impl EventService {
             }) {
             "pending"
         } else if record.batch.candidates.is_empty() {
-            "non_event"
+            if self
+                .sources_tx(tx)?
+                .iter()
+                .any(|source| source.message_key == key)
+            {
+                "pending"
+            } else {
+                "non_event"
+            }
         } else {
             "committed"
         };
@@ -200,7 +376,10 @@ impl EventService {
             )
             .map_err(storage_error)?;
         if let Some(p) = &prior {
-            if p.message_key != m.message_key || p.message_revision > m.revision {
+            if p.message_key != m.message_key
+                || p.message_revision > m.revision
+                || p.source_order != order
+            {
                 return Err(AppError::Conflict);
             }
             if p.message_revision == m.revision
@@ -229,6 +408,8 @@ impl EventService {
         }
         let event_id = if c.action == CandidateAction::Create {
             source.event_id
+        } else if c.target_message_key.is_none() && m.reply_to.is_none() {
+            self.explicit_target(tx, m, c)?
         } else {
             let matching: Vec<_> = self
                 .sources_tx(tx)?
@@ -380,6 +561,69 @@ impl EventService {
         }
         self.source(tx, &source)?;
         Ok(())
+    }
+    fn explicit_target(
+        &self,
+        tx: &Transaction<'_>,
+        m: &MessageEnvelope,
+        c: &Candidate,
+    ) -> AppResult<Option<EventId>> {
+        let Some(reference) = explicit_reference(c, m.sent_at)? else {
+            return Ok(None);
+        };
+        let mut originals = self.sources_tx(tx)?;
+        // Original-date proof survives later source edits. These protected
+        // immutable snapshots were grounded when the automatic change committed.
+        let mut stmt = tx
+            .prepare("SELECT payload FROM calendar_changes")
+            .map_err(storage_error)?;
+        for row in stmt
+            .query_map([], |r| r.get::<_, Vec<u8>>(0))
+            .map_err(storage_error)?
+        {
+            let change: EventChange = self.db.unprotect(&row.map_err(storage_error)?)?;
+            if let Some(source) = change.source {
+                originals.push(source)
+            }
+        }
+        let mut matching = std::collections::HashSet::new();
+        for original in originals {
+            if original.source_id != m.source_id
+                || original.account_id != m.account_id
+                || original.group_id != m.group_id
+                || original.candidate.action != CandidateAction::Create
+                || original.candidate.kind != c.kind
+                || original.candidate.time.local_date != reference.time.local_date
+                || reference
+                    .time
+                    .start_at
+                    .is_some_and(|start| original.candidate.time.start_at != Some(start))
+            {
+                continue;
+            }
+            let Some(id) = original.event_id else {
+                continue;
+            };
+            let same_namespace:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM messages AS original JOIN messages AS notice ON original.namespace=notice.namespace WHERE original.message_key=?1 AND notice.message_key=?2 AND original.revoked=0)",
+                params![original.message_key.to_string(),m.message_key.to_string()],|r|r.get(0)).map_err(storage_error)?;
+            if !same_namespace {
+                continue;
+            }
+            let identifiers: std::collections::HashSet<_> = original
+                .candidate
+                .evidence
+                .iter()
+                .filter_map(|e| identifier(&e.text))
+                .collect();
+            if identifiers.len() == 1 && identifiers.contains(&reference.identifier) {
+                matching.insert(id);
+            }
+        }
+        Ok(if matching.len() == 1 {
+            matching.into_iter().next()
+        } else {
+            None
+        })
     }
     pub fn query(&self, q: EventQuery) -> AppResult<Vec<CalendarEvent>> {
         for d in [&q.from_date, &q.through_date].into_iter().flatten() {

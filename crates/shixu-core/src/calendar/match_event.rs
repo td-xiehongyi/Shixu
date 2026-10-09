@@ -121,6 +121,18 @@ pub(crate) fn validate(
     {
         return Err(AppError::Conflict);
     }
+    let mut seen = tx
+        .prepare("SELECT payload FROM calendar_sources WHERE message_key=?1")
+        .map_err(storage_error)?;
+    for row in seen
+        .query_map([m.message_key.to_string()], |r| r.get::<_, Vec<u8>>(0))
+        .map_err(storage_error)?
+    {
+        let source: super::changes::EventSource = db.unprotect(&row.map_err(storage_error)?)?;
+        if source.source_order != batch.source_order {
+            return Err(AppError::Conflict);
+        }
+    }
     let binding: Option<(String, String, String,String)> = tx
         .query_row(
             "SELECT account_id,groups_json,timezone,adapter_type FROM source_bindings WHERE source_id=?1",
@@ -258,4 +270,143 @@ pub(crate) fn validate(
         }
     }
     Ok((m, canonical))
+}
+
+/// Recompute from current durable inputs under the caller's transaction. The
+/// empty header is internal; no supplied candidate or saved source is trusted.
+pub(crate) fn extract_current(
+    db: &Database,
+    tx: &Transaction<'_>,
+    key: MessageKey,
+) -> AppResult<(MessageEnvelope, ExtractBatch)> {
+    let m = message(db, tx, key)?;
+    let zone: String = tx
+        .query_row(
+            "SELECT timezone FROM source_bindings WHERE source_id=?1",
+            [m.source_id.to_string()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(storage_error)?
+        .ok_or(AppError::InvalidInput)?;
+    let header = ExtractBatch {
+        message_key: key,
+        message_revision: m.revision,
+        source_order: u64::try_from(m.sent_at).map_err(|_| AppError::InvalidInput)?,
+        candidates: vec![],
+        part_results: vec![],
+        extractor_version: format!("n6.rules.1;timezone={zone}"),
+    };
+    validate(db, tx, &header)
+}
+/// Proof of what an earlier targetless reply could establish independently.
+pub(crate) fn without_reply_context(
+    m: &MessageEnvelope,
+    current: &ExtractBatch,
+) -> AppResult<ExtractBatch> {
+    let blocks: Vec<_> = current
+        .part_results
+        .iter()
+        .filter(|p| p.part_id != body_part_id(m))
+        .flat_map(|p| p.blocks.clone())
+        .collect();
+    extract(
+        m,
+        &blocks,
+        &[],
+        current
+            .extractor_version
+            .strip_prefix("n6.rules.1;timezone=")
+            .ok_or(AppError::InvalidInput)?,
+    )
+}
+
+/// Explicit identifier grammar is bounded and exact; the surrounding Chinese
+/// subject is never a similarity key. A partial/oversized token fails closed.
+pub(crate) fn identifier(text: &str) -> Option<String> {
+    static GRAMMAR: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let grammar = GRAMMAR.get_or_init(|| {
+        regex::Regex::new(r"事件编号\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9_-]{0,63})")
+            .expect("static identifier grammar")
+    });
+    let captures: Vec<_> = grammar.captures_iter(text).collect();
+    if captures.len() != 1 {
+        return None;
+    }
+    let value = captures[0].get(1)?;
+    if text[value.end()..]
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return None;
+    }
+    Some(value.as_str().into())
+}
+pub(crate) struct ExplicitReference {
+    pub identifier: String,
+    pub time: TimeValue,
+}
+/// Prove the original date in the same grounded evidence block as an explicit
+/// identifier. The reschedule date is excluded before parsing the old date.
+pub(crate) fn explicit_reference(c: &Candidate, sent: i64) -> AppResult<Option<ExplicitReference>> {
+    static DATE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let date = DATE.get_or_init(|| {
+        regex::Regex::new(
+            r"[0-9]{4}年[0-9]{1,2}月[0-9]{1,2}[日号]|[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}",
+        )
+        .expect("static explicit date grammar")
+    });
+    let mut result: Option<ExplicitReference> = None;
+    for evidence in &c.evidence {
+        if context_evidence_target(evidence)?.is_some()
+            || evidence
+                .quality_flags
+                .iter()
+                .any(|f| *f != QualityFlag::UncertainDate)
+        {
+            continue;
+        }
+        let text = &evidence.text;
+        let original: Vec<_> = text.match_indices("原定").collect();
+        if original.len() != 1 {
+            continue;
+        }
+        let start = original[0].0 + "原定".len();
+        let changes: Vec<_> = ["改至", "改到", "调整至", "调整到", "延期至"]
+            .iter()
+            .flat_map(|marker| text.match_indices(marker).map(|(index, _)| index))
+            .collect();
+        let end = match c.action {
+            CandidateAction::Reschedule if changes.len() == 1 && changes[0] >= start => changes[0],
+            CandidateAction::Cancel if changes.is_empty() => text[start..]
+                .find("取消")
+                .map(|index| start + index)
+                .unwrap_or(text.len()),
+            _ => continue,
+        };
+        let old = &text[start..end];
+        let Some(id) = identifier(old) else { continue };
+        if !date.is_match(old) {
+            continue;
+        }
+        let time = crate::notifications::time::parse_time(old, sent, &c.time.timezone)?;
+        if time.local_date.is_none() {
+            continue;
+        }
+        if let Some(previous) = &result {
+            if previous.identifier != id
+                || previous.time.local_date != time.local_date
+                || previous.time.start_at != time.start_at
+            {
+                return Ok(None);
+            }
+        } else {
+            result = Some(ExplicitReference {
+                identifier: id,
+                time,
+            });
+        }
+    }
+    Ok(result)
 }

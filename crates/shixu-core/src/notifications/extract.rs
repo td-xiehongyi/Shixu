@@ -444,21 +444,32 @@ pub fn extract(
                 }),
                 ..body.clone()
             };
-            let original_candidates = from_block(
+            let original_candidates = match from_block(
                 original.message_key,
                 &original_block,
                 original.sent_at,
                 timezone,
-            )?;
-            if original_candidates.len() == 1
-                && subject(&original_candidates[0].title) == subject(&c.title)
-            {
+            ) {
+                Ok(candidates) => candidates,
+                // Ambiguous repeated subjects in referenced context cannot
+                // establish a target/year; retain the current notice unbound.
+                Err(AppError::Conflict) => continue,
+                Err(error) => return Err(error),
+            };
+            let matching: Vec<_> = original_candidates
+                .iter()
+                .filter(|original| {
+                    original.kind == c.kind && subject(&original.title) == subject(&c.title)
+                })
+                .collect();
+            if matching.len() == 1 {
+                let original_candidate = matching[0];
                 if c.action != CandidateAction::Create {
                     c.target_message_key = Some(original.message_key);
                 }
                 if c.action == CandidateAction::Create
                     && c.time.precision == Precision::UnknownDate
-                    && let Some(date) = &original_candidates[0].time.local_date
+                    && let Some(date) = &original_candidate.time.local_date
                     && inherit_year(&c.time.raw_time_text, &date[..4]).is_some()
                 {
                     deferred_context_year = true;
@@ -474,7 +485,7 @@ pub fn extract(
                             .iter()
                             .all(|f| *f == QualityFlag::UncertainDate)
                     })
-                    && let Some(date) = &original_candidates[0].time.local_date
+                    && let Some(date) = &original_candidate.time.local_date
                     && let Some(inherited) = inherit_year(&c.time.raw_time_text, &date[..4])
                 {
                     let mut inherited_time = parse_time(&inherited, envelope.sent_at, timezone)?;
@@ -486,7 +497,7 @@ pub fn extract(
                                 .quality_flags
                                 .retain(|flag| *flag != QualityFlag::UncertainDate);
                         }
-                        for mut evidence in original_candidates[0].evidence.clone() {
+                        for mut evidence in original_candidate.evidence.clone() {
                             evidence.engine_version =
                                 format!("{CONTEXT_ROLE_PREFIX}{}", original.message_key);
                             c.evidence.push(evidence);

@@ -1176,3 +1176,43 @@ fn review_schema3_upgrade_preserves_existing_retry_task() {
     assert!(q.claim(59_999, &l).unwrap().is_none());
     assert!(q.claim(60_000, &l).unwrap().is_some());
 }
+
+#[test]
+fn d1_review1_stable_native_edit_keeps_original_timestamp_and_cursor_after_reopen() {
+    let t = TempDir::new();
+    let s = store(&t);
+    let mut c = config();
+    c.capability_set.push(SourceCapability::Edits);
+    let mut original = message(&c);
+    original.sent_at = 123;
+    original.received_at = 124;
+    assert_eq!(
+        s.append_with_cursor(&c, original.clone(), "original-cursor")
+            .unwrap(),
+        AppendOutcome::Stored
+    );
+    let mut edited = original.clone();
+    edited.sent_at = 125;
+    edited.received_at = 126;
+    edited.revision = 2;
+    assert_eq!(
+        s.append_with_cursor(&c, edited, "wrong-cursor").unwrap(),
+        AppendOutcome::RevisionConflict
+    );
+    drop(s);
+    let reopened = store(&t);
+    let saved = reopened.pending(10).unwrap();
+    assert_eq!(saved[0].sent_at, 123);
+    assert_eq!(saved[0].revision, 1);
+    assert_eq!(
+        reopened.cursor(&c, "group-1").unwrap().as_deref(),
+        Some("original-cursor")
+    );
+    original.text = "synthetic edited body".into();
+    original.revision = 2;
+    assert_eq!(
+        reopened.append(&c, original).unwrap(),
+        AppendOutcome::Stored
+    );
+    assert_eq!(reopened.pending(10).unwrap()[0].sent_at, 123);
+}

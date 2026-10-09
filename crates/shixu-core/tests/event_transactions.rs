@@ -832,3 +832,600 @@ fn stored_late_attachment_cannot_replace_newer_reply_notice() {
     assert_eq!(f.service().apply(late).unwrap().conflicts, 1);
     assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-13"));
 }
+
+fn image_part(message: &MessageEnvelope) -> MessagePart {
+    MessagePart {
+        part_id: PartId::from_uuid(Uuid::new_v4()),
+        message_key: message.message_key,
+        kind: PartKind::Image,
+        source_file_ref: Some("synthetic-review-image".to_string().try_into().unwrap()),
+        original_name: None,
+        declared_type: None,
+        detected_type: None,
+        byte_size: None,
+        content_hash: None,
+        fetch_state: FetchState::Fetched,
+        parse_state: PartStatus::Success,
+        failure_code: None,
+        encrypted_blob_ref: None,
+        retained_until: None,
+    }
+}
+fn parser_block(part_id: PartId, text: &str) -> EvidenceBlock {
+    EvidenceBlock {
+        part_id,
+        page_or_sheet: None,
+        cell_range_or_bbox: Some(EvidenceLocation::BoundingBox {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        }),
+        text: text.into(),
+        method: Method::Ocr,
+        engine_version: "synthetic-review-parser".into(),
+        quality_flags: vec![],
+    }
+}
+fn save_parser(f: &Fixture, m: &MessageEnvelope, block: EvidenceBlock) {
+    MessageStore::new(f.db.clone())
+        .record_parts(
+            &m.message_key,
+            m.revision,
+            vec![PartResult {
+                part_id: block.part_id,
+                status: PartStatus::Success,
+                blocks: vec![block],
+                reason_code: None,
+            }],
+        )
+        .unwrap();
+}
+#[test]
+fn review1_f1_omitted_current_candidate_cannot_revive_stale_precise_notice() {
+    let f = Fixture::new();
+    let original = f.msg("2026年10月12日高数考试", 1791504000000, None);
+    let mut notice = f.msg(
+        "高数考试改至2026年10月13日",
+        original.sent_at + 1,
+        Some(original.message_key),
+    );
+    let part = image_part(&notice);
+    let id = part.part_id;
+    notice.parts.push(part);
+    notice.revision = 2;
+    let notice = f.persist(notice);
+    assert_eq!(
+        f.service()
+            .apply(f.batch(&notice, std::slice::from_ref(&original)))
+            .unwrap()
+            .pending,
+        1
+    );
+    let block = parser_block(id, "2026年10月14日高数考试改至2026年10月14日");
+    save_parser(&f, &notice, block.clone());
+    let mut omitted = extract(
+        &notice,
+        &[block],
+        std::slice::from_ref(&original),
+        &f.config.timezone,
+    )
+    .unwrap();
+    assert_eq!(omitted.candidates[0].time.precision, Precision::UnknownDate);
+    omitted.candidates.clear();
+    f.service().apply(omitted).unwrap();
+    let summary = f.service().apply(f.batch(&original, &[])).unwrap();
+    assert_eq!(summary.updated, 0);
+    assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-12"));
+    assert!(
+        f.service()
+            .notices()
+            .unwrap()
+            .iter()
+            .any(|s| s.outcome == shixu_core::calendar::changes::SourceOutcome::Conflict)
+    );
+}
+#[test]
+fn review1_f2_cleanup_removes_non_event_body_and_attachment_duplicates() {
+    let f = Fixture::new();
+    let mut m = f.msg("谢谢老师", 1791504000000, None);
+    let part = image_part(&m);
+    let id = part.part_id;
+    m.parts.push(part);
+    m.revision = 2;
+    let m = f.persist(m);
+    let block = parser_block(id, "谢谢老师");
+    save_parser(&f, &m, block.clone());
+    f.service()
+        .apply(extract(&m, &[block], &[], &f.config.timezone).unwrap())
+        .unwrap();
+    let store = MessageStore::new(f.db.clone());
+    let deadline = m.received_at + shixu_core::notifications::retention::NON_EVENT_RETENTION_MILLIS;
+    assert_eq!(store.cleanup(deadline - 1).unwrap(), 0);
+    assert_eq!(store.cleanup(deadline).unwrap(), 1);
+    let c = rusqlite::Connection::open(&f.path).unwrap();
+    assert!(
+        c.query_row::<bool, _, _>(
+            "SELECT payload IS NULL FROM messages WHERE message_key=?1",
+            [m.message_key.to_string()],
+            |r| r.get(0)
+        )
+        .unwrap()
+    );
+    for table in ["part_results", "calendar_batches"] {
+        assert_eq!(
+            c.query_row::<i64, _, _>(
+                &format!("SELECT count(*) FROM {table} WHERE message_key=?1"),
+                [m.message_key.to_string()],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+    let db = Arc::new(Database::open(&f.path, f.protector.clone()).unwrap());
+    assert_eq!(MessageStore::new(db).cleanup(deadline).unwrap(), 0);
+}
+#[test]
+fn review1_f2_linked_chat_edit_is_not_disposable_non_event() {
+    let f = Fixture::new();
+    let (original, s) = f.create();
+    f.service()
+        .undo(UndoRequest {
+            change_id: s.change_ids[0],
+            expected_revision: 1,
+        })
+        .unwrap();
+    let mut chat = original.clone();
+    chat.revision = 2;
+    chat.text = "谢谢老师".into();
+    let chat = f.persist(chat);
+    f.service().apply(f.batch(&chat, &[])).unwrap();
+    let c = rusqlite::Connection::open(&f.path).unwrap();
+    let state: String = c
+        .query_row(
+            "SELECT processing_state FROM messages WHERE message_key=?1",
+            [chat.message_key.to_string()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_ne!(state, "non_event");
+    assert_eq!(
+        MessageStore::new(f.db.clone())
+            .cleanup(
+                chat.received_at + shixu_core::notifications::retention::NON_EVENT_RETENTION_MILLIS
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(f.events()[0].status, EventStatus::Removed);
+    assert!(
+        f.service()
+            .history(&f.events()[0].event_id.to_string())
+            .unwrap()[0]
+            .undone
+    );
+    assert_eq!(
+        c.query_row::<i64, _, _>("SELECT count(*) FROM calendar_suppressions", [], |r| r
+            .get(0))
+            .unwrap(),
+        1
+    );
+}
+#[test]
+fn review1_f3_edit_cannot_change_original_anchor_before_first_apply_or_after_newer_reply() {
+    for apply_first in [false, true] {
+        let f = Fixture::new();
+        let original = f.msg("2026年10月12日高数考试", 1791504000000, None);
+        if apply_first {
+            f.service().apply(f.batch(&original, &[])).unwrap();
+            let n = f.msg(
+                "高数考试改至2026年10月13日",
+                original.sent_at + 1,
+                Some(original.message_key),
+            );
+            f.service()
+                .apply(f.batch(&n, std::slice::from_ref(&original)))
+                .unwrap();
+        }
+        let mut edit = original.clone();
+        edit.revision = 2;
+        edit.sent_at += 2;
+        edit.text = "2026年10月14日高数考试".into();
+        let store = MessageStore::new(f.db.clone());
+        assert_eq!(
+            store.append(&f.config, edit.clone()).unwrap(),
+            shixu_core::notifications::AppendOutcome::RevisionConflict
+        );
+        let persisted = f.persist(original.clone());
+        assert_eq!(persisted.sent_at, original.sent_at);
+        assert_eq!(persisted.revision, 1);
+        if apply_first {
+            assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-13"));
+        } else {
+            f.service().apply(f.batch(&persisted, &[])).unwrap();
+            assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-12"));
+        }
+    }
+}
+#[test]
+fn review1_f4_explicit_identifier_original_date_updates_unique_same_group_event() {
+    let f = Fixture::new();
+    let original = f.msg(
+        "2026年10月12日9:00事件编号MATH101高数考试",
+        1791504000000,
+        None,
+    );
+    f.service().apply(f.batch(&original, &[])).unwrap();
+    let n = f.msg(
+        "原定2026年10月12日9:00事件编号MATH101高数考试改至2026年10月13日10:00",
+        original.sent_at + 1,
+        None,
+    );
+    let s = f.service().apply(f.batch(&n, &[])).unwrap();
+    assert_eq!(s.updated, 1);
+    assert_eq!(s.pending, 0);
+    assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-13"));
+}
+#[test]
+fn review1_f5_actual_original_message_arrives_after_its_reply() {
+    let f = Fixture::new();
+    let seed = f.msg("synthetic template", 1791504000000, None);
+    let mut original = seed;
+    original.native_message_id = Uuid::new_v4().to_string();
+    original.text = "2026年10月12日高数考试".into();
+    original.message_key =
+        shixu_core::notifications::identity::message_identity(&f.config, &original)
+            .unwrap()
+            .key;
+    let n = f.msg(
+        "高数考试改至2026年10月13日",
+        original.sent_at + 1,
+        Some(original.message_key),
+    );
+    assert_eq!(f.service().apply(f.batch(&n, &[])).unwrap().pending, 1);
+    let original = f.persist(original);
+    let s = f.service().apply(f.batch(&original, &[])).unwrap();
+    assert_eq!(s.created, 1);
+    assert_eq!(s.updated, 1);
+    assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-13"));
+    assert_eq!(
+        f.service()
+            .notices()
+            .unwrap()
+            .iter()
+            .filter(|s| s.outcome == shixu_core::calendar::changes::SourceOutcome::Pending)
+            .count(),
+        0
+    );
+}
+#[test]
+fn review1_f6_reply_uniquely_matches_one_subject_in_multi_event_original() {
+    let f = Fixture::new();
+    let original = f.msg(
+        "2026年10月12日高数考试；2026年10月14日英语考试",
+        1791504000000,
+        None,
+    );
+    assert_eq!(
+        f.service().apply(f.batch(&original, &[])).unwrap().created,
+        2
+    );
+    let n = f.msg(
+        "高数考试改至2026年10月13日",
+        original.sent_at + 1,
+        Some(original.message_key),
+    );
+    let s = f.service().apply(f.batch(&n, &[original])).unwrap();
+    assert_eq!(s.updated, 1);
+    let e = f.events();
+    assert_eq!(
+        e.iter()
+            .find(|e| e.title == "高数考试")
+            .unwrap()
+            .local_date
+            .as_deref(),
+        Some("2026-10-13")
+    );
+    assert_eq!(
+        e.iter()
+            .find(|e| e.title == "英语考试")
+            .unwrap()
+            .local_date
+            .as_deref(),
+        Some("2026-10-14")
+    );
+}
+
+#[test]
+fn review1_f4_fallback_needs_unique_identifier_original_date_and_namespace() {
+    for (originals, notice, group) in [
+        (
+            vec![
+                "2026年10月12日事件编号MATH101高数考试",
+                "2026年10月12日事件编号MATH101高数考试",
+            ],
+            "原定2026年10月12日事件编号MATH101高数考试改至2026年10月13日",
+            "g1",
+        ),
+        (
+            vec!["2026年10月12日事件编号MATH101高数考试"],
+            "原定2026年10月12日事件编号OTHER高数考试改至2026年10月13日",
+            "g1",
+        ),
+        (
+            vec!["2026年10月12日事件编号MATH101高数考试"],
+            "事件编号MATH101高数考试改至2026年10月12日",
+            "g1",
+        ),
+        (
+            vec!["2026年10月12日事件编号MATH101高数考试"],
+            "原定2026年10月11日事件编号MATH101高数考试改至2026年10月12日",
+            "g1",
+        ),
+        (
+            vec!["2026年10月12日事件编号MATH101高数考试"],
+            "原定2026年10月12日事件编号MATH101高数考试改至2026年10月13日",
+            "g2",
+        ),
+        (
+            vec!["2026年10月12日事件编号MATH101高数考试"],
+            "原定10月12日事件编号MATH101高数考试改至2026年10月13日",
+            "g1",
+        ),
+    ] {
+        let f = Fixture::new();
+        for text in originals {
+            let m = f.msg(text, 1791504000000, None);
+            f.service().apply(f.batch(&m, &[])).unwrap();
+        }
+        let mut n = f.msg(notice, 1791504000001, None);
+        if group != "g1" {
+            n.group_id = group.into();
+            n.native_message_id = Uuid::new_v4().to_string();
+            n = f.persist(n);
+        }
+        let summary = f.service().apply(f.batch(&n, &[])).unwrap();
+        assert_eq!(summary.updated, 0, "{notice}");
+        assert_eq!(summary.pending, 1, "{notice}");
+        assert!(
+            f.events()
+                .iter()
+                .all(|e| e.local_date.as_deref() == Some("2026-10-12"))
+        );
+    }
+}
+#[test]
+fn review1_f4_fallback_retains_order_overrides_and_cancellation_guards() {
+    for mode in ["override", "equal", "cancel", "unclear"] {
+        let f = Fixture::new();
+        let original = f.msg("2026年10月12日事件编号MATH101高数考试", 1791504000000, None);
+        f.service().apply(f.batch(&original, &[])).unwrap();
+        let e = f.events().remove(0);
+        if mode == "override" {
+            let mut p = patch(&e);
+            p.time = Some(
+                shixu_core::notifications::time::parse_time(
+                    "2026年10月20日",
+                    original.sent_at,
+                    "Asia/Shanghai",
+                )
+                .unwrap(),
+            );
+            f.service()
+                .edit(&e.event_id.to_string(), e.revision, p)
+                .unwrap();
+        }
+        let text = match mode {
+            "cancel" => "取消原定2026年10月12日事件编号MATH101高数考试",
+            "unclear" => "原定2026年10月12日事件编号MATH101高数考试改至近期",
+            _ => "原定2026年10月12日事件编号MATH101高数考试改至2026年10月13日",
+        };
+        let n = f.msg(text, original.sent_at + i64::from(mode != "equal"), None);
+        let s = f.service().apply(f.batch(&n, &[])).unwrap();
+        match mode {
+            "override" => {
+                assert_eq!(s.conflicts, 1);
+                assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-20"));
+            }
+            "equal" => {
+                assert_eq!(s.conflicts, 1);
+                assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-12"));
+            }
+            "cancel" => {
+                assert_eq!(s.cancelled, 1);
+                assert_eq!(f.events()[0].status, EventStatus::Cancelled);
+            }
+            _ => {
+                assert_eq!(s.updated, 1);
+                assert_eq!(f.events()[0].time_precision, Precision::UnknownDate);
+            }
+        }
+    }
+}
+
+#[test]
+fn review1_f1_retry_uses_newly_supplied_uncertain_candidate_after_parser_conflict() {
+    let f = Fixture::new();
+    let original = f.msg("2026年10月12日高数考试", 1791504000000, None);
+    let mut notice = f.msg(
+        "高数考试改至2026年10月13日",
+        original.sent_at + 1,
+        Some(original.message_key),
+    );
+    let part = image_part(&notice);
+    let id = part.part_id;
+    notice.parts.push(part);
+    notice.revision = 2;
+    let notice = f.persist(notice);
+    f.service()
+        .apply(f.batch(&notice, std::slice::from_ref(&original)))
+        .unwrap();
+    let block = parser_block(id, "2026年10月14日高数考试改至2026年10月14日");
+    save_parser(&f, &notice, block.clone());
+    let current = extract(
+        &notice,
+        &[block],
+        std::slice::from_ref(&original),
+        &f.config.timezone,
+    )
+    .unwrap();
+    assert_eq!(current.candidates[0].time.precision, Precision::UnknownDate);
+    f.service().apply(current).unwrap();
+    f.service().apply(f.batch(&original, &[])).unwrap();
+    assert_eq!(f.events()[0].time_precision, Precision::UnknownDate);
+    assert_eq!(f.events()[0].local_date, None);
+    let source = f
+        .service()
+        .notices()
+        .unwrap()
+        .into_iter()
+        .find(|s| s.message_key == notice.message_key)
+        .unwrap();
+    assert_eq!(source.candidate.time.precision, Precision::UnknownDate);
+}
+#[test]
+fn review1_f2_cleanup_failure_rolls_back_all_content_copies_and_preserves_linked_history() {
+    let f = Fixture::new();
+    let mut m = f.msg("谢谢老师", 1791504000000, None);
+    let part = image_part(&m);
+    let id = part.part_id;
+    m.parts.push(part);
+    m.revision = 2;
+    let m = f.persist(m);
+    let block = parser_block(id, "谢谢老师");
+    save_parser(&f, &m, block.clone());
+    f.service()
+        .apply(extract(&m, &[block], &[], &f.config.timezone).unwrap())
+        .unwrap();
+    let c = rusqlite::Connection::open(&f.path).unwrap();
+    c.execute_batch("CREATE TRIGGER fail_cleanup AFTER UPDATE OF payload ON messages BEGIN SELECT RAISE(ABORT,'synthetic fault'); END;").unwrap();
+    assert!(
+        MessageStore::new(f.db.clone())
+            .cleanup(
+                m.received_at + shixu_core::notifications::retention::NON_EVENT_RETENTION_MILLIS
+            )
+            .is_err()
+    );
+    for table in ["calendar_batches", "part_results"] {
+        assert_eq!(
+            c.query_row::<i64, _, _>(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap(),
+            1
+        );
+    }
+    assert!(
+        c.query_row::<bool, _, _>("SELECT payload IS NOT NULL FROM messages", [], |r| r.get(0))
+            .unwrap()
+    );
+    c.execute_batch("DROP TRIGGER fail_cleanup;").unwrap();
+    let linked = Fixture::new();
+    let (original, _) = linked.create();
+    let conn = rusqlite::Connection::open(&linked.path).unwrap();
+    conn.execute(
+        "UPDATE messages SET processing_state='non_event' WHERE message_key=?1",
+        [original.message_key.to_string()],
+    )
+    .unwrap();
+    assert_eq!(
+        MessageStore::new(linked.db.clone())
+            .cleanup(
+                original.received_at
+                    + shixu_core::notifications::retention::NON_EVENT_RETENTION_MILLIS
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(linked.events().len(), 1);
+    assert_eq!(
+        linked
+            .service()
+            .history(&linked.events()[0].event_id.to_string())
+            .unwrap()
+            .len(),
+        1
+    );
+}
+#[test]
+fn review1_f5_later_original_proves_year_without_reusing_targetless_time() {
+    let f = Fixture::new();
+    let mut original = f.msg("synthetic template", 1791504000000, None);
+    original.native_message_id = Uuid::new_v4().to_string();
+    original.text = "2026年10月12日高数考试".into();
+    original.message_key =
+        shixu_core::notifications::identity::message_identity(&f.config, &original)
+            .unwrap()
+            .key;
+    let notice = f.msg(
+        "高数考试改至10月13日9:00",
+        original.sent_at + 1,
+        Some(original.message_key),
+    );
+    let old = f.batch(&notice, &[]);
+    assert_eq!(old.candidates[0].time.precision, Precision::UnknownDate);
+    assert_eq!(old.candidates[0].target_message_key, None);
+    f.service().apply(old).unwrap();
+    let original = f.persist(original);
+    assert_eq!(
+        f.service().apply(f.batch(&original, &[])).unwrap().updated,
+        1
+    );
+    assert_eq!(f.events()[0].time_precision, Precision::Exact);
+    assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-13"));
+    let source = f
+        .service()
+        .notices()
+        .unwrap()
+        .into_iter()
+        .find(|s| s.message_key == notice.message_key)
+        .unwrap();
+    assert_eq!(
+        source.candidate.target_message_key,
+        Some(original.message_key)
+    );
+    assert_eq!(source.candidate.evidence.len(), 2);
+}
+#[test]
+fn review1_f6_duplicate_subject_reply_remains_pending() {
+    let f = Fixture::new();
+    let original = f.msg(
+        "2026年10月12日高数考试；2026年10月14日高数考试",
+        1791504000000,
+        None,
+    );
+    let n = f.msg(
+        "高数考试改至2026年10月13日",
+        original.sent_at + 1,
+        Some(original.message_key),
+    );
+    let s = f.service().apply(f.batch(&n, &[original])).unwrap();
+    assert_eq!(s.pending, 1);
+    assert_eq!(s.updated, 0);
+    assert!(f.events().is_empty());
+}
+
+#[test]
+fn review1_f2_cleanup_also_expires_batches_left_by_previous_schema5_cleanup() {
+    let f = Fixture::new();
+    let m = f.msg("谢谢老师", 1791504000000, None);
+    f.service().apply(f.batch(&m, &[])).unwrap();
+    let c = rusqlite::Connection::open(&f.path).unwrap();
+    c.execute(
+        "UPDATE messages SET payload=NULL WHERE message_key=?1",
+        [m.message_key.to_string()],
+    )
+    .unwrap();
+    assert_eq!(
+        MessageStore::new(f.db.clone())
+            .cleanup(
+                m.received_at + shixu_core::notifications::retention::NON_EVENT_RETENTION_MILLIS
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        c.query_row::<i64, _, _>("SELECT count(*) FROM calendar_batches", [], |r| r.get(0))
+            .unwrap(),
+        0
+    );
+}

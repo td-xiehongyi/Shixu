@@ -1096,3 +1096,43 @@ fn review2_conjunction_within_explicit_location_remains_metadata() {
             .all(|p| p.status == PartStatus::Success)
     );
 }
+
+#[test]
+fn d1_review1_unique_subject_in_multi_event_reply_establishes_target_and_year() {
+    let original = envelope("2026年10月12日高数考试；2027年10月14日英语考试");
+    let mut notice = envelope("高数考试改至10月13日9:00");
+    notice.message_key = MessageKey::from_uuid(Uuid::from_u128(90));
+    notice.reply_to = Some(original.message_key);
+    let result = extract(
+        &notice,
+        &[],
+        std::slice::from_ref(&original),
+        "Asia/Shanghai",
+    )
+    .unwrap();
+    assert_eq!(
+        result.candidates[0].target_message_key,
+        Some(original.message_key)
+    );
+    assert_eq!(
+        result.candidates[0].time.local_date.as_deref(),
+        Some("2026-10-13")
+    );
+    let historical = result.candidates[0].evidence.last().unwrap();
+    assert_eq!(historical.text, "2026年10月12日高数考试");
+    assert_eq!(
+        shixu_core::notifications::extract::context_evidence_target(historical).unwrap(),
+        Some(original.message_key)
+    );
+}
+#[test]
+fn d1_review1_duplicate_subject_context_stays_unbound_without_year_inheritance() {
+    let original = envelope("2026年10月12日高数考试；2027年10月14日高数考试");
+    let mut notice = envelope("高数考试改至10月13日9:00");
+    notice.message_key = MessageKey::from_uuid(Uuid::from_u128(90));
+    notice.reply_to = Some(original.message_key);
+    let result = extract(&notice, &[], &[original], "Asia/Shanghai").unwrap();
+    assert_eq!(result.candidates[0].target_message_key, None);
+    assert_eq!(result.candidates[0].time.precision, Precision::UnknownDate);
+    assert_eq!(result.candidates[0].evidence.len(), 1);
+}
