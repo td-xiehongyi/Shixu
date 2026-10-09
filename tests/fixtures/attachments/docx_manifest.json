@@ -1,0 +1,333 @@
+{
+  "schema_version": 1,
+  "synthetic_only": true,
+  "fixtures": [
+    {
+      "id": "paragraph",
+      "file": "office/paragraph.docx",
+      "sha256": "bc5ad8b0224d6167c8f31b7f52f794c4e320e2468d2dabaa75f5b83c9c504eb9",
+      "expected_extracted": "2026年10月12日9:00高数考试",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "Success",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "split_runs",
+      "file": "office/split_runs.docx",
+      "sha256": "8c9d93a4d764e87bc998db393763159e2b7509e1c4a63fc92373e322373abeef",
+      "expected_extracted": "2026年10月12日9:00高数考试",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "Success",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "table",
+      "file": "office/table.docx",
+      "sha256": "815fba054e24e06ac82c45037010c781ca0ab013b3f20987cf085a20d0213bee",
+      "expected_extracted": "2026年10月12日9:00高数考试\n教室A301",
+      "source_gold": "2026年10月12日9:00高数考试\n教室A301",
+      "status": "Success",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "unicode",
+      "file": "office/unicode.docx",
+      "sha256": "cf2bd227bdc819408f6eac1e6c22b6df0ea465adc1d6f34bed708b419c51ce23",
+      "expected_extracted": "欢迎学生，资料📚",
+      "source_gold": "欢迎学生，资料📚",
+      "status": "Success",
+      "events": []
+    },
+    {
+      "id": "escaped",
+      "file": "office/escaped.docx",
+      "sha256": "2131f1769ccf4746dd14040a80d2c2709c192822ec027d803566895b21a950c5",
+      "expected_extracted": "A&B <通知>",
+      "source_gold": "A&B <通知>",
+      "status": "Success",
+      "events": []
+    },
+    {
+      "id": "yearless",
+      "file": "office/yearless.docx",
+      "sha256": "edc85b95f0ce8268bdcedb59535d278abc5e7d75532e34945c762eccbc8cc095",
+      "expected_extracted": "10月12日高数考试",
+      "source_gold": "10月12日高数考试",
+      "status": "Success",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "UnknownDate",
+          "local_date": null
+        }
+      ]
+    },
+    {
+      "id": "dateonly",
+      "file": "office/dateonly.docx",
+      "sha256": "87b5d064166aa2ab4ffc98f571df6d163fdea6547893e592de96b4c8e8d50062",
+      "expected_extracted": "2026年10月12日高数考试",
+      "source_gold": "2026年10月12日高数考试",
+      "status": "Success",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "DateOnly",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "negated",
+      "file": "office/negated.docx",
+      "sha256": "254a44c6afc4677e92bcbc9013ad896eb10d038111620cd441a71139c93adc23",
+      "expected_extracted": "明天不考试",
+      "source_gold": "明天不考试",
+      "status": "Success",
+      "events": []
+    },
+    {
+      "id": "question",
+      "file": "office/question.docx",
+      "sha256": "f33db54d1b3b184792ab548b2711b4c4300523b5adf7911bf6658f6c52b48a6d",
+      "expected_extracted": "明天考试吗？",
+      "source_gold": "明天考试吗？",
+      "status": "Success",
+      "events": []
+    },
+    {
+      "id": "tracked",
+      "file": "office/tracked.docx",
+      "sha256": "81a731309970164adbf457c50fe7569806e45ff7bea6e5b8b0454d36fee624a8",
+      "expected_extracted": "正常",
+      "source_gold": "正常\n2026年10月12日9:00高数考试",
+      "status": "PartialParse",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "deleted",
+      "file": "office/deleted.docx",
+      "sha256": "c30ff0481c4e3fa9ebc1106e7c1179edcf305efd5f559db5739c6150dde828a9",
+      "expected_extracted": "正常",
+      "source_gold": "正常\n旧内容",
+      "status": "PartialParse",
+      "events": []
+    },
+    {
+      "id": "floating",
+      "file": "office/floating.docx",
+      "sha256": "dd7d9c20359c2ae50ad4896e8428c3f92f76ea24bfd675aecd42b98862edd059",
+      "expected_extracted": "正常",
+      "source_gold": "正常\n2026年10月12日9:00高数考试",
+      "status": "PartialParse",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "textbox",
+      "file": "office/textbox.docx",
+      "sha256": "7f0270ee9a7e8c93760f7e49133d55788909d21e82ca56793ead7c04a415840b",
+      "expected_extracted": "正常",
+      "source_gold": "正常\n2026年10月12日9:00高数考试",
+      "status": "PartialParse",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "columns",
+      "file": "office/columns.docx",
+      "sha256": "e1538195daaf01a01840dd3b04e8b215ab270b6ae59dbe21a5b4d48adbe3d2d9",
+      "expected_extracted": "2026年10月12日9:00高数考试",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "PartialParse",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "object",
+      "file": "office/object.docx",
+      "sha256": "d01b2f325d40a63a2452e9adbcc116a2ddfd31fa1d215d1d063a44c5966e8836",
+      "expected_extracted": "正常",
+      "source_gold": "正常",
+      "status": "PartialParse",
+      "events": []
+    },
+    {
+      "id": "field",
+      "file": "office/field.docx",
+      "sha256": "80e06d528755de1be0f8bdde0959a8e694a4dda2b3ed71f798a1a5a58e86078e",
+      "expected_extracted": "正常",
+      "source_gold": "正常",
+      "status": "PartialParse",
+      "events": []
+    },
+    {
+      "id": "hyperlink",
+      "file": "office/hyperlink.docx",
+      "sha256": "ee05647a605759ef5310603d2e752f72fcbbd405fef841d35016b026e50a5834",
+      "expected_extracted": "2026年10月12日9:00高数考试",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "PartialParse",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "wrong_namespace",
+      "file": "office/wrong_namespace.docx",
+      "sha256": "380edcab0bf0efa5fa3424c5602fe0197c33a987499587d6c5cb191fcf7c454a",
+      "expected_extracted": "",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "Unsupported",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "dtd",
+      "file": "office/dtd.docx",
+      "sha256": "e4ca673fa3ae75095b77b9a90a7863f8aac0cd11aa6a5328fc99c15917713c06",
+      "expected_extracted": "",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "Unsupported",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "macro",
+      "file": "office/macro.docx",
+      "sha256": "1b5658883f846414df9c03014feae747a992062ca1082039f212025951baf8ab",
+      "expected_extracted": "",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "Unsupported",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "renamed_prefix",
+      "file": "office/renamed_prefix.docx",
+      "sha256": "c1020b1f9146633e8615971444f3e672a763e440f5d38964006ee965af758e4f",
+      "expected_extracted": "2026年10月12日9:00高数考试",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "Success",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "headers_omitted",
+      "file": "office/headers_omitted.docx",
+      "sha256": "e65174214f662daba5041db3cdb961fbf088ab402f3951754faaa973d0cafbb4",
+      "expected_extracted": "正文",
+      "source_gold": "正文\n2026年10月12日9:00高数考试",
+      "status": "PartialParse",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "line_break",
+      "file": "office/line_break.docx",
+      "sha256": "6f9c5b93f05cbeaf83d3be93372b124a9261800437ddac496fa10fd12e960811",
+      "expected_extracted": "第一行\n第二行",
+      "source_gold": "第一行\n第二行",
+      "status": "Success",
+      "events": []
+    },
+    {
+      "id": "nested_table",
+      "file": "office/nested_table.docx",
+      "sha256": "294ec149821e0cf248618c7aceb207bb70072c4380e972eb2e255fcc20b828c3",
+      "expected_extracted": "",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "PartialParse",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    },
+    {
+      "id": "hidden_run",
+      "file": "office/hidden_run.docx",
+      "sha256": "3991599a99f90b85ce9cbbad51f5cb5fccb9a081766f5fd4e04c327a80baa8d5",
+      "expected_extracted": "",
+      "source_gold": "2026年10月12日9:00高数考试",
+      "status": "PartialParse",
+      "events": [
+        {
+          "title": "高数考试",
+          "precision": "Exact",
+          "local_date": "2026-10-12"
+        }
+      ]
+    }
+  ]
+}

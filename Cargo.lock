@@ -2930,10 +2930,12 @@ dependencies = [
 name = "shixu-native"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "crc32fast",
  "flate2",
  "image",
  "libloading 0.8.9",
+ "quick-xml",
  "rusqlite",
  "serde",
  "serde_json",
