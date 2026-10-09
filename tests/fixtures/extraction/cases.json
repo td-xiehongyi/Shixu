@@ -1,0 +1,919 @@
+[
+  {
+    "id": "text-001",
+    "text": "2026年10月12日09:00—11:00高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-002",
+    "text": "明天9:00英语考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-003",
+    "text": "后天14:30物理补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-004",
+    "text": "今天18:00班级会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-005",
+    "text": "2026-10-12 09:20计算机考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-006",
+    "text": "2026/10/13 15:45研究生报名截止",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-007",
+    "text": "项目提交截止2026年10月14日23:59",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-008",
+    "text": "通知：明天上午9点高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-009",
+    "text": "后天下午2点30分学术讲座",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-010",
+    "text": "今天晚上7点社团活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-011",
+    "text": "明天中午12点班会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-012",
+    "text": "2026年10月12日（周一）10:00化学考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-013",
+    "text": "明天09：30实验考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-014",
+    "text": "2026年10月15号08:15晨间会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-015",
+    "text": "明天8点半英语补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-016",
+    "text": "后天16时30分材料提交截止",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-017",
+    "text": "今天10:00至12:00部门会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-018",
+    "text": "明天14:00到16:30实践活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-019",
+    "text": "2026-12-31 23:00—23:30跨年活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-020",
+    "text": "2028年2月29日09:00闰日会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-021",
+    "text": "高数考试定于2026年10月12日09:00",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-022",
+    "text": "报名截止时间：明天17:00",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-023",
+    "text": "志愿活动将于2026年10月18日08:00举行",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-024",
+    "text": "班级会议：今天19:00，地点：A301",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-025",
+    "text": "明天9:00高数考试，地点：教学楼B101",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-026",
+    "text": "后天20:00线上会议，地点：线上会议室",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-027",
+    "text": "2026年11月1日07:00运动活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-028",
+    "text": "2026-10-20 13:00—14:00安全讲座",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-029",
+    "text": "明天下午4时班会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-030",
+    "text": "今天早上7点签到活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-031",
+    "text": "2026年10月21日凌晨1点报名截止",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-032",
+    "text": "后天10:00~11:30组织会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "exact_clock_range"
+  },
+  {
+    "id": "text-033",
+    "text": "2026年10月12日高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-034",
+    "text": "明天上午考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-035",
+    "text": "后天下午英语补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-036",
+    "text": "今天班级会议，具体钟点待定",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-037",
+    "text": "2026年10月19日报名截止",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-038",
+    "text": "论文提交截止2026-10-20",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-039",
+    "text": "明天全天社团活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-040",
+    "text": "2026年10月25日整天志愿活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-041",
+    "text": "明天9:00左右高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-042",
+    "text": "后天下午约2点讲座",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-043",
+    "text": "2026-10-12全天会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-044",
+    "text": "今天晚上社团活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-045",
+    "text": "明天开会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-046",
+    "text": "后天报名截止，钟点稍后通知",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-047",
+    "text": "2026年10月12日（星期一）物理考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-048",
+    "text": "明天上午大约9点英语考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-049",
+    "text": "2026/10/16读书活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-050",
+    "text": "今天提交截止",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-051",
+    "text": "后天新生班会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-052",
+    "text": "2026年10月30日毕业讲座",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "known_date_all_day_approximate"
+  },
+  {
+    "id": "text-053",
+    "text": "10月12日考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-054",
+    "text": "下周考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-055",
+    "text": "近期补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-056",
+    "text": "周三考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-057",
+    "text": "2026年10月12日（周二）高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-058",
+    "text": "2026年2月30日化学考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-059",
+    "text": "2026-10-12 11:00—09:00物理考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-060",
+    "text": "2026-10-12 25:00计算机考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-061",
+    "text": "2026-10-12或2026-10-13英语考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-062",
+    "text": "高数考试时间另行通知",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-063",
+    "text": "补考安排见附件",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-064",
+    "text": "报名截止时间待定",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-065",
+    "text": "项目提交截止尚待通知",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-066",
+    "text": "班级会议时间待通知",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-067",
+    "text": "社团活动日期另行通知",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-068",
+    "text": "周五学术讲座",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-069",
+    "text": "下个月部门会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-070",
+    "text": "10月20日14:00报名截止",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-071",
+    "text": "明天或后天班会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-072",
+    "text": "2026-04-31英语补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-073",
+    "text": "2027年2月29日考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-074",
+    "text": "2026-10-12 09:99高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-075",
+    "text": "下周二上午会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-076",
+    "text": "本周实践活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-077",
+    "text": "月底论文提交截止",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-078",
+    "text": "期末高数考试安排公布，日期待通知",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-079",
+    "text": "近期班会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-080",
+    "text": "周日全天活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "incomplete_invalid_ambiguous_time"
+  },
+  {
+    "id": "text-081",
+    "text": "明天考试吗？",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-082",
+    "text": "明天不考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-083",
+    "text": "听说明天考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-084",
+    "text": "可能明天会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-085",
+    "text": "我今天考完试了",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-086",
+    "text": "考试真难",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-087",
+    "text": "请问报名截止了吗",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-088",
+    "text": "是否2026年10月12日考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-089",
+    "text": "如果明天考试就早点睡",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-090",
+    "text": "据说后天英语补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-091",
+    "text": "2026年10月12日不举行活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-092",
+    "text": "明天不用提交报名材料",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-093",
+    "text": "会议已经结束",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-094",
+    "text": "报名截止了吗？",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-095",
+    "text": "希望明天没有考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-096",
+    "text": "今天不召开会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-097",
+    "text": "开会真累",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-098",
+    "text": "我想参加活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-099",
+    "text": "讲座是否免费？",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-100",
+    "text": "不确定周三班会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-101",
+    "text": "也许近期补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-102",
+    "text": "尚未安排考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-103",
+    "text": "2026年10月12日并非报名截止",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-104",
+    "text": "明天不需要开会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-105",
+    "text": "物理考试怎么复习",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-106",
+    "text": "会议室怎么走",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-107",
+    "text": "今天天气很好",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-108",
+    "text": "谢谢老师",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "negation_question_uncertain_chat"
+  },
+  {
+    "id": "text-109",
+    "text": "原定高数考试改至明天9:00",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-110",
+    "text": "英语补考改到后天14:00",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-111",
+    "text": "部门会议调整至2026年10月20日",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-112",
+    "text": "社团活动延期至下周",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-113",
+    "text": "高数考试改至近期",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-114",
+    "text": "报名截止调整到明天17:00",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-115",
+    "text": "取消明天高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-116",
+    "text": "原定班级会议取消",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-117",
+    "text": "取消2026年10月12日社团活动",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-118",
+    "text": "英语补考取消",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "change_notice"
+  },
+  {
+    "id": "text-119",
+    "text": "明天9:00高数考试；后天14:00班级会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "multiple_clause"
+  },
+  {
+    "id": "text-120",
+    "text": "明天报名截止\n后天英语补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "multiple_clause"
+  },
+  {
+    "id": "text-121",
+    "text": "2026年10月12日活动。2026年10月13日会议",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "multiple_clause"
+  },
+  {
+    "id": "text-122",
+    "text": "明天高数考试；后天物理考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "multiple_clause"
+  },
+  {
+    "id": "text-123",
+    "text": "近期补考；明天班会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "multiple_clause"
+  },
+  {
+    "id": "text-124",
+    "text": "明天不考试；后天学术讲座",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "multiple_clause"
+  },
+  {
+    "id": "text-125",
+    "text": "二〇二六年十月十二日9:00高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "unsupported_positive"
+  },
+  {
+    "id": "text-126",
+    "text": "2026年十月十二日14:00英语考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "unsupported_positive"
+  },
+  {
+    "id": "text-127",
+    "text": "2026年10月12日数学测验",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "unsupported_positive"
+  },
+  {
+    "id": "text-128",
+    "text": "明天研究生答辩",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1791532800000,
+    "category": "unsupported_positive"
+  },
+  {
+    "id": "text-129",
+    "text": "明天高数考试",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1709107200000,
+    "category": "calendar_boundary"
+  },
+  {
+    "id": "text-130",
+    "text": "明天英语补考",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1798704000000,
+    "category": "calendar_boundary"
+  },
+  {
+    "id": "text-131",
+    "text": "明天班会",
+    "timezone": "Asia/Shanghai",
+    "sent_at": 1777536000000,
+    "category": "calendar_boundary"
+  }
+]

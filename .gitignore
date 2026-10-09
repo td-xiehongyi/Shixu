@@ -91,3 +91,9 @@
 !/tests/fixtures/attachments/unsupported.gif
 !/tests/fixtures/attachments/wide.png
 !/tests/fixtures/attachments/xfa.pdf
+
+# N6 reviewed synthetic text-quality labels only.
+!/tests/fixtures/extraction/
+/tests/fixtures/extraction/*
+!/tests/fixtures/extraction/cases.json
+!/tests/fixtures/extraction/expected.json

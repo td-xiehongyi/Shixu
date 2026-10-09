@@ -1,0 +1,1732 @@
+[
+  {
+    "id": "text-001",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": 1791774000000,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-002",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791594000000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-003",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-11",
+        "start_at": 1791700200000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-004",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-09",
+        "start_at": 1791540000000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-005",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791768000000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-006",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "exact",
+        "local_date": "2026-10-13",
+        "start_at": 1791877500000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-007",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "exact",
+        "local_date": "2026-10-14",
+        "start_at": 1791993540000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-008",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791594000000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-009",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "exact",
+        "local_date": "2026-10-11",
+        "start_at": 1791700200000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-010",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "exact",
+        "local_date": "2026-10-09",
+        "start_at": 1791543600000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-011",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791604800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-012",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791770400000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-013",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791595800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-014",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-15",
+        "start_at": 1792023300000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-015",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791592200000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-016",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "exact",
+        "local_date": "2026-10-11",
+        "start_at": 1791707400000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-017",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-09",
+        "start_at": 1791511200000,
+        "end_at": 1791518400000,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-018",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791612000000,
+        "end_at": 1791621000000,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-019",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "exact",
+        "local_date": "2026-12-31",
+        "start_at": 1798729200000,
+        "end_at": 1798731000000,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-020",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2028-02-29",
+        "start_at": 1835398800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-021",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-022",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791622800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-023",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "exact",
+        "local_date": "2026-10-18",
+        "start_at": 1792281600000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-024",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-09",
+        "start_at": 1791543600000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-025",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791594000000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-026",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-11",
+        "start_at": 1791720000000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-027",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "exact",
+        "local_date": "2026-11-01",
+        "start_at": 1793487600000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-028",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "exact",
+        "local_date": "2026-10-20",
+        "start_at": 1792472400000,
+        "end_at": 1792476000000,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-029",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791619200000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-030",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "exact",
+        "local_date": "2026-10-09",
+        "start_at": 1791500400000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-031",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "exact",
+        "local_date": "2026-10-21",
+        "start_at": 1792515600000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-032",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-11",
+        "start_at": 1791684000000,
+        "end_at": 1791689400000,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-033",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-034",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-035",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-11",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-036",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "date_only",
+        "local_date": "2026-10-09",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-037",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "date_only",
+        "local_date": "2026-10-19",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-038",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "date_only",
+        "local_date": "2026-10-20",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-039",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "explicit_all_day",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-040",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "explicit_all_day",
+        "local_date": "2026-10-25",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-041",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-042",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-11",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-043",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "explicit_all_day",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-044",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-09",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-045",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-046",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "date_only",
+        "local_date": "2026-10-11",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-047",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-048",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-049",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-16",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-050",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "date_only",
+        "local_date": "2026-10-09",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-051",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "date_only",
+        "local_date": "2026-10-11",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-052",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-30",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-053",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-054",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-055",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-056",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-057",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-058",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-059",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-060",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-061",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-062",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-063",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-064",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-065",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-066",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-067",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-068",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-069",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-070",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-071",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-072",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-073",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-074",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-075",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-076",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-077",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-078",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-079",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-080",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-081",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-082",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-083",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-084",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-085",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-086",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-087",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-088",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-089",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-090",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-091",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-092",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-093",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-094",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-095",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-096",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-097",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-098",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-099",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-100",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-101",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-102",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-103",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-104",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-105",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-106",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-107",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-108",
+    "events": [],
+    "unsupported": null
+  },
+  {
+    "id": "text-109",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791594000000,
+        "end_at": null,
+        "action": "reschedule",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-110",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-11",
+        "start_at": 1791698400000,
+        "end_at": null,
+        "action": "reschedule",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-111",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "date_only",
+        "local_date": "2026-10-20",
+        "start_at": null,
+        "end_at": null,
+        "action": "reschedule",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-112",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "reschedule",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-113",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "reschedule",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-114",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791622800000,
+        "end_at": null,
+        "action": "reschedule",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-115",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "cancel",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-116",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "cancel",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-117",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "cancel",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-118",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "cancel",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-119",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-10",
+        "start_at": 1791594000000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "meeting",
+        "precision": "exact",
+        "local_date": "2026-10-11",
+        "start_at": 1791698400000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-120",
+    "events": [
+      {
+        "kind": "deadline",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-11",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-121",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "meeting",
+        "precision": "date_only",
+        "local_date": "2026-10-13",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-122",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-11",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-123",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "unknown_date",
+        "local_date": null,
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      },
+      {
+        "kind": "meeting",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-124",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-11",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-125",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791766800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "Chinese numeral date grammar"
+  },
+  {
+    "id": "text-126",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "exact",
+        "local_date": "2026-10-12",
+        "start_at": 1791784800000,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "Chinese numeral month/day"
+  },
+  {
+    "id": "text-127",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2026-10-12",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "event synonym 测验"
+  },
+  {
+    "id": "text-128",
+    "events": [
+      {
+        "kind": "activity",
+        "precision": "date_only",
+        "local_date": "2026-10-10",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": "event synonym 答辩"
+  },
+  {
+    "id": "text-129",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2024-02-29",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-130",
+    "events": [
+      {
+        "kind": "exam",
+        "precision": "date_only",
+        "local_date": "2027-01-01",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  },
+  {
+    "id": "text-131",
+    "events": [
+      {
+        "kind": "meeting",
+        "precision": "date_only",
+        "local_date": "2026-05-01",
+        "start_at": null,
+        "end_at": null,
+        "action": "create",
+        "target": false
+      }
+    ],
+    "unsupported": null
+  }
+]
