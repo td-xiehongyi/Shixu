@@ -557,3 +557,202 @@ fn degraded_attachment_identity_survives_regenerated_local_keys() {
         message_identity(&c, &b).unwrap().key
     );
 }
+
+fn message_with_two_parts(c: &SourceConfig) -> MessageEnvelope {
+    let mut m = message(c);
+    for name in ["part-A", "part-B"] {
+        m.parts.push(MessagePart {
+            part_id: PartId::from_uuid(Uuid::new_v4()),
+            message_key: m.message_key,
+            kind: PartKind::Image,
+            source_file_ref: Some(name.to_string().try_into().unwrap()),
+            original_name: Some(format!("{name}.png")),
+            declared_type: None,
+            detected_type: None,
+            byte_size: None,
+            content_hash: None,
+            fetch_state: FetchState::Pending,
+            parse_state: PartStatus::PendingDownload,
+            failure_code: None,
+            encrypted_blob_ref: None,
+            retained_until: None,
+        });
+    }
+    m
+}
+fn successful_result(part_id: PartId, text: &str) -> PartResult {
+    PartResult {
+        part_id,
+        status: PartStatus::Success,
+        blocks: vec![EvidenceBlock {
+            part_id,
+            page_or_sheet: None,
+            cell_range_or_bbox: None,
+            text: text.into(),
+            method: Method::Ocr,
+            engine_version: "synthetic".into(),
+            quality_flags: vec![],
+        }],
+        reason_code: None,
+    }
+}
+fn saved_message_and_results(t: &TempDir) -> (MessageEnvelope, i64, Vec<PartResult>) {
+    let conn = rusqlite::Connection::open(t.db()).unwrap();
+    let payload: Vec<u8> = conn
+        .query_row("SELECT payload FROM messages", [], |r| r.get(0))
+        .unwrap();
+    let message =
+        serde_json::from_slice(&TestProtector::new(42).unprotect(&payload).unwrap()).unwrap();
+    let (revision, payload): (i64, Vec<u8>) = conn
+        .query_row("SELECT revision,payload FROM part_results", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    let results =
+        serde_json::from_slice(&TestProtector::new(42).unprotect(&payload).unwrap()).unwrap();
+    (message, revision, results)
+}
+
+#[test]
+fn equal_content_advances_trusted_revision_and_rejects_stale_edit_after_reopen() {
+    let t = TempDir::new();
+    let mut c = config();
+    c.capability_set.push(SourceCapability::Edits);
+    let m = message_with_two_parts(&c);
+    let key = message_identity(&c, &m).unwrap().key;
+    let s = store(&t);
+    s.append(&c, m.clone()).unwrap();
+    let evidence = successful_result(m.parts[0].part_id, "synthetic original evidence");
+    s.record_parts(&key, vec![evidence.clone()]).unwrap();
+    let mut newer = m.clone();
+    newer.revision = 3;
+    newer.received_at = 123;
+    assert_eq!(s.append(&c, newer).unwrap(), AppendOutcome::Duplicate);
+    drop(s);
+    let s = store(&t);
+    let mut stale = m;
+    stale.revision = 2;
+    stale.text = "synthetic stale content B".into();
+    assert_eq!(
+        s.append(&c, stale.clone()).unwrap(),
+        AppendOutcome::RevisionConflict
+    );
+    let p = s.pending(10).unwrap();
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0].revision, 3);
+    assert_ne!(p[0].text, stale.text);
+    assert_eq!(p[0].received_at, 0);
+    let (saved, revision, results) = saved_message_and_results(&t);
+    assert_eq!(saved.revision, 3);
+    assert_eq!(revision, 3);
+    assert_eq!(results, vec![evidence]);
+    assert_eq!(saved.parts[0].parse_state, PartStatus::Success);
+    assert_eq!(count(&t, "messages"), 1);
+}
+#[test]
+fn equal_content_revision_advance_preserves_completed_state_and_cleaned_tombstone() {
+    for cleaned in [false, true] {
+        let t = TempDir::new();
+        let mut c = config();
+        c.capability_set.push(SourceCapability::Edits);
+        let s = store(&t);
+        let m = message(&c);
+        let key = message_identity(&c, &m).unwrap().key;
+        s.append(&c, m.clone()).unwrap();
+        let conn = rusqlite::Connection::open(t.db()).unwrap();
+        let state = if cleaned { "non_event" } else { "committed" };
+        conn.execute("UPDATE messages SET processing_state=?1", [state])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO suppressions VALUES (?1,'user_removed')",
+            [key.to_string()],
+        )
+        .unwrap();
+        if cleaned {
+            assert_eq!(s.cleanup(NON_EVENT_RETENTION_MILLIS).unwrap(), 1);
+        }
+        let mut newer = m.clone();
+        newer.revision = 3;
+        assert_eq!(s.append(&c, newer).unwrap(), AppendOutcome::Duplicate);
+        drop(s);
+        let s = store(&t);
+        let mut stale = m;
+        stale.revision = 2;
+        stale.text = "synthetic stale B".into();
+        assert_eq!(
+            s.append(&c, stale).unwrap(),
+            AppendOutcome::RevisionConflict
+        );
+        let (revision, saved_state, missing): (i64, String, bool) = conn
+            .query_row(
+                "SELECT revision,processing_state,payload IS NULL FROM messages",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(revision, 3);
+        assert_eq!(saved_state, state);
+        assert_eq!(missing, cleaned);
+        assert!(s.pending(10).unwrap().is_empty());
+        assert_eq!(count(&t, "messages"), 1);
+        assert_eq!(count(&t, "suppressions"), 1);
+    }
+}
+#[test]
+fn independent_part_results_merge_retries_and_empty_updates_across_reopen() {
+    let t = TempDir::new();
+    let c = config();
+    let m = message_with_two_parts(&c);
+    let key = message_identity(&c, &m).unwrap().key;
+    let s = store(&t);
+    s.append(&c, m.clone()).unwrap();
+    let a = successful_result(m.parts[0].part_id, "synthetic evidence A");
+    let b = successful_result(m.parts[1].part_id, "synthetic evidence B");
+    s.record_parts(&key, vec![a.clone()]).unwrap();
+    s.record_parts(&key, vec![b.clone()]).unwrap();
+    drop(s);
+    let s = store(&t);
+    let (envelope, revision, results) = saved_message_and_results(&t);
+    assert_eq!(revision, 1);
+    assert_eq!(results, vec![a.clone(), b.clone()]);
+    assert!(
+        envelope
+            .parts
+            .iter()
+            .all(|p| p.parse_state == PartStatus::Success)
+    );
+    let mut retry_a = a;
+    retry_a.status = PartStatus::PartialParse;
+    retry_a.reason_code = Some(PartReason::PartialSource);
+    retry_a.blocks[0].text = "synthetic retry evidence A".into();
+    s.record_parts(&key, vec![retry_a.clone()]).unwrap();
+    s.record_parts(&key, vec![]).unwrap();
+    drop(s);
+    let reopened = store(&t);
+    let (envelope, revision, results) = saved_message_and_results(&t);
+    assert_eq!(revision, 1);
+    assert_eq!(results, vec![retry_a.clone(), b]);
+    assert_eq!(envelope.parts[0].parse_state, retry_a.status);
+    assert_eq!(envelope.parts[0].failure_code, retry_a.reason_code);
+    assert_eq!(envelope.parts[1].parse_state, PartStatus::Success);
+    assert_eq!(envelope.parts[1].failure_code, None);
+    assert_eq!(reopened.pending(1).unwrap()[0].parts, envelope.parts);
+}
+#[test]
+fn empty_part_update_does_not_erase_saved_evidence() {
+    let t = TempDir::new();
+    let c = config();
+    let m = message_with_two_parts(&c);
+    let key = message_identity(&c, &m).unwrap().key;
+    let s = store(&t);
+    s.append(&c, m.clone()).unwrap();
+    let result = successful_result(m.parts[0].part_id, "synthetic retained evidence");
+    s.record_parts(&key, vec![result.clone()]).unwrap();
+    s.record_parts(&key, vec![]).unwrap();
+    drop(s);
+    let _reopened = store(&t);
+    let (envelope, _, results) = saved_message_and_results(&t);
+    assert_eq!(results, vec![result]);
+    assert_eq!(envelope.parts[0].parse_state, PartStatus::Success);
+    assert_eq!(envelope.parts[1].parse_state, PartStatus::PendingDownload);
+}

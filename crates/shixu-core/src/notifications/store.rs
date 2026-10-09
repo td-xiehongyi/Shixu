@@ -12,6 +12,12 @@ pub enum AppendOutcome {
     RevisionConflict,
     Filtered,
 }
+struct StoredMessage {
+    revision: i64,
+    sealed_digest: Vec<u8>,
+    existing_payload: Option<Vec<u8>>,
+    revoked: bool,
+}
 pub struct MessageStore {
     db: Arc<Database>,
 }
@@ -68,12 +74,29 @@ impl MessageStore {
         }
         let digest = content_digest(&envelope)?;
         self.db.transaction(|tx| {
-        let existing: Option<(i64,Vec<u8>,bool,bool)> = tx.query_row("SELECT revision,content_digest,payload IS NULL,revoked FROM messages WHERE message_key=?1", [identity.key.to_string()], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage_error)?;
-        if let Some((revision, sealed_digest, cleaned, revoked)) = existing {
+        let existing: Option<StoredMessage> = tx.query_row("SELECT revision,content_digest,payload,revoked FROM messages WHERE message_key=?1", [identity.key.to_string()], |r| Ok(StoredMessage {revision:r.get(0)?,sealed_digest:r.get(1)?,existing_payload:r.get(2)?,revoked:r.get(3)?})).optional().map_err(storage_error)?;
+        if let Some(StoredMessage { revision, sealed_digest, existing_payload, revoked }) = existing {
             let old_digest: Vec<u8> = self.db.unprotect(&sealed_digest)?;
-            if old_digest == digest { return Ok(AppendOutcome::Duplicate); }
+            if old_digest == digest {
+                let trusted_revision = !identity.degraded &&
+                    (config.capability_set.contains(&SourceCapability::Edits) ||
+                     (revoked && config.capability_set.contains(&SourceCapability::Revocations)));
+                if trusted_revision && envelope.revision > revision as u64 {
+                    // Same logical content: advance the durable revision without
+                    // requeueing work, replacing local part state, or reviving a
+                    // cleaned payload. Result evidence follows identical content.
+                    let payload = existing_payload.as_ref().map(|sealed| {
+                        let mut stored: MessageEnvelope = self.db.unprotect(sealed)?;
+                        stored.revision = envelope.revision;
+                        self.db.protect(&stored)
+                    }).transpose()?;
+                    tx.execute("UPDATE messages SET revision=?2,payload=?3 WHERE message_key=?1", params![identity.key.to_string(),envelope.revision as i64,payload]).map_err(storage_error)?;
+                    tx.execute("UPDATE part_results SET revision=?2 WHERE message_key=?1 AND revision=?3", params![identity.key.to_string(),envelope.revision as i64,revision]).map_err(storage_error)?;
+                }
+                return Ok(AppendOutcome::Duplicate);
+            }
             let allowed_change = if envelope.revoked && !revoked { config.capability_set.contains(&SourceCapability::Revocations) } else { config.capability_set.contains(&SourceCapability::Edits) && !revoked };
-            if cleaned || identity.degraded || envelope.revision <= revision as u64 || !allowed_change { return Ok(AppendOutcome::RevisionConflict); }
+            if existing_payload.is_none() || identity.degraded || envelope.revision <= revision as u64 || !allowed_change { return Ok(AppendOutcome::RevisionConflict); }
         }
         envelope.processing_state = if envelope.revoked { ProcessingState::SourceRevoked } else { ProcessingState::Persisted };
         let payload = self.db.protect(&envelope)?; let protected_digest = self.db.protect(&digest)?;
@@ -97,11 +120,24 @@ impl MessageStore {
         self.db.transaction(|tx| {
         let data: Option<Vec<u8>> = tx.query_row("SELECT payload FROM messages WHERE message_key=?1 AND payload IS NOT NULL AND revoked=0", [key.to_string()], |r| r.get(0)).optional().map_err(storage_error)?;
         let mut envelope: MessageEnvelope = self.db.unprotect(&data.ok_or(AppError::Conflict)?)?;
+        if parts.is_empty() { return Ok(()); }
+        let previous: Option<(i64,Vec<u8>)> = tx.query_row("SELECT revision,payload FROM part_results WHERE message_key=?1", [key.to_string()], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage_error)?;
+        let mut merged = std::collections::HashMap::new();
+        if let Some((revision, sealed)) = previous
+            && revision == envelope.revision as i64 {
+            let previous: Vec<PartResult> = self.db.unprotect(&sealed)?;
+            for result in previous { merged.insert(result.part_id, result); }
+        }
         let mut seen = std::collections::HashSet::new();
         for result in &parts { if !seen.insert(result.part_id) || result.blocks.iter().any(|b| b.part_id != result.part_id) { return Err(AppError::InvalidInput); }
             let part = envelope.parts.iter_mut().find(|p| p.part_id == result.part_id).ok_or(AppError::InvalidInput)?; part.parse_state = result.status; part.failure_code = result.reason_code;
         }
-        let payload = self.db.protect(&parts)?; let message_payload = self.db.protect(&envelope)?;
+        for result in parts { merged.insert(result.part_id, result); }
+        // Preserve omitted current-revision evidence; retries replace only their
+        // own part result. Envelope order makes persistence deterministic.
+        let results: Vec<PartResult> = envelope.parts.iter().filter_map(|part| merged.remove(&part.part_id)).collect();
+        if !merged.is_empty() { return Err(AppError::ParseFailed); }
+        let payload = self.db.protect(&results)?; let message_payload = self.db.protect(&envelope)?;
         tx.execute("INSERT INTO part_results VALUES (?1,?2,?3) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,payload=excluded.payload", params![key.to_string(),envelope.revision as i64,payload]).map_err(storage_error)?;
         tx.execute("UPDATE messages SET payload=?2 WHERE message_key=?1", params![key.to_string(),message_payload]).map_err(storage_error)?;
         Ok(())
