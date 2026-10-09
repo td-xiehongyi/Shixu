@@ -4,6 +4,9 @@
   "local": true,
   "windows": ["vault"],
   "permissions": [
+    "allow-vault-create",
+    "allow-vault-change-master",
+    "allow-vault-copy",
     "allow-vault-unlock",
     "allow-vault-list",
     "allow-vault-apply",

@@ -252,6 +252,23 @@ async function call(
     );
   }
 }
+/** Best-effort erasure of owned numeric IPC arrays after native settlement. */
+async function secretCall(
+  invoke: Invoke,
+  command: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  try {
+    return await call(invoke, command, payload);
+  } finally {
+    const wipe = (value: unknown): void => {
+      if (Array.isArray(value)) value.fill(0);
+      else if (value && typeof value === "object")
+        Object.values(value).forEach(wipe);
+    };
+    wipe(payload);
+  }
+}
 export function createMainBridge(invoke: Invoke) {
   return Object.freeze({
     async calendarQuery(value: EventQuery): Promise<CalendarEvent[]> {
@@ -294,8 +311,32 @@ export function createMainBridge(invoke: Invoke) {
 /** Only import/use this in the isolated vault view. Native policy remains the authority. */
 export function createVaultBridge(invoke: Invoke) {
   return Object.freeze({
+    async vaultCreate(master: Uint8Array): Promise<void> {
+      await secretCall(invoke, "vault_create", {
+        master: Array.from(bytes(master)),
+      });
+    },
+    async vaultChangeMaster(
+      current: Uint8Array,
+      next: Uint8Array,
+    ): Promise<void> {
+      await secretCall(invoke, "vault_change_master", {
+        current: Array.from(bytes(current)),
+        next: Array.from(bytes(next)),
+      });
+    },
+    async vaultCopy(
+      entryId: string,
+      field: "account" | "password",
+    ): Promise<void> {
+      id(entryId);
+      enumeration(field, ["account", "password"]);
+      await call(invoke, "vault_copy", { id: entryId, field });
+    },
     async vaultUnlock(master: Uint8Array): Promise<void> {
-      await call(invoke, "vault_unlock", { master: Array.from(bytes(master)) });
+      await secretCall(invoke, "vault_unlock", {
+        master: Array.from(bytes(master)),
+      });
     },
     async vaultList(): Promise<VaultSummary[]> {
       const r = await call(invoke, "vault_list");
@@ -304,7 +345,7 @@ export function createVaultBridge(invoke: Invoke) {
     },
     async vaultApply(value: VaultMutation): Promise<VaultSummary> {
       return decodeSummary(
-        await call(invoke, "vault_apply", { mutation: mutation(value) }),
+        await secretCall(invoke, "vault_apply", { mutation: mutation(value) }),
       );
     },
     async vaultReveal(entryId: string): Promise<Uint8Array> {

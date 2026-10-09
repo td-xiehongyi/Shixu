@@ -170,3 +170,56 @@ fn safe_millis_and_all_summary_counts_stay_lossless() {
     let core: CalendarEvent = serde_json::from_value(value).unwrap();
     assert!(matches!(wire::event(core), Err(AppError::InvalidInput)));
 }
+
+#[test]
+fn d3_commands_are_vault_only_bounded_and_honestly_unsupported() {
+    use shixu_desktop::{app_state::AppState, commands::dispatch};
+    let vault = CallingContext {
+        label: "vault",
+        origin: MAIN.origin,
+    };
+    for (command, payload) in [
+        ("vault_create", serde_json::json!({"master":[7,8]})),
+        (
+            "vault_change_master",
+            serde_json::json!({"current":[7],"next":[8]}),
+        ),
+        (
+            "vault_copy",
+            serde_json::json!({"id":"11111111-1111-4111-8111-111111111111","field":"password"}),
+        ),
+    ] {
+        assert_eq!(
+            dispatch(&MAIN, command, payload.clone(), &AppState::default()),
+            Err(AppError::AuthFailed)
+        );
+        assert_eq!(
+            dispatch(&vault, command, payload, &AppState::default()),
+            Err(AppError::Unsupported)
+        );
+    }
+    for (command, payload) in [
+        ("vault_create", serde_json::json!({"master":[]})),
+        (
+            "vault_change_master",
+            serde_json::json!({"current":[7],"next":[]}),
+        ),
+        (
+            "vault_copy",
+            serde_json::json!({"id":"11111111-1111-4111-8111-111111111111","field":"url"}),
+        ),
+        (
+            "vault_copy",
+            serde_json::json!({"id":"../secret","field":"account"}),
+        ),
+        (
+            "vault_copy",
+            serde_json::json!({"id":"11111111-1111-4111-8111-111111111111","field":"password","session":"forged"}),
+        ),
+    ] {
+        assert_eq!(
+            dispatch(&vault, command, payload, &AppState::default()),
+            Err(AppError::InvalidInput)
+        );
+    }
+}

@@ -4,3 +4,4 @@ pub mod attachments;
 pub mod model_client;
 pub mod protection;
 pub mod qq;
+pub mod vault;

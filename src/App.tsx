@@ -11,6 +11,7 @@ import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { Sparkle } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { UsersThree } from "@phosphor-icons/react/dist/csr/UsersThree";
 import { mainBridge } from "./contracts/bridge";
+import { VaultWindow } from "./features/vault/VaultWindow";
 import type { CalendarEvent } from "./contracts/domain";
 
 type Module = "calendar" | "notifications" | "vault" | "settings";
@@ -111,17 +112,6 @@ function NotificationPanel({
     </aside>
   );
 }
-function VaultView() {
-  return (
-    <main className="vault-window">
-      <LockSimple size={40} />
-      <h1>密码库已锁定</h1>
-      <p>密码库将在独立窗口中运行。</p>
-      <p className="muted">密码引擎尚未验证，暂不可解锁或保存条目。</p>
-      <span className="availability">暂不可用</span>
-    </main>
-  );
-}
 export default function App() {
   // Demo opt-in is presentation only; never swaps or intercepts the actual native bridge.
   const [demo, setDemo] = useState(
@@ -162,7 +152,7 @@ export default function App() {
     };
   }, [demo, week]);
   if (new URLSearchParams(location.search).get("window") === "vault")
-    return <VaultView />;
+    return <VaultWindow />;
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(week);
     d.setDate(d.getDate() + i);

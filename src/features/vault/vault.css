@@ -1,0 +1,242 @@
+.vault-shell {
+  min-height: 100vh;
+  background: #fafbf9;
+  color: #23333e;
+  display: flex;
+  flex-direction: column;
+}
+.vault-header {
+  height: 80px;
+  padding: 0 32px;
+  border-bottom: 1px solid #e5e9e5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff;
+}
+.vault-brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: #267a71;
+  font-size: 24px;
+  font-weight: 700;
+}
+.vault-brand small {
+  font-size: 14px;
+  color: #7a858a;
+  margin-left: 10px;
+  font-weight: 400;
+}
+.vault-state {
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  background: #eef3ef;
+  color: #68766f;
+}
+.vault-body {
+  width: min(900px, 100%);
+  margin: 0 auto;
+  padding: 30px;
+  flex: 1;
+}
+.vault-locked {
+  max-width: 390px;
+  margin: 35px auto;
+  text-align: center;
+}
+.vault-emblem {
+  background: #e5f0eb;
+  color: #2b8075;
+  border: 1px solid #d6e5df;
+  width: 88px;
+  height: 88px;
+  border-radius: 24px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 22px;
+}
+.vault-shell h1 {
+  font-size: 28px;
+  margin: 0 0 10px;
+}
+.vault-shell h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.vault-shell p {
+  font-size: 14px;
+  line-height: 1.8;
+}
+.vault-shell button {
+  border: 1px solid #d8e2dc;
+  border-radius: 8px;
+  background: #fff;
+  color: #426058;
+  padding: 9px 13px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.vault-shell button.primary {
+  background: #267f73;
+  color: white;
+  border-color: #267f73;
+}
+.vault-shell button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.vault-shell input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d4ded7;
+  background: #fff;
+  border-radius: 8px;
+  height: 43px;
+  padding: 10px 12px;
+  font: inherit;
+  color: inherit;
+}
+.vault-shell input:focus {
+  outline: 2px solid #92bfb1;
+  outline-offset: 2px;
+}
+.vault-form {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+  text-align: left;
+  margin: 25px 0 20px;
+}
+.vault-form label {
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vault-form p {
+  margin: 0;
+}
+.vault-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.vault-actions input {
+  flex: 1;
+  min-width: 180px;
+}
+.vault-locked .vault-actions {
+  justify-content: center;
+}
+.vault-availability {
+  color: #8d775b;
+  border-top: 1px solid #e5e7df;
+  margin-top: 28px;
+  padding-top: 20px;
+}
+.vault-help {
+  padding: 12px 16px;
+  background: #edf2ef;
+  border-radius: 10px;
+  text-align: left;
+}
+.vault-message {
+  color: #79634c;
+  text-align: center;
+  min-height: 25px;
+}
+.vault-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.vault-toolbar p {
+  margin: 0;
+}
+.vault-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 25px;
+}
+.vault-list article,
+.vault-editor,
+.vault-confirm {
+  background: #fff;
+  padding: 20px;
+  border: 1px solid #dde5df;
+  border-radius: 12px;
+}
+.vault-entry-heading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.vault-entry-heading h2 {
+  flex: 1;
+}
+.vault-value {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+.vault-value span {
+  font-size: 12px;
+  color: #7b8780;
+  width: 32px;
+}
+.vault-value strong,
+.vault-value code {
+  flex: 1;
+  min-width: 100px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.vault-confirm {
+  margin-top: 20px;
+  border-color: #cbb9a3;
+}
+.vault-empty {
+  color: #849088;
+  padding: 25px 0;
+  text-align: center;
+}
+.vault-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 18px;
+  font-size: 12px;
+  color: #86908a;
+  border-top: 1px solid #e4e9e3;
+}
+@media (max-width: 500px) {
+  .vault-body {
+    padding: 22px 18px;
+  }
+  .vault-header {
+    padding: 0 18px;
+  }
+  .vault-locked {
+    margin: 20px auto;
+  }
+  .vault-brand {
+    font-size: 22px;
+  }
+  .vault-list article {
+    padding: 14px;
+  }
+  .vault-toolbar {
+    align-items: flex-start;
+  }
+}

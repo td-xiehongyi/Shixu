@@ -193,3 +193,55 @@ it("successful command reception preserves every revision above 2^53", async () 
     "calendar_undo",
   ]);
 });
+
+it("D3 contracts validate create/change/copy without adding main authority", async () => {
+  const sent: {
+    command: string;
+    payload: Record<string, unknown> | undefined;
+  }[] = [];
+  const bridge = createVaultBridge(async (command, payload) => {
+    sent.push({ command, payload });
+    return null;
+  });
+  await bridge.vaultCreate(Uint8Array.of(7));
+  await bridge.vaultChangeMaster(Uint8Array.of(7), Uint8Array.of(8));
+  await bridge.vaultCopy(fixture.event_id, "account");
+  expect(sent.map((x) => x.command)).toEqual([
+    "vault_create",
+    "vault_change_master",
+    "vault_copy",
+  ]);
+  expect(sent[2].payload).toEqual({ id: fixture.event_id, field: "account" });
+  await expect(bridge.vaultCreate(new Uint8Array())).rejects.toThrow(
+    "INVALID_INPUT",
+  );
+  await expect(
+    bridge.vaultChangeMaster(Uint8Array.of(7), new Uint8Array()),
+  ).rejects.toThrow("INVALID_INPUT");
+  await expect(bridge.vaultCopy("../secret", "password")).rejects.toThrow(
+    "INVALID_INPUT",
+  );
+  await expect(
+    bridge.vaultCopy(fixture.event_id, "url" as "account"),
+  ).rejects.toThrow("INVALID_INPUT");
+  expect(sent.length).toBe(3);
+});
+
+it("D3 owned IPC arrays are erased after fulfillment and rejection", async () => {
+  let payload: Record<string, unknown> | undefined;
+  const bridge = createVaultBridge(async (_command, value) => {
+    payload = value;
+    throw "UNSUPPORTED";
+  });
+  await expect(
+    bridge.vaultChangeMaster(Uint8Array.of(7), Uint8Array.of(8)),
+  ).rejects.toThrow("UNSUPPORTED");
+  expect(payload?.current).toEqual([0]);
+  expect(payload?.next).toEqual([0]);
+  const successful = createVaultBridge(async (_command, value) => {
+    payload = value;
+    return null;
+  });
+  await successful.vaultCreate(Uint8Array.of(7));
+  expect(payload?.master).toEqual([0]);
+});

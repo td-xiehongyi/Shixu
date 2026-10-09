@@ -10,6 +10,9 @@ pub const COMMANDS: &[&str] = &[
     "calendar_edit",
     "calendar_undo",
     "show_vault_window",
+    "vault_create",
+    "vault_change_master",
+    "vault_copy",
     "vault_unlock",
     "vault_list",
     "vault_apply",
@@ -146,6 +149,24 @@ struct UnlockArgs {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ChangeMasterArgs {
+    current: zeroize::Zeroizing<Vec<u8>>,
+    next: zeroize::Zeroizing<Vec<u8>>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CopyArgs {
+    id: String,
+    field: CopyField,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CopyField {
+    Account,
+    Password,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RevealArgs {
     id: String,
 }
@@ -183,7 +204,17 @@ fn secret(value: &[u8]) -> AppResult<()> {
 }
 fn validate_vault(command: &str, payload: serde_json::Value) -> AppResult<()> {
     match command {
-        "vault_unlock" => {
+        "vault_change_master" => {
+            let a: ChangeMasterArgs = decode(payload)?;
+            secret(&a.current)?;
+            secret(&a.next)
+        }
+        "vault_copy" => {
+            let a: CopyArgs = decode(payload)?;
+            let _ = a.field;
+            validate_id(&a.id)
+        }
+        "vault_unlock" | "vault_create" => {
             let a: UnlockArgs = decode(payload)?;
             secret(&a.master)
         }
