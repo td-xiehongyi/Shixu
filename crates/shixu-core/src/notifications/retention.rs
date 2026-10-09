@@ -1,0 +1,1 @@
+pub const NON_EVENT_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1000;

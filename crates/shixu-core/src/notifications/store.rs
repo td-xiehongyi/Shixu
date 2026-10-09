@@ -1,0 +1,132 @@
+use super::identity::{content_digest, message_identity, namespace};
+use crate::{
+    contracts::{AppResult, UtcMillis, error::AppError, notification::*},
+    storage::{Database, database::storage_error},
+};
+use rusqlite::{OptionalExtension, params};
+use std::sync::Arc;
+#[derive(Debug, PartialEq, Eq)]
+pub enum AppendOutcome {
+    Stored,
+    Duplicate,
+    RevisionConflict,
+    Filtered,
+}
+pub struct MessageStore {
+    db: Arc<Database>,
+}
+impl MessageStore {
+    pub fn new(db: Arc<Database>) -> Self {
+        Self { db }
+    }
+    pub fn append(
+        &self,
+        config: &SourceConfig,
+        mut envelope: MessageEnvelope,
+    ) -> AppResult<AppendOutcome> {
+        // Authorization MUST precede identity derivation, protection and all writes.
+        if !config.enabled
+            || envelope.source_id != config.source_id
+            || envelope.account_id != config.account_id
+            || !config.allowed_group_ids.contains(&envelope.group_id)
+            || !config.capability_set.iter().any(|c| {
+                matches!(
+                    c,
+                    SourceCapability::LiveMessages | SourceCapability::Backfill
+                )
+            })
+        {
+            return Ok(AppendOutcome::Filtered);
+        }
+        if envelope.revision == 0
+            || envelope.revision > i64::MAX as u64
+            || config.adapter_type.is_empty()
+            || config.account_id.is_empty()
+            || envelope
+                .parts
+                .iter()
+                .any(|p| p.message_key != envelope.message_key)
+            || (!envelope.parts.is_empty()
+                && !config
+                    .capability_set
+                    .contains(&SourceCapability::Attachments))
+        {
+            return Err(AppError::InvalidInput);
+        }
+        if envelope.revoked
+            && !config
+                .capability_set
+                .contains(&SourceCapability::Revocations)
+        {
+            return Ok(AppendOutcome::RevisionConflict);
+        }
+        let identity = message_identity(config, &envelope)?;
+        let ns = namespace(config, &envelope.group_id);
+        envelope.message_key = identity.key;
+        for part in &mut envelope.parts {
+            part.message_key = identity.key;
+        }
+        let digest = content_digest(&envelope)?;
+        self.db.transaction(|tx| {
+        let existing: Option<(i64,Vec<u8>,bool,bool)> = tx.query_row("SELECT revision,content_digest,payload IS NULL,revoked FROM messages WHERE message_key=?1", [identity.key.to_string()], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage_error)?;
+        if let Some((revision, sealed_digest, cleaned, revoked)) = existing {
+            let old_digest: Vec<u8> = self.db.unprotect(&sealed_digest)?;
+            if old_digest == digest { return Ok(AppendOutcome::Duplicate); }
+            let allowed_change = if envelope.revoked && !revoked { config.capability_set.contains(&SourceCapability::Revocations) } else { config.capability_set.contains(&SourceCapability::Edits) && !revoked };
+            if cleaned || identity.degraded || envelope.revision <= revision as u64 || !allowed_change { return Ok(AppendOutcome::RevisionConflict); }
+        }
+        envelope.processing_state = if envelope.revoked { ProcessingState::SourceRevoked } else { ProcessingState::Persisted };
+        let payload = self.db.protect(&envelope)?; let protected_digest = self.db.protect(&digest)?;
+        // Missing IDs use the derived key as the degraded native identity slot.
+        let native_id = if identity.degraded { identity.key.to_string() } else { envelope.native_message_id.clone() };
+        tx.execute("INSERT INTO sources VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(namespace) DO NOTHING", params![ns,config.source_id.to_string(),config.adapter_type,config.account_id,envelope.group_id,""]).map_err(storage_error)?;
+        tx.execute("INSERT INTO messages VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,received_at=excluded.received_at,processing_state=excluded.processing_state,revoked=excluded.revoked,payload=excluded.payload,content_digest=excluded.content_digest", params![identity.key.to_string(),ns,native_id,identity.degraded,envelope.revision as i64,envelope.received_at,state_name(envelope.processing_state),envelope.revoked,payload,protected_digest]).map_err(storage_error)?;
+        tx.execute("DELETE FROM part_results WHERE message_key=?1", [identity.key.to_string()]).map_err(storage_error)?;
+        if envelope.revoked { tx.execute("INSERT OR IGNORE INTO suppressions VALUES (?1,'source_revoked')", [identity.key.to_string()]).map_err(storage_error)?; }
+        Ok(AppendOutcome::Stored)
+    })
+    }
+    pub fn pending(&self, limit: u32) -> AppResult<Vec<MessageEnvelope>> {
+        self.db.transaction(|tx| {
+        let mut stmt = tx.prepare("SELECT payload,processing_state FROM messages WHERE payload IS NOT NULL AND processing_state IN ('persisted','parsing','retryable_failure','pending') ORDER BY received_at,message_key LIMIT ?1").map_err(storage_error)?;
+        let rows = stmt.query_map([limit], |r| Ok((r.get::<_,Vec<u8>>(0)?,r.get::<_,String>(1)?))).map_err(storage_error)?;
+        rows.map(|row| { let (payload,state) = row.map_err(storage_error)?; let mut message: MessageEnvelope = self.db.unprotect(&payload)?; message.processing_state = serde_json::from_value(serde_json::Value::String(state)).map_err(|_| AppError::ParseFailed)?; Ok(message) }).collect()
+    })
+    }
+    pub fn record_parts(&self, key: &MessageKey, parts: Vec<PartResult>) -> AppResult<()> {
+        self.db.transaction(|tx| {
+        let data: Option<Vec<u8>> = tx.query_row("SELECT payload FROM messages WHERE message_key=?1 AND payload IS NOT NULL AND revoked=0", [key.to_string()], |r| r.get(0)).optional().map_err(storage_error)?;
+        let mut envelope: MessageEnvelope = self.db.unprotect(&data.ok_or(AppError::Conflict)?)?;
+        let mut seen = std::collections::HashSet::new();
+        for result in &parts { if !seen.insert(result.part_id) || result.blocks.iter().any(|b| b.part_id != result.part_id) { return Err(AppError::InvalidInput); }
+            let part = envelope.parts.iter_mut().find(|p| p.part_id == result.part_id).ok_or(AppError::InvalidInput)?; part.parse_state = result.status; part.failure_code = result.reason_code;
+        }
+        let payload = self.db.protect(&parts)?; let message_payload = self.db.protect(&envelope)?;
+        tx.execute("INSERT INTO part_results VALUES (?1,?2,?3) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,payload=excluded.payload", params![key.to_string(),envelope.revision as i64,payload]).map_err(storage_error)?;
+        tx.execute("UPDATE messages SET payload=?2 WHERE message_key=?1", params![key.to_string(),message_payload]).map_err(storage_error)?;
+        Ok(())
+    })
+    }
+    pub fn cleanup(&self, now: UtcMillis) -> AppResult<u64> {
+        let cutoff = now
+            .checked_sub(super::retention::NON_EVENT_RETENTION_MILLIS)
+            .ok_or(AppError::InvalidInput)?;
+        self.db.transaction(|tx| {
+        tx.execute("DELETE FROM part_results WHERE message_key IN (SELECT message_key FROM messages WHERE payload IS NOT NULL AND processing_state='non_event' AND received_at<=?1)", [cutoff]).map_err(storage_error)?;
+        let removed = tx.execute("UPDATE messages SET payload=NULL WHERE payload IS NOT NULL AND processing_state='non_event' AND received_at<=?1", [cutoff]).map_err(storage_error)?;
+        Ok(removed as u64)
+    })
+    }
+}
+pub(crate) fn state_name(state: ProcessingState) -> &'static str {
+    match state {
+        ProcessingState::Persisted => "persisted",
+        ProcessingState::Parsing => "parsing",
+        ProcessingState::Committed => "committed",
+        ProcessingState::RetryableFailure => "retryable_failure",
+        ProcessingState::Unparseable => "unparseable",
+        ProcessingState::NonEvent => "non_event",
+        ProcessingState::Pending => "pending",
+        ProcessingState::SourceRevoked => "source_revoked",
+    }
+}

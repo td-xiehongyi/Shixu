@@ -45,6 +45,8 @@ pub enum SourceCapability {
     Attachments,
     Replies,
     Revocations,
+    /// Native adapter explicitly reports same-ID content revisions.
+    Edits,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

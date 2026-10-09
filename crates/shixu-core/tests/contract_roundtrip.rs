@@ -303,3 +303,25 @@ fn part_and_vault_states_are_typed_wire_values() {
     }
     assert!(serde_json::from_value::<PartStatus>(json!("pretend_success")).is_err());
 }
+
+#[test]
+fn explicit_edit_capability_preserves_existing_wire_names() {
+    use shixu_core::contracts::notification::SourceCapability;
+    for (capability, wire) in [
+        (SourceCapability::LiveMessages, "live_messages"),
+        (SourceCapability::Backfill, "backfill"),
+        (SourceCapability::Attachments, "attachments"),
+        (SourceCapability::Replies, "replies"),
+        (SourceCapability::Revocations, "revocations"),
+        (SourceCapability::Edits, "edits"),
+    ] {
+        assert_eq!(
+            serde_json::to_value(capability).unwrap(),
+            serde_json::json!(wire)
+        );
+        assert_eq!(
+            serde_json::from_value::<SourceCapability>(serde_json::json!(wire)).unwrap(),
+            capability
+        );
+    }
+}

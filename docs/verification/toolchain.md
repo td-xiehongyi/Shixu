@@ -92,3 +92,43 @@ The F0 dependency table above is historical baseline evidence. V1 enabled `uuid/
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | [r-efi](https://github.com/r-efi/r-efi) |
 
 These packages resolved from `registry+https://github.com/rust-lang/crates.io-index`. `r-efi` is a target-specific transitive dependency; this Linux verification does not test a Windows or EFI backend. This provenance note records declared metadata and does not imply a security audit.
+
+## N1 persistence and Windows protection update
+
+N1 adds exactly pinned direct `rusqlite = 0.40.2` (default features disabled, `bundled` only), `sha2 = 0.11.0`, and Windows-target-only `windows-sys = 0.61.2`. `serde_json = 1.0.151` now also serializes protected runtime DTO payloads. No test protector is exported by either product crate: synthetic reversible doubles exist only inside integration test binaries. SHA-256 is identity/content hashing, never product encryption.
+
+The locked `libsqlite3-sys = 0.38.2` bundles SQLite **3.53.2**, as read from the registry source's `sqlite3.h`; SQLite's upstream code is [public domain](https://www.sqlite.org/copyright.html). All new registry packages below come from crates.io; `Cargo.lock` records sources and checksums. Table entries are actual `cargo metadata --locked --format-version 1` declared license/repository metadata, not a security audit.
+
+| Package | Version | Declared license | Upstream repository |
+| --- | --- | --- | --- |
+| bitflags | 2.13.2 | MIT OR Apache-2.0 | https://github.com/bitflags/bitflags |
+| block-buffer | 0.12.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
+| cc | 1.6.0 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
+| const-oid | 0.10.2 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
+| cpufeatures | 0.3.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
+| crypto-common | 0.2.2 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
+| digest | 0.11.3 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 | https://github.com/sfackler/rust-fallible-iterator |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 | https://github.com/sfackler/fallible-streaming-iterator |
+| find-msvc-tools | 0.1.14 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
+| hybrid-array | 0.4.15 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hybrid-array |
+| libsqlite3-sys | 0.38.2 | MIT | https://github.com/rusqlite/rusqlite |
+| pkg-config | 0.3.34 | MIT OR Apache-2.0 | https://github.com/rust-lang/pkg-config-rs |
+| rusqlite | 0.40.2 | MIT | https://github.com/rusqlite/rusqlite |
+| sha2 | 0.11.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
+| shlex | 2.0.1 | MIT OR Apache-2.0 | https://github.com/comex/rust-shlex |
+| smallvec | 1.16.2 | MIT OR Apache-2.0 | https://github.com/servo/rust-smallvec |
+| typenum | 1.20.1 | MIT OR Apache-2.0 | https://github.com/paholg/typenum |
+| vcpkg | 0.2.15 | MIT/Apache-2.0 | https://github.com/mcgoo/vcpkg-rs |
+| windows-link | 0.2.1 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
+| windows-sys | 0.61.2 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
+
+Core/native APIs preserve F0 DTO fields and wire names; the sole required contract addition is explicit `SourceCapability::Edits` (`edits`). Changes without this declared adapter capability return `RevisionConflict`. SQLite stores protected message/sender/filename/evidence payloads and protected content digests; technical identity/date/state columns remain indexable. Current-user DPAPI uses `CRYPTPROTECT_UI_FORBIDDEN`, app-specific constant entropy and no machine-scope flag. Its small Win32 boundary is the only module allowing unsafe code; buffer/handle ownership and Win32 release operations are documented beside each block. Native `open_database` applies a current-user-only inheritable protected ACL to an app-owned leaf before SQLite creation, and reapplies it to existing database/WAL/SHM files. It rejects leaf/file reparse points. The caller must provide a trusted app-owned directory and parent; ancestor replacement/race resistance still requires Windows review.
+
+API behavior is based on primary documentation: [CryptProtectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata), [CryptUnprotectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptunprotectdata), [CreateDirectoryW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createdirectoryw), [SetFileSecurityW](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-setfilesecurityw), and [security descriptor conversion/allocation](https://learn.microsoft.com/en-us/windows/win32/api/sddl/nf-sddl-convertstringsecuritydescriptortosecuritydescriptorw). These do not establish actual Windows behavior in this Linux run. DPAPI restoration across machines is not promised.
+
+N1 final Linux evidence: 16/16 persistence integration tests; workspace 23 contract + 16 message + 31 vault + 1 unsupported-native + 7 compile-fail doctests pass; two real Windows tests remain explicitly ignored in the ordinary suite. `cargo fmt --all -- --check` and workspace strict clippy pass. The persistence test actually kills a writer process after commit and reopens the SQLite database to assert the durable message remains pending.
+
+The explicit native command `cargo test -p shixu-native --test data_protection -- --ignored` returns exit 101 with both tests reporting **BLOCKED**, because this host lacks Windows DPAPI/ACL and a second real Windows identity. This is not native acceptance. A normal `cargo check -p shixu-native --all-targets --locked --target x86_64-pc-windows-gnu` also returns exit 101: bundled SQLite cannot compile without `x86_64-w64-mingw32-gcc`. No Windows C compiler or administrator package was installed.
+
+For **Rust Windows cfg/type checking only**, the official rustup Windows GNU standard-library target was installed. `LIBSQLITE3_SYS_USE_PKG_CONFIG=1 cargo check -p shixu-native --all-targets --locked --target x86_64-pc-windows-gnu` and the matching strict-clippy command pass. This environment option switches libsqlite3-sys away from its bundled C build to declared external-library bindings; pkg-config does not find an actual Windows SQLite library. Cargo check/clippy type-check Rust without final linking, so these results prove Win32 Rust API/cfg compatibility only. They do not prove a Windows application build, SQLite target library, DPAPI operation, user ACL, other-identity denial or cross-machine restoration. The unmodified default manifest still uses bundled SQLite for product builds. Raw success and blocker logs are retained in ignored `.superpowers/sdd/shixu-v0.1/task-N1-*.log`.

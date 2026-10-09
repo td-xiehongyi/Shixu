@@ -1,2 +1,3 @@
-//! Platform adapter boundary. No platform integrations are implemented in F0.
-#![forbid(unsafe_code)]
+//! Native adapters. Unsafe code is allowed only inside the reviewed Win32 boundary.
+#![deny(unsafe_code)]
+pub mod protection;
