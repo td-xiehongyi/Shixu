@@ -30,6 +30,12 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
   const mounted = useRef(true);
   const unlocked = useRef(false);
   const masterForm = useRef<HTMLFormElement>(null);
+  // Ref detachment happens before passive unmount effects. Reset the actual
+  // previous node before releasing it, including locked/change-form replacement.
+  const attachMasterForm = useCallback((node: HTMLFormElement | null) => {
+    masterForm.current?.reset();
+    masterForm.current = node;
+  }, []);
   const ownedMaster = useRef<Uint8Array[]>([]);
   const secret = useRef<Uint8Array | null>(null);
   const revealSequence = useRef(0);
@@ -84,7 +90,6 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
   }, [lock]);
   useEffect(() => {
     mounted.current = true;
-    const element = masterForm.current;
     const close = () => {
       clearLocal();
       void port.vaultLock().catch(() => {});
@@ -98,7 +103,6 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
       secret.current?.fill(0);
       secret.current = null;
       ownedMaster.current.forEach((b) => b.fill(0));
-      element?.reset();
       if (revealTimer.current) clearTimeout(revealTimer.current);
       if (idleTimer.current) clearTimeout(idleTimer.current);
       window.removeEventListener("pagehide", close);
@@ -236,11 +240,9 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
     } catch (error) {
       if (valid(original)) {
         setMessage(vaultError(error));
-        if (
-          error instanceof BridgeError &&
-          ["LOCKED", "AUTH_FAILED"].includes(error.code)
-        )
-          clearLocal();
+        // Copy failures carry no trustworthy clipboard-only recovery proof.
+        // Unknown transport errors are normalized to UNSUPPORTED by the bridge.
+        clearLocal();
       }
     }
   }
@@ -271,7 +273,7 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
             <h1>{mode === "create" ? "新建密码库" : "密码库已锁定"}</h1>
             <p>主密码只锁密码库，日历与通知独立运行。</p>
             <form
-              ref={masterForm}
+              ref={attachMasterForm}
               className="vault-form"
               onSubmit={authenticate}
             >
@@ -384,7 +386,7 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
             </div>
             {mode === "change" ? (
               <form
-                ref={masterForm}
+                ref={attachMasterForm}
                 className="vault-form"
                 onSubmit={authenticate}
               >

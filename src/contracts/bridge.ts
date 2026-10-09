@@ -351,14 +351,26 @@ export function createVaultBridge(invoke: Invoke) {
     async vaultReveal(entryId: string): Promise<Uint8Array> {
       id(entryId);
       const r = await call(invoke, "vault_reveal", { id: entryId });
-      if (
-        !Array.isArray(r) ||
-        !r.length ||
-        r.length > 65536 ||
-        r.some((b) => !Number.isInteger(b) || b < 0 || b > 255)
-      )
-        return invalid();
-      return Uint8Array.from(r);
+      try {
+        if (
+          !Array.isArray(r) ||
+          !r.length ||
+          r.length > 65536 ||
+          r.some((b) => !Number.isInteger(b) || b < 0 || b > 255)
+        )
+          return invalid();
+        return Uint8Array.from(r);
+      } finally {
+        // We own this mutable IPC array, separately from the returned typed copy.
+        // Immutable/inaccessible transport copies remain outside JS erasure control.
+        if (Array.isArray(r)) {
+          try {
+            Array.prototype.fill.call(r, 0);
+          } catch {
+            /* Best effort for read-only values. */
+          }
+        }
+      }
     },
     async vaultLock(): Promise<void> {
       await call(invoke, "vault_lock");

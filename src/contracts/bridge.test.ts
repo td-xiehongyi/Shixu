@@ -245,3 +245,22 @@ it("D3 owned IPC arrays are erased after fulfillment and rejection", async () =>
   await successful.vaultCreate(Uint8Array.of(7));
   expect(payload?.master).toEqual([0]);
 });
+
+// D3-R2: incoming mutable IPC bytes are independently owned and cleared after decoding.
+it("incoming_reveal_array_is_wiped_after_independent_successful_decode", async () => {
+  const incoming = [7, 8, 9];
+  const bridge = createVaultBridge(async () => incoming);
+  const result = await bridge.vaultReveal(fixture.event_id);
+  expect([...result]).toEqual([7, 8, 9]);
+  expect(incoming).toEqual([0, 0, 0]);
+  result.fill(0);
+  expect(incoming).toEqual([0, 0, 0]);
+});
+it("invalid_incoming_reveal_array_is_wiped_on_rejection", async () => {
+  const incoming = [7, 256, 9];
+  const bridge = createVaultBridge(async () => incoming);
+  await expect(bridge.vaultReveal(fixture.event_id)).rejects.toThrow(
+    "INVALID_INPUT",
+  );
+  expect(incoming).toEqual([0, 0, 0]);
+});

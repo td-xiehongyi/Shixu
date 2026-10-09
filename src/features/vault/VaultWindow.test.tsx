@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { VaultWindow, type VaultPort } from "./VaultWindow";
 import { EntryForm } from "./EntryForm";
-import { BridgeError } from "../../contracts/bridge";
+import { BridgeError, createVaultBridge } from "../../contracts/bridge";
 import type { VaultMutation, VaultSummary } from "../../contracts/domain";
 const rows: VaultSummary[] = [1, 2].map((n) => ({
   entry_id: `11111111-1111-4111-8111-11111111111${n}`,
@@ -366,4 +366,81 @@ it("unknown_save_failure_fails_closed", async () => {
   await click("保存条目");
   expect(host.textContent).not.toContain("虚构账号");
   expect(host.textContent).toContain("密码库已锁定");
+});
+
+// D3-R1: both injected unknown failures and native-normalized failures revoke UI authority.
+it.each(["raw", "normalized"] as const)(
+  "unknown_copy_%s_failure_revokes_accounts_and_reveal",
+  async (kind) => {
+    const bytes = new TextEncoder().encode("synthetic-revealed");
+    const copyPort = createVaultBridge(async () => {
+      throw new Error("synthetic-transport-detail");
+    });
+    await render(
+      port({
+        vaultReveal: async () => bytes,
+        vaultCopy:
+          kind === "raw"
+            ? async () => {
+                throw new Error("synthetic-transport-detail");
+              }
+            : copyPort.vaultCopy,
+      }),
+    );
+    await unlock();
+    await click("显示密码");
+    expect(host.textContent).toContain("synthetic-revealed");
+    await click("复制密码");
+    expect(host.textContent).not.toContain("synthetic-revealed");
+    expect(host.textContent).not.toContain("虚构账号");
+    expect(host.textContent).toContain("密码库已锁定");
+    expect(host.textContent).toContain("暂不可用");
+    expect(host.textContent).not.toContain("synthetic-transport-detail");
+    expect(bytes.every((b) => b === 0)).toBe(true);
+  },
+);
+// D3-R3: observation handles retain the real detached DOM inputs solely to verify reset.
+it("current_change_master_form_is_reset_on_actual_unmount", async () => {
+  await render(port());
+  await unlock();
+  await click("更改主密码");
+  await fill("主密码", "synthetic-current");
+  await fill("新主密码", "synthetic-next");
+  await fill("再次输入主密码", "synthetic-next");
+  const inputs = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+  ];
+  expect(inputs.map((x) => x.value)).toEqual([
+    "synthetic-current",
+    "synthetic-next",
+    "synthetic-next",
+  ]);
+  await act(async () => root.render(<div>已关闭</div>));
+  expect(inputs.map((x) => x.value)).toEqual(["", "", ""]);
+});
+it("manual_lock_resets_current_change_master_form_control", async () => {
+  await render(port());
+  await unlock();
+  await click("更改主密码");
+  await fill("主密码", "synthetic-current");
+  await fill("新主密码", "synthetic-next");
+  await fill("再次输入主密码", "synthetic-next");
+  const inputs = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+  ];
+  await click("锁定密码库");
+  expect(inputs.map((x) => x.value)).toEqual(["", "", ""]);
+});
+it("cancel_detaches_and_resets_current_change_master_form", async () => {
+  await render(port());
+  await unlock();
+  await click("更改主密码");
+  await fill("主密码", "synthetic-current");
+  await fill("新主密码", "synthetic-next");
+  await fill("再次输入主密码", "synthetic-next");
+  const inputs = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+  ];
+  await click("取消");
+  expect(inputs.map((x) => x.value)).toEqual(["", "", ""]);
 });
