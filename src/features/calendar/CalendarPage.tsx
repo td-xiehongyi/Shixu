@@ -195,7 +195,11 @@ export function CalendarPage({
           <select
             aria-label="日历视图"
             value={view}
-            onChange={(e) => setView(e.target.value)}
+            onChange={(e) => {
+              const nextView = e.target.value;
+              if (nextView === "week") setWeek((anchor) => monday(anchor));
+              setView(nextView);
+            }}
           >
             <option value="week">周</option>
             <option value="month">月</option>

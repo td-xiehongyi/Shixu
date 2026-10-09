@@ -140,3 +140,110 @@ it("switching_views_uses_month_and_agenda_without_dragging", async () => {
   expect(r.host.querySelector(".fc-event-draggable")).toBeNull();
   await r.close();
 });
+
+import type { EventQuery } from "../../contracts/domain";
+it.each(["month", "agenda"])(
+  "returning from navigated %s restores Monday dates and headers",
+  async (view) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
+    const queries: EventQuery[] = [];
+    const r = await render(
+      <CalendarPage
+        port={port({
+          calendarQuery: async (q) => {
+            queries.push(q);
+            return [];
+          },
+        })}
+      />,
+    );
+    try {
+      const select = r.host.querySelector<HTMLSelectElement>(
+        'select[aria-label="日历视图"]',
+      )!;
+      await act(async () => {
+        select.value = view;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await act(async () =>
+        r.host
+          .querySelector<HTMLButtonElement>('button[aria-label="下一月"]')!
+          .click(),
+      );
+      expect(queries.at(-1)).toMatchObject({
+        from_date: "2026-11-01",
+        through_date: "2026-11-30",
+      });
+      await act(async () => {
+        select.value = "week";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      expect(queries.at(-1)).toMatchObject({
+        from_date: "2026-10-26",
+        through_date: "2026-11-01",
+      });
+      expect(
+        [...r.host.querySelectorAll(".day-headers > div")].map(
+          (e) => e.textContent,
+        ),
+      ).toEqual([
+        "周一10月26日",
+        "周二10月27日",
+        "周三10月28日",
+        "周四10月29日",
+        "周五10月30日",
+        "周六10月31日",
+        "周日11月1日",
+      ]);
+    } finally {
+      await r.close();
+      vi.useRealTimers();
+    }
+  },
+);
+it("normal_week_navigation_remains_Monday_through_Sunday", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
+  const queries: EventQuery[] = [];
+  const r = await render(
+    <CalendarPage
+      port={port({
+        calendarQuery: async (q) => {
+          queries.push(q);
+          return [];
+        },
+      })}
+    />,
+  );
+  try {
+    expect(queries.at(-1)).toMatchObject({
+      from_date: "2026-10-05",
+      through_date: "2026-10-11",
+    });
+    await act(async () =>
+      r.host
+        .querySelector<HTMLButtonElement>('button[aria-label="下一周"]')!
+        .click(),
+    );
+    expect(queries.at(-1)).toMatchObject({
+      from_date: "2026-10-12",
+      through_date: "2026-10-18",
+    });
+    expect(r.host.querySelector(".day-headers > div")?.textContent).toBe(
+      "周一10月12日",
+    );
+    await act(async () =>
+      r.host
+        .querySelector<HTMLButtonElement>('button[aria-label="上一周"]')!
+        .click(),
+    );
+    expect(queries.at(-1)).toMatchObject({
+      from_date: "2026-10-05",
+      through_date: "2026-10-11",
+    });
+  } finally {
+    await r.close();
+    vi.useRealTimers();
+  }
+});

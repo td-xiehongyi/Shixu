@@ -315,3 +315,123 @@ fn settings_cannot_invent_binding_for_retained_unbound_legacy_notices() {
         Err(AppError::Conflict)
     );
 }
+
+fn retry_capacity_fixture(
+    other_pending: usize,
+) -> (shixu_core::notifications::parts::TaskQueue, PartId) {
+    use shixu_core::notifications::parts::TaskQueue;
+    let db = database();
+    let c = config();
+    let store = MessageStore::new(db.clone());
+    store.bind_source(&c).unwrap();
+    let queue = TaskQueue::new(db);
+    let limits = ParserLimits::v01();
+    let first: PartId = "33333333-3333-4333-8333-000000000000".parse().unwrap();
+    for i in 0..=other_pending {
+        let pid: PartId = format!("33333333-3333-4333-8333-{i:012}").parse().unwrap();
+        let mut m = message(
+            &c,
+            "synthetic capacity test",
+            &format!("retry-capacity-{i}"),
+        );
+        m.received_at = i as i64;
+        m.parts = vec![MessagePart {
+            part_id: pid,
+            message_key: m.message_key,
+            kind: PartKind::Image,
+            source_file_ref: None,
+            original_name: None,
+            declared_type: None,
+            detected_type: None,
+            byte_size: Some(1),
+            content_hash: None,
+            fetch_state: FetchState::Pending,
+            parse_state: PartStatus::PendingDownload,
+            failure_code: None,
+            encrypted_blob_ref: None,
+            retained_until: None,
+        }];
+        store.append(&c, m).unwrap();
+        let current = store.list(None, 100).unwrap().remove(0);
+        queue.enqueue(&current.message_key, 1, 0, &limits).unwrap();
+        if i == 0 {
+            let lease = queue.claim(0, &limits).unwrap().unwrap();
+            queue
+                .finish(&lease, transient_download(first), false, 17)
+                .unwrap();
+        }
+    }
+    (queue, first)
+}
+fn transient_download(part_id: PartId) -> PartResult {
+    PartResult {
+        part_id,
+        status: PartStatus::DownloadFailed,
+        blocks: vec![],
+        reason_code: Some(PartReason::DownloadUnavailable),
+    }
+}
+fn drain_capacity_queue(
+    queue: &shixu_core::notifications::parts::TaskQueue,
+    now: i64,
+) -> Vec<PartId> {
+    let mut ids = vec![];
+    while let Some(job) = queue.claim(now, &ParserLimits::v01()).unwrap() {
+        ids.push(job.part.part_id);
+        queue
+            .finish(
+                &job,
+                PartResult {
+                    part_id: job.part.part_id,
+                    status: PartStatus::Success,
+                    blocks: vec![],
+                    reason_code: None,
+                },
+                false,
+                now,
+            )
+            .unwrap();
+    }
+    ids
+}
+#[test]
+fn manual_retry_at_capacity_preserves_terminal_state_and_original_retry_budget() {
+    let (queue, first) = retry_capacity_fixture(100);
+    let limits = ParserLimits::v01();
+    assert_eq!(queue.retry_part(first, 500), Err(AppError::StorageFull));
+    let ids = drain_capacity_queue(&queue, 0);
+    assert_eq!(ids.len(), 100);
+    assert!(!ids.contains(&first));
+    assert!(queue.claim(i64::MAX, &limits).unwrap().is_none());
+    // Rejection neither requeued the terminal task nor consumed any of its three attempts.
+    for attempt in 1..=3 {
+        let due = 1000 * attempt;
+        queue.retry_part(first, due).unwrap();
+        assert!(queue.claim(due - 1, &limits).unwrap().is_none());
+        let job = queue.claim(due, &limits).unwrap().unwrap();
+        assert_eq!(job.part.part_id, first);
+        assert_eq!(queue.retry_part(first, due), Err(AppError::Conflict));
+        queue
+            .finish(&job, transient_download(first), false, due)
+            .unwrap();
+    }
+    assert_eq!(queue.retry_part(first, 4000), Err(AppError::Unsupported));
+}
+#[test]
+fn manual_retry_uses_last_slot_and_queued_request_at_capacity_is_idempotent() {
+    let (queue, first) = retry_capacity_fixture(99);
+    queue.retry_part(first, 50).unwrap();
+    // The queue is now exactly full; a repeat must neither reject nor change the deadline.
+    assert_eq!(queue.retry_part(first, 9999), Ok(()));
+    let ids = drain_capacity_queue(&queue, 0);
+    assert_eq!(ids.len(), 99);
+    assert!(!ids.contains(&first));
+    assert!(queue.claim(49, &ParserLimits::v01()).unwrap().is_none());
+    assert_eq!(drain_capacity_queue(&queue, 50), vec![first]);
+    assert!(
+        queue
+            .claim(i64::MAX, &ParserLimits::v01())
+            .unwrap()
+            .is_none()
+    );
+}

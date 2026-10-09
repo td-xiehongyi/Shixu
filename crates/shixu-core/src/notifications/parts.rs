@@ -121,6 +121,10 @@ impl TaskQueue {
             let results:Option<Vec<u8>>=tx.query_row("SELECT payload FROM part_results WHERE message_key=?1 AND revision=?2",params![key,revision],|r|r.get(0)).optional().map_err(storage_error)?;
             let results:Vec<PartResult>=self.db.unprotect(&results.ok_or(AppError::Conflict)?)?;
             if !results.iter().any(|p|p.part_id==part_id&&p.status==PartStatus::DownloadFailed&&p.reason_code==Some(PartReason::DownloadUnavailable)){return Err(AppError::Unsupported);}
+            // A terminal task is a new queue admission; enforce the shared cap
+            // before changing state, attempts or deadline in this same transaction.
+            let pending:u64=tx.query_row("SELECT count(*) FROM attachment_tasks WHERE state!='done'",[],|r|r.get::<_,i64>(0)).map_err(storage_error)? as u64;
+            ParserLimits::v01().check(Resource::PendingTasks,pending+1).map_err(|_|AppError::StorageFull)?;
             tx.execute("UPDATE attachment_tasks SET state='queued',retries=retries+1,due_at=?4,lease=NULL WHERE message_key=?1 AND revision=?2 AND part_id=?3",params![key,revision,part_id.to_string(),now]).map_err(storage_error)?;
             Ok(())
         })
