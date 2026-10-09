@@ -334,11 +334,14 @@ pub(crate) fn identifier(text: &str) -> Option<String> {
         return None;
     }
     let value = captures[0].get(1)?;
-    if text[value.end()..]
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
+    // A supported prefix is insufficient: reject all unrecognized token
+    // continuations. Chinese subject adjacency is an approved field boundary;
+    // whitespace and explicit comma/colon separators also terminate the ID.
+    let boundary = text[value.end()..].chars().next().is_none_or(|c| {
+        c.is_whitespace()
+            || matches!(c, ','|'，'|':'|'：'|'\u{3400}'..='\u{4dbf}'|'\u{4e00}'..='\u{9fff}')
+    });
+    if !boundary {
         return None;
     }
     Some(value.as_str().into())
@@ -394,12 +397,28 @@ pub(crate) fn explicit_reference(c: &Candidate, sent: i64) -> AppResult<Option<E
         if time.local_date.is_none() {
             continue;
         }
-        if let Some(previous) = &result {
+        if let Some(previous) = &mut result {
             if previous.identifier != id
                 || previous.time.local_date != time.local_date
-                || previous.time.start_at != time.start_at
+                || previous
+                    .time
+                    .start_at
+                    .zip(time.start_at)
+                    .is_some_and(|(a, b)| a != b)
+                || previous
+                    .time
+                    .end_at
+                    .zip(time.end_at)
+                    .is_some_and(|(a, b)| a != b)
             {
                 return Ok(None);
+            }
+            // Missing clock fields make no claim. Keep every supplied endpoint
+            // so an earlier date/start-only block cannot hide a later old end.
+            previous.time.start_at = previous.time.start_at.or(time.start_at);
+            previous.time.end_at = previous.time.end_at.or(time.end_at);
+            if previous.time.start_at.is_some() {
+                previous.time.precision = Precision::Exact;
             }
         } else {
             result = Some(ExplicitReference {

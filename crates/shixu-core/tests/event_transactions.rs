@@ -1429,3 +1429,227 @@ fn review1_f2_cleanup_also_expires_batches_left_by_previous_schema5_cleanup() {
         0
     );
 }
+
+fn review2_apply_identifier_pair(
+    original_id: &str,
+    notice_id: &str,
+) -> (ApplySummary, CalendarEvent) {
+    let f = Fixture::new();
+    let original = f.msg(
+        &format!("2026年10月12日9:00事件编号{original_id}高数考试"),
+        1791504000000,
+        None,
+    );
+    f.service().apply(f.batch(&original, &[])).unwrap();
+    let notice = f.msg(
+        &format!("原定2026年10月12日9:00事件编号{notice_id}高数考试改至2026年10月13日10:00"),
+        original.sent_at + 1,
+        None,
+    );
+    let result = f.service().apply(f.batch(&notice, &[])).unwrap();
+    (result, f.events().remove(0))
+}
+#[test]
+fn review2_r1_unsupported_identifier_continuations_in_notice_never_match_prefix() {
+    let mut incorrectly_matched = vec![];
+    for id in [
+        "MATH101é",
+        "MATH101/OTHER",
+        "MATH101β",
+        "MATH101\u{301}",
+        "MATH101.OTHER",
+        "MATH101\\OTHER",
+        "MATH101~OTHER",
+    ] {
+        let (summary, event) = review2_apply_identifier_pair("MATH101", id);
+        if summary.updated != 0
+            || summary.pending != 1
+            || event.local_date.as_deref() != Some("2026-10-12")
+        {
+            incorrectly_matched.push(id);
+        }
+    }
+    assert!(
+        incorrectly_matched.is_empty(),
+        "unsupported references matched a prefix: {incorrectly_matched:?}"
+    );
+}
+#[test]
+fn review2_r1_unsupported_identifier_continuations_in_original_never_match_prefix() {
+    let mut incorrectly_matched = vec![];
+    for id in [
+        "MATH101é",
+        "MATH101/OTHER",
+        "MATH101β",
+        "MATH101\u{301}",
+        "MATH101.OTHER",
+        "MATH101\\OTHER",
+        "MATH101~OTHER",
+    ] {
+        let (summary, event) = review2_apply_identifier_pair(id, "MATH101");
+        if summary.updated != 0
+            || summary.pending != 1
+            || event.local_date.as_deref() != Some("2026-10-12")
+        {
+            incorrectly_matched.push(id);
+        }
+    }
+    assert!(
+        incorrectly_matched.is_empty(),
+        "unsupported originals matched a prefix: {incorrectly_matched:?}"
+    );
+}
+#[test]
+fn review2_r1_complete_ascii_identifiers_boundaries_and_exact_case_are_preserved() {
+    for id in [
+        "A".to_owned(),
+        "A_9-z".to_owned(),
+        "MATH101".to_owned(),
+        "A".repeat(64),
+    ] {
+        let (summary, event) = review2_apply_identifier_pair(&id, &id);
+        assert_eq!(summary.updated, 1, "{id}");
+        assert_eq!(event.local_date.as_deref(), Some("2026-10-13"));
+    }
+    for (old, new) in [
+        ("MATH101", "MATH101X"),
+        ("MATH101", "math101"),
+        ("MATH101X", "MATH101"),
+    ] {
+        let (summary, event) = review2_apply_identifier_pair(old, new);
+        assert_eq!(summary.updated, 0);
+        assert_eq!(summary.pending, 1);
+        assert_eq!(event.local_date.as_deref(), Some("2026-10-12"));
+    }
+    let maximum = "A".repeat(64);
+    let oversized = "A".repeat(65);
+    for (old, new) in [
+        (&maximum, &oversized),
+        (&oversized, &maximum),
+        (&oversized, &oversized),
+    ] {
+        let (summary, event) = review2_apply_identifier_pair(old, new);
+        assert_eq!(summary.updated, 0);
+        assert_eq!(summary.pending, 1);
+        assert_eq!(event.local_date.as_deref(), Some("2026-10-12"));
+    }
+    for suffix in [
+        " 高数考试",
+        "\t高数考试",
+        ",高数考试",
+        "，高数考试",
+        ":高数考试",
+        "：高数考试",
+    ] {
+        let f = Fixture::new();
+        let original = f.msg(
+            &format!("2026年10月12日9:00事件编号：MATH101{suffix}"),
+            1791504000000,
+            None,
+        );
+        f.service().apply(f.batch(&original, &[])).unwrap();
+        let n = f.msg(
+            &format!("原定2026年10月12日9:00事件编号 MATH101{suffix}改至2026年10月13日10:00"),
+            original.sent_at + 1,
+            None,
+        );
+        let s = f.service().apply(f.batch(&n, &[])).unwrap();
+        assert_eq!(s.updated, 1, "separator {suffix:?}");
+        assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-13"));
+    }
+}
+#[test]
+fn review2_r2_supplied_original_end_must_agree_but_missing_old_clocks_are_optional() {
+    let mut violations = vec![];
+    for (original_clock, reference_clock, should_update) in [
+        ("9:00—11:00", "9:00—12:00", false),
+        ("9:00", "9:00—11:00", false),
+        ("9:00—11:00", "9:00—11:00", true),
+        ("9:00—11:00", "9:00", true),
+        ("9:00—11:00", "", true),
+    ] {
+        let f = Fixture::new();
+        let original = f.msg(
+            &format!("2026年10月12日{original_clock}事件编号MATH101高数考试"),
+            1791504000000,
+            None,
+        );
+        f.service().apply(f.batch(&original, &[])).unwrap();
+        let n = f.msg(
+            &format!(
+                "原定2026年10月12日{reference_clock}事件编号MATH101高数考试改至2026年10月13日10:00"
+            ),
+            original.sent_at + 1,
+            None,
+        );
+        let result = f.service().apply(f.batch(&n, &[])).unwrap();
+        let event = f.events().remove(0);
+        if result.updated != u64::from(should_update)
+            || result.pending != u64::from(!should_update)
+            || event.local_date.as_deref()
+                != Some(if should_update {
+                    "2026-10-13"
+                } else {
+                    "2026-10-12"
+                })
+        {
+            violations.push((original_clock, reference_clock, should_update, result));
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "incorrect old endpoint proof: {violations:?}"
+    );
+}
+#[test]
+fn review2_r2_multiple_evidence_cannot_hide_supplied_or_contradictory_old_endpoints() {
+    let mut violations = vec![];
+    for (body_clock, image_clock, should_update) in [
+        ("9:00—11:00", "9:00—12:00", false),
+        ("9:00—12:00", "9:00—11:00", false),
+        ("9:00", "9:00—12:00", false),
+        ("9:00—12:00", "9:00", false),
+        ("", "9:00—11:00", true),
+        ("9:00", "9:00—11:00", true),
+        ("9:00—11:00", "9:00", true),
+    ] {
+        let f = Fixture::new();
+        let original = f.msg(
+            "2026年10月12日9:00—11:00事件编号MATH101高数考试",
+            1791504000000,
+            None,
+        );
+        f.service().apply(f.batch(&original, &[])).unwrap();
+        let text = |clock: &str| {
+            format!("原定2026年10月12日{clock}事件编号MATH101高数考试改至2026年10月13日10:00")
+        };
+        let mut notice = f.msg(&text(body_clock), original.sent_at + 1, None);
+        let part = image_part(&notice);
+        let part_id = part.part_id;
+        notice.parts.push(part);
+        notice.revision = 2;
+        let notice = f.persist(notice);
+        let block = parser_block(part_id, &text(image_clock));
+        save_parser(&f, &notice, block.clone());
+        let batch = extract(&notice, &[block], &[], &f.config.timezone).unwrap();
+        assert_eq!(batch.candidates.len(), 1);
+        assert_eq!(batch.candidates[0].evidence.len(), 2);
+        let result = f.service().apply(batch).unwrap();
+        let event = f.events().remove(0);
+        if result.updated != u64::from(should_update)
+            || result.pending != u64::from(!should_update)
+            || event.local_date.as_deref()
+                != Some(if should_update {
+                    "2026-10-13"
+                } else {
+                    "2026-10-12"
+                })
+        {
+            violations.push((body_clock, image_clock, should_update, result));
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "contradictory/omitted cross-evidence endpoints: {violations:?}"
+    );
+}

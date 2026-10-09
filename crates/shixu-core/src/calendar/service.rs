@@ -598,6 +598,10 @@ impl EventService {
                     .time
                     .start_at
                     .is_some_and(|start| original.candidate.time.start_at != Some(start))
+                || reference
+                    .time
+                    .end_at
+                    .is_some_and(|end| original.candidate.time.end_at != Some(end))
             {
                 continue;
             }
