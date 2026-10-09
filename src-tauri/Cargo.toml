@@ -14,6 +14,10 @@ shixu-core = { path = "../crates/shixu-core" }
 serde.workspace = true
 serde_json.workspace = true
 zeroize = { workspace = true, features = ["serde"] }
+sha2 = "=0.11.0"
+
+[build-dependencies]
+sha2 = "=0.11.0"
 
 [target.'cfg(windows)'.dependencies]
 shixu-native = { path = "../crates/shixu-native" }
