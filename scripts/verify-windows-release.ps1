@@ -17,7 +17,8 @@ try {
     $reportPath = [IO.Path]::GetFullPath($Output)
     $evidencePath = '-'
     if ($Evidence) { $evidencePath = (Resolve-Path -LiteralPath $Evidence).Path }
-    if ($reportPath -eq $binary -or $reportPath -eq $evidencePath) { throw 'Output must be a separate report file' }
+    # The CLI atomically creates a NEW report file and refuses every existing
+    # destination (including aliases/links). Do not rely on string path checks.
     # The exact Shixu executable embeds source/version/capability identity and
     # hashes its own bytes. An external JSON cannot supply the expected manifest.
     & $binary '--verify-release' $evidencePath $reportPath
@@ -26,6 +27,6 @@ try {
     exit $code
 } catch {
     # Avoid echoing file paths or arbitrary evidence/error text into logs.
-    Write-Error 'FAIL: executable/evidence/report validation could not run. Check local paths and permissions.' -ErrorAction Continue
+    Write-Error 'FAIL: executable/evidence/report validation could not run. Use a new output path and check local paths and permissions.' -ErrorAction Continue
     exit 1
 }

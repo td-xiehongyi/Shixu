@@ -11,7 +11,7 @@ shixu-desktop --release-manifest
 shixu-desktop --verify-release EVIDENCE_OR_DASH OUTPUT
 ```
 
-第二项以 `-` 表示未提供证据，写出所有必需门槛 BLOCKED 的报告。退出码：0=所有必需门槛 PASS；1=FAIL（含非法证据）；2=BLOCKED。读取失败、空缺、未知字段/枚举、重复 JSON 对象键或门槛/覆盖项、超过 1 MiB、非法类型/数值、错误版本/构建/来源/可执行文件摘要均不能通过。输入错误详情不会回显证据载荷。日志引用不接受任意路径；校验器不读取密码文件。
+第二项以 `-` 表示未提供证据，写出所有必需门槛 BLOCKED 的报告。`OUTPUT` 必须是尚不存在的新文件；实际 CLI 以原子 create-new 创建并通过已打开的句柄写入，拒绝所有已存在的输出（包括原报告、证据/二进制、相对路径别名、符号链接及硬链接），返回 1 并保留原文件。每次使用新的报告文件名，不覆盖或删除旧证据/报告；写入失败时新文件可能不完整，不能当作验收报告。退出码：0=所有必需门槛 PASS；1=FAIL（含非法证据）；2=BLOCKED。读取失败、空缺、未知字段/枚举、重复 JSON 对象键或门槛/覆盖项、超过 1 MiB、非法类型/数值、错误版本/构建/来源/可执行文件摘要均不能通过。输入错误详情不会回显证据载荷。日志引用不接受任意路径；校验器不读取密码文件。
 
 编译时 build script 使用 Git 列出的已跟踪及未忽略新增文件的路径与实际字节生成 source_sha256；source_commit 记录当时 HEAD，**不是 dirty 构建的唯一身份**。build_id 绑定 source_sha256、目标平台、构建 profile、应用版本；versions 包含应用、Tauri 和两个依赖锁文件摘要。可执行文件运行时计算自身 artifact_sha256；证据必须匹配这些实际编译/文件值，不能从证据 JSON 提供预期能力。新增/修改源文件应重新构建并重新收集证据，不能复制旧 build_id。构建需要 Git checkout；未提供无需 Git 的发布源码打包模式。
 
@@ -48,7 +48,7 @@ pwsh -NoProfile -File scripts/verify-windows-release.ps1 `
 # 有真实、同构建的脱敏证据时才增加 -Evidence .\release-evidence.json
 ```
 
-wrapper 只调用指定二进制的校验命令，不构建、登录、发送、上传、发布或安装任何东西。输出必须是与二进制/证据不同的文件。wrapper 已在云端编写，**未在 Windows/PowerShell 执行**。Linux 可直接使用 portable 二进制的同名命令检查 BLOCKED 报告，不能据此关闭 Windows 门槛。
+wrapper 只调用指定二进制的校验命令，不构建、登录、发送、上传、发布或安装任何东西。输出必须是尚不存在的新文件；wrapper 使用实际 CLI 的原子拒绝覆盖契约，每次调用请选择新的报告名。wrapper 已在云端编写，**未在 Windows/PowerShell 执行**。Linux 可直接使用 portable 二进制的同名命令检查 BLOCKED 报告，不能据此关闭 Windows 门槛。
 
 ## 所需组件与真实证据
 

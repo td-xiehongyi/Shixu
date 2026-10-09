@@ -14,7 +14,7 @@ fn main() {
 fn release_command() -> Option<i32> {
     use sha2::{Digest, Sha256};
     use shixu_desktop::release::{MAX_EVIDENCE_BYTES, compiled_manifest, hex, validate};
-    use std::io::Read;
+    use std::io::{Read, Write};
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.is_empty() {
         return None;
@@ -76,8 +76,15 @@ fn release_command() -> Option<i32> {
         .unwrap_or(-1);
     let report = validate(&raw, &artifact, now);
     let bytes = serde_json::to_vec_pretty(&report).unwrap();
-    if std::fs::write(&args[2], bytes).is_err() {
-        eprintln!("FAIL: release report could not be written");
+    // create_new atomically refuses every existing destination, including links.
+    // Write through the opened handle; never check a path and then truncate it.
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&args[2])
+        .and_then(|mut file| file.write_all(&bytes));
+    if written.is_err() {
+        eprintln!("FAIL: release report requires a new writable output file");
         return Some(1);
     }
     eprintln!(
