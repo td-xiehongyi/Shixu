@@ -1253,3 +1253,350 @@ fn default_cell_style_zero_retains_its_explicit_date_format() {
     assert_eq!(r.status, PartStatus::Success);
     assert_eq!(text(&r), "2026-10-12");
 }
+fn fix1_change(fmt: &str, id: &str, part: &str, from: &str, to: &str) -> Vec<u8> {
+    rewrite(
+        &fixture(fmt, id),
+        |name, bytes| {
+            if name == part {
+                let s = String::from_utf8(bytes).unwrap();
+                assert!(s.contains(from));
+                s.replace(from, to).into_bytes()
+            } else {
+                bytes
+            }
+        },
+        &[],
+        zip::CompressionMethod::Stored,
+    )
+}
+#[test]
+fn fix1_f1_default_hidden_rows_are_omitted_but_counted() {
+    let bytes = fix1_change(
+        "xlsx",
+        "visible",
+        "xl/worksheets/sheet1.xml",
+        "<sheetData>",
+        "<sheetFormatPr defaultRowHeight=\"15\" zeroHeight=\"1\"/><sheetData>",
+    );
+    let r = parse("xlsx", &bytes, &ParserLimits::default());
+    assert_eq!(r.status, PartStatus::PartialParse);
+    assert!(r.blocks.is_empty());
+    let limits = ParserLimits {
+        max_xlsx_nonempty_cells: 0,
+        ..ParserLimits::default()
+    };
+    assert_eq!(
+        parse("xlsx", &bytes, &limits).status,
+        PartStatus::LimitExceeded
+    );
+}
+#[test]
+fn fix1_f1_explicit_row_visibility_and_default_visible_controls() {
+    for zero_height in ["0", "false", "1", "true"] {
+        let bytes = fix1_change(
+            "xlsx",
+            "visible",
+            "xl/worksheets/sheet1.xml",
+            "<sheetData>",
+            &format!(
+                "<sheetFormatPr defaultRowHeight=\"15\" zeroHeight=\"{zero_height}\"/><sheetData>"
+            ),
+        );
+        let override_bytes = rewrite(
+            &bytes,
+            |name, b| {
+                if name.ends_with("sheet1.xml") {
+                    String::from_utf8(b)
+                        .unwrap()
+                        .replace("<row r=\"1\" >", "<row r=\"1\" hidden=\"0\">")
+                        .into_bytes()
+                } else {
+                    b
+                }
+            },
+            &[],
+            zip::CompressionMethod::Stored,
+        );
+        let r = parse("xlsx", &override_bytes, &ParserLimits::default());
+        assert_eq!(r.status, PartStatus::Success);
+        assert_eq!(text(&r), "2026年10月12日9:00高数考试");
+    }
+}
+#[test]
+fn fix1_f2_floating_frame_paragraph_is_partial_and_omitted() {
+    let bytes = fix1_change(
+        "docx",
+        "paragraph",
+        "word/document.xml",
+        "<w:p>",
+        "<w:p><w:pPr><w:framePr w:hAnchor=\"page\" w:vAnchor=\"page\" w:x=\"100\" w:y=\"100\"/></w:pPr>",
+    );
+    let r = parse("docx", &bytes, &ParserLimits::default());
+    assert_eq!(r.status, PartStatus::PartialParse);
+    assert!(r.blocks.is_empty());
+}
+#[test]
+fn fix1_f2_normal_paragraph_properties_control() {
+    let bytes = fix1_change(
+        "docx",
+        "paragraph",
+        "word/document.xml",
+        "<w:p>",
+        "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+    );
+    let r = parse("docx", &bytes, &ParserLimits::default());
+    assert_eq!(r.status, PartStatus::Success);
+    assert_eq!(text(&r), "2026年10月12日9:00高数考试");
+}
+#[test]
+fn fix1_f3_hidden_onoff_values_preserve_explicitly_visible_runs() {
+    let mut errors = vec![];
+    for property in ["vanish", "webHidden"] {
+        for (value, hidden) in [
+            ("0", false),
+            ("false", false),
+            ("off", false),
+            ("1", true),
+            ("true", true),
+            ("on", true),
+            ("", true),
+        ] {
+            let tag = if value.is_empty() {
+                format!("<w:{property}/>")
+            } else {
+                format!("<w:{property} w:val=\"{value}\"/>")
+            };
+            let bytes = fix1_change(
+                "docx",
+                "hidden_run",
+                "word/document.xml",
+                "<w:vanish/>",
+                &tag,
+            );
+            let r = parse("docx", &bytes, &ParserLimits::default());
+            let correct = if hidden {
+                r.status == PartStatus::PartialParse && r.blocks.is_empty()
+            } else {
+                r.status == PartStatus::Success && text(&r) == "2026年10月12日9:00高数考试"
+            };
+            if !correct {
+                errors.push(format!("{property}/{value}: {:?} {}", r.status, text(&r)));
+            }
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+#[test]
+fn fix1_f3_invalid_onoff_values_fail_without_tentative_text() {
+    let mut errors = vec![];
+    for property in ["vanish", "webHidden"] {
+        for value in ["maybe", "TRUE", "2"] {
+            let bytes = fix1_change(
+                "docx",
+                "hidden_run",
+                "word/document.xml",
+                "<w:vanish/>",
+                &format!("<w:{property} w:val=\"{value}\"/>"),
+            );
+            let r = parse("docx", &bytes, &ParserLimits::default());
+            if r.status != PartStatus::Unsupported || !r.blocks.is_empty() {
+                errors.push(format!("{property}/{value}: {:?}", r.status));
+            }
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+#[test]
+fn fix1_f4_invalid_qnames_and_xmlns_components_fail_closed() {
+    let mut errors = vec![];
+    for to in [
+        "<w:p 1bad=\"x\">",
+        "<w:p w:1bad=\"x\">",
+        "<w:p xmlns:1bad=\"urn:bad\">",
+        "<w:p xmlns:bad:name=\"urn:bad\">",
+        "<w:p w:bad:name=\"x\">",
+        "<w:p xmlns:_=\"urn:ok\" _:1bad=\"x\">",
+    ] {
+        let bytes = fix1_change("docx", "paragraph", "word/document.xml", "<w:p>", to);
+        let r = parse("docx", &bytes, &ParserLimits::default());
+        if r.status != PartStatus::Unsupported || !r.blocks.is_empty() {
+            errors.push(format!("{to}: {:?}", r.status));
+        }
+    }
+    let bytes = fix1_change("docx", "paragraph", "word/document.xml", "w:t>", "w:1bad>");
+    let r = parse("docx", &bytes, &ParserLimits::default());
+    if r.status != PartStatus::Unsupported {
+        errors.push(format!("element: {:?}", r.status));
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+#[test]
+fn fix1_f4_xml_declarations_require_one_legal_prolog_position() {
+    let mut errors = vec![];
+    for prefix in [
+        "<?xml version=\"1.0\"?><?xml version=\"1.0\"?>",
+        " <?xml version=\"1.0\"?>",
+        "<!--before--><?xml version=\"1.0\"?>",
+        "\n<?xml version=\"1.0\"?>",
+        "<?xml version=\"1.0\" unknown=\"x\"?>",
+        "<?xml version=\"1.0\" standalone=\"maybe\"?>",
+        "<?xml version=\"1.0\" standalone=\"yes\" encoding=\"UTF-8\"?>",
+        "<?xml version=\"1.0\" version=\"1.0\"?>",
+    ] {
+        let bytes = fix1_change(
+            "docx",
+            "paragraph",
+            "word/document.xml",
+            "<w:document ",
+            &format!("{prefix}<w:document "),
+        );
+        let r = parse("docx", &bytes, &ParserLimits::default());
+        if r.status != PartStatus::Unsupported || !r.blocks.is_empty() {
+            errors.push(format!("{prefix}: {:?}", r.status));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+#[test]
+fn fix1_f4_valid_unicode_names_prefixes_and_references_control() {
+    let mut errors = vec![];
+    for prefix in [
+        "",
+        "<?xml version=\"1.0\"?>",
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+    ] {
+        let bytes = fix1_change(
+            "docx",
+            "paragraph",
+            "word/document.xml",
+            "<w:document ",
+            &format!("{prefix}<w:document "),
+        );
+        let bytes = rewrite(
+            &bytes,
+            |n, b| {
+                if n == "word/document.xml" {
+                    String::from_utf8(b)
+                        .unwrap()
+                        .replace(
+                            "<w:p>",
+                            "<w:p xmlns:通知=\"urn:valid\" 通知:字段=\"x\" Á=\"x\">",
+                        )
+                        .replace("2026年", "&#50;026年")
+                        .into_bytes()
+                } else {
+                    b
+                }
+            },
+            &[],
+            zip::CompressionMethod::Stored,
+        );
+        let r = parse("docx", &bytes, &ParserLimits::default());
+        if r.status != PartStatus::Success || text(&r) != "2026年10月12日9:00高数考试" {
+            errors.push(format!("valid {prefix}: {:?}", r.status));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+    assert_eq!(result("docx", "renamed_prefix").status, PartStatus::Success);
+    assert_eq!(result("docx", "dtd").status, PartStatus::Unsupported);
+}
+fn fix1_style(apply: &str, xfid: &str) -> String {
+    format!(
+        "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\"/></cellStyleXfs><cellXfs count=\"1\"><xf numFmtId=\"14\" xfId=\"{xfid}\" applyNumberFormat=\"{apply}\"/></cellXfs>"
+    )
+}
+#[test]
+fn fix1_f5_disabled_number_format_cannot_establish_date() {
+    let mut errors = vec![];
+    for value in ["0", "false"] {
+        let bytes = fix1_change(
+            "xlsx",
+            "date1900",
+            "xl/styles.xml",
+            "<cellXfs><xf numFmtId=\"14\"/></cellXfs>",
+            &fix1_style(value, "0"),
+        );
+        let r = parse("xlsx", &bytes, &ParserLimits::default());
+        if r.status != PartStatus::PartialParse
+            || text(&r) != "46307"
+            || !r.blocks[0]
+                .quality_flags
+                .contains(&QualityFlag::UncertainDate)
+        {
+            errors.push(format!("{value}: {:?} {}", r.status, text(&r)));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+#[test]
+fn fix1_f5_enabled_format_and_formula_controls() {
+    for value in ["1", "true"] {
+        let bytes = fix1_change(
+            "xlsx",
+            "date1900",
+            "xl/styles.xml",
+            "<cellXfs><xf numFmtId=\"14\"/></cellXfs>",
+            &fix1_style(value, "0"),
+        );
+        let r = parse("xlsx", &bytes, &ParserLimits::default());
+        assert_eq!(r.status, PartStatus::Success);
+        assert_eq!(text(&r), "2026-10-12");
+        let formula = rewrite(
+            &bytes,
+            |n, b| {
+                if n.ends_with("sheet1.xml") {
+                    String::from_utf8(b)
+                        .unwrap()
+                        .replace("<v>", "<f>TODAY()</f><v>")
+                        .into_bytes()
+                } else {
+                    b
+                }
+            },
+            &[],
+            zip::CompressionMethod::Stored,
+        );
+        let r = parse("xlsx", &formula, &ParserLimits::default());
+        assert_eq!(r.status, PartStatus::PartialParse);
+        assert!(
+            r.blocks[0]
+                .quality_flags
+                .contains(&QualityFlag::FormulaDerived)
+        );
+        assert!(
+            r.blocks[0]
+                .quality_flags
+                .contains(&QualityFlag::UncertainDate)
+        );
+    }
+    assert_eq!(result("xlsx", "date1900").status, PartStatus::Success);
+}
+#[test]
+fn fix1_f1_and_f5_invalid_boolean_format_metadata_fail_closed() {
+    let mut errors = vec![];
+    for value in ["yes", "on", "2"] {
+        let row = fix1_change(
+            "xlsx",
+            "visible",
+            "xl/worksheets/sheet1.xml",
+            "<sheetData>",
+            &format!("<sheetFormatPr zeroHeight=\"{value}\"/><sheetData>"),
+        );
+        let r = parse("xlsx", &row, &ParserLimits::default());
+        if r.status != PartStatus::Unsupported || !r.blocks.is_empty() {
+            errors.push(format!("zeroHeight {value}: {:?}", r.status));
+        }
+        let style = fix1_change(
+            "xlsx",
+            "date1900",
+            "xl/styles.xml",
+            "<cellXfs><xf numFmtId=\"14\"/></cellXfs>",
+            &fix1_style(value, "0"),
+        );
+        let r = parse("xlsx", &style, &ParserLimits::default());
+        if r.status != PartStatus::Unsupported || !r.blocks.is_empty() {
+            errors.push(format!("applyNumberFormat {value}: {:?}", r.status));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

@@ -62,7 +62,7 @@ fn parse(bytes: &[u8], limits: &ParserLimits, output: &mut Output) -> Parse<()> 
                 if !node.is(S, "styleSheet") {
                     return Err(PartReason::FormatUnsupported);
                 }
-                node.unique_children(S, &["numFmts", "cellXfs"])?;
+                node.unique_children(S, &["numFmts", "cellXfs", "cellStyleXfs"])?;
                 if let Some(formats) = node.child(S, "numFmts") {
                     for n in &formats.children {
                         if !n.is(S, "numFmt") {
@@ -82,7 +82,18 @@ fn parse(bytes: &[u8], limits: &ParserLimits, output: &mut Output) -> Parse<()> 
                         if !xf.is(S, "xf") {
                             return Err(PartReason::FormatUnsupported);
                         }
-                        styles.push(integer(xf.attr("", "numFmtId"))?);
+                        let number_format = integer(xf.attr("", "numFmtId"))?;
+                        let applied = xf.attr("", "applyNumberFormat").map(boolean).transpose()?;
+                        let base = xf.attr("", "xfId").map(|v| integer(Some(v))).transpose()?;
+                        // Disabled direct formats and unresolved inherited formats
+                        // cannot establish dates in this deliberately small profile.
+                        styles.push(
+                            if applied == Some(false) || applied.is_none() && base.is_some() {
+                                None
+                            } else {
+                                Some(number_format)
+                            },
+                        );
                     }
                 }
             }
@@ -156,7 +167,7 @@ struct SheetContext<'a> {
     hidden: bool,
     date1904: bool,
     strings: &'a [String],
-    styles: &'a [u32],
+    styles: &'a [Option<u32>],
     custom: &'a BTreeMap<u32, String>,
 }
 fn read_sheet(
@@ -169,7 +180,22 @@ fn read_sheet(
     if !node.is(S, "worksheet") {
         return Err(PartReason::FormatUnsupported);
     }
-    node.unique_children(S, &["sheetData", "dimension", "cols", "mergeCells"])?;
+    node.unique_children(
+        S,
+        &[
+            "sheetData",
+            "dimension",
+            "cols",
+            "mergeCells",
+            "sheetFormatPr",
+        ],
+    )?;
+    let default_hidden = node
+        .child(S, "sheetFormatPr")
+        .and_then(|p| p.attr("", "zeroHeight"))
+        .map(boolean)
+        .transpose()?
+        .unwrap_or(false);
     let mut hidden_cols = BTreeSet::new();
     let mut merges = vec![];
     for n in &node.children {
@@ -228,7 +254,11 @@ fn read_sheet(
         }
         limits.check(Resource::XlsxRows, u64::from(row_num))?;
         limits.check(Resource::XlsxRows, rows.len() as u64)?;
-        let hidden = boolean(row.attr("", "hidden").unwrap_or("0"))?;
+        let hidden = row
+            .attr("", "hidden")
+            .map(boolean)
+            .transpose()?
+            .unwrap_or(default_hidden);
         output.partial |= hidden;
         for cell in &row.children {
             if !cell.is(S, "c") {
@@ -303,8 +333,9 @@ fn read_sheet(
                                     .ok_or(PartReason::FormatUnsupported)
                             })
                             .transpose()?
-                            .unwrap_or_else(|| cx.styles.first().copied().unwrap_or(0));
-                        match date_value(raw, fmt, cx.custom, cx.date1904) {
+                            .unwrap_or_else(|| cx.styles.first().copied().unwrap_or(Some(0)));
+                        match fmt.and_then(|format| date_value(raw, format, cx.custom, cx.date1904))
+                        {
                             Some(v) => v,
                             None => {
                                 output.partial = true;

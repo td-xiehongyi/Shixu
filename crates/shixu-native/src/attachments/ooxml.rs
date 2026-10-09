@@ -1,7 +1,11 @@
 //! Controlled OOXML algorithms only. Buffer archive callbacks until full success.
 //! No extraction to disk, entity resolver, process launch or network capability.
 use super::{container::read_bounded_archive, host::DetectedType};
-use quick_xml::{events::Event, name::ResolveResult, reader::NsReader};
+use quick_xml::{
+    events::{BytesDecl, BytesStart, Event},
+    name::ResolveResult,
+    reader::NsReader,
+};
 use shixu_core::{
     contracts::{AppResult, error::AppError, notification::*},
     notifications::limits::Resource,
@@ -77,6 +81,8 @@ fn xml(bytes: &[u8], limits: &ParserLimits, reserved: u64) -> Parse<Node> {
     reader.config_mut().check_end_names = true;
     let mut stack: Vec<Node> = vec![];
     let mut root = None;
+    let mut first_event = true;
+    let mut declaration_seen = false;
     let mut nodes = 0u64;
     let mut memory = reserved.saturating_add(bytes.len() as u64);
     loop {
@@ -88,6 +94,9 @@ fn xml(bytes: &[u8], limits: &ParserLimits, reserved: u64) -> Parse<Node> {
                 nodes += 1;
                 if nodes > 250_000 || stack.len() >= 64 {
                     return Err(PartReason::LimitExceeded);
+                }
+                if !qname(e.name().as_ref()) {
+                    return Err(PartReason::FormatUnsupported);
                 }
                 let (ns, local) = reader.resolver().resolve_element(e.name());
                 let mut node = Node {
@@ -102,6 +111,9 @@ fn xml(bytes: &[u8], limits: &ParserLimits, reserved: u64) -> Parse<Node> {
                         return Err(PartReason::LimitExceeded);
                     }
                     let a = a.map_err(|_| PartReason::FormatUnsupported)?;
+                    if !qname(a.key.as_ref()) {
+                        return Err(PartReason::FormatUnsupported);
+                    }
                     if a.key.as_ref() == "xmlns" || a.key.as_ref().starts_with("xmlns:") {
                         continue;
                     }
@@ -138,7 +150,10 @@ fn xml(bytes: &[u8], limits: &ParserLimits, reserved: u64) -> Parse<Node> {
                     stack.push(node)
                 }
             }
-            Event::End(_) => {
+            Event::End(e) => {
+                if !qname(e.name().as_ref()) {
+                    return Err(PartReason::FormatUnsupported);
+                }
                 let node = stack.pop().ok_or(PartReason::FormatUnsupported)?;
                 append(node, &mut stack, &mut root)?;
             }
@@ -184,27 +199,69 @@ fn xml(bytes: &[u8], limits: &ParserLimits, reserved: u64) -> Parse<Node> {
                 add_text(&s, &mut stack)?;
             }
             Event::Decl(e) => {
-                if root.is_some()
-                    || !stack.is_empty()
-                    || e.version()
-                        .map_err(|_| PartReason::FormatUnsupported)?
-                        .as_ref()
-                        != "1.0"
-                    || e.encoding()
-                        .is_some_and(|e| e.map_or(true, |v| !v.eq_ignore_ascii_case("utf-8")))
-                {
+                if !first_event || declaration_seen || root.is_some() || !stack.is_empty() {
                     return Err(PartReason::FormatUnsupported);
                 }
+                declaration(&e)?;
+                declaration_seen = true;
             }
             Event::DocType(_) | Event::PI(_) => return Err(PartReason::FormatUnsupported),
             Event::Comment(_) => {}
             Event::Eof => break,
         }
+        first_event = false;
     }
     if !stack.is_empty() {
         return Err(PartReason::FormatUnsupported);
     }
     root.ok_or(PartReason::FormatUnsupported)
+}
+// XML1.0 Fifth Edition NameStartChar/NameChar, excluding colon for NCName.
+// Namespace QNames contain either one NCName or prefix:local NCNames.
+fn ncname_start(c: char) -> bool {
+    matches!(c, '_'|'A'..='Z'|'a'..='z'|'\u{c0}'..='\u{d6}'|'\u{d8}'..='\u{f6}'|
+        '\u{f8}'..='\u{2ff}'|'\u{370}'..='\u{37d}'|'\u{37f}'..='\u{1fff}'|
+        '\u{200c}'..='\u{200d}'|'\u{2070}'..='\u{218f}'|'\u{2c00}'..='\u{2fef}'|
+        '\u{3001}'..='\u{d7ff}'|'\u{f900}'..='\u{fdcf}'|'\u{fdf0}'..='\u{fffd}'|
+        '\u{10000}'..='\u{effff}')
+}
+fn ncname(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars.next().is_some_and(ncname_start) && chars.all(|c| {
+        ncname_start(c)
+            || matches!(c,'-'|'.'|'0'..='9'|'\u{b7}'|'\u{300}'..='\u{36f}'|'\u{203f}'..='\u{2040}')
+    })
+}
+fn qname(s: &str) -> bool {
+    if let Some((prefix, local)) = s.split_once(':') {
+        ncname(prefix) && ncname(local)
+    } else {
+        ncname(s)
+    }
+}
+fn declaration(e: &BytesDecl<'_>) -> Parse<()> {
+    if !valid_text(e.as_ref()) {
+        return Err(PartReason::FormatUnsupported);
+    }
+    let start = BytesStart::from_content(e.as_ref(), 3);
+    let mut attrs = start.attributes();
+    let version = attrs
+        .next()
+        .ok_or(PartReason::FormatUnsupported)?
+        .map_err(|_| PartReason::FormatUnsupported)?;
+    if version.key.as_ref() != "version" || version.value.as_ref() != "1.0" {
+        return Err(PartReason::FormatUnsupported);
+    }
+    let mut stage = 0;
+    for attr in attrs {
+        let attr = attr.map_err(|_| PartReason::FormatUnsupported)?;
+        match attr.key.as_ref() {
+            "encoding" if stage == 0 && attr.value.eq_ignore_ascii_case("utf-8") => stage = 1,
+            "standalone" if stage < 2 && matches!(attr.value.as_ref(), "yes" | "no") => stage = 2,
+            _ => return Err(PartReason::FormatUnsupported),
+        }
+    }
+    Ok(())
 }
 fn add_text(s: &str, stack: &mut [Node]) -> Parse<()> {
     if let Some(n) = stack.last_mut() {

@@ -128,6 +128,12 @@ impl Document<'_> {
                 .paragraph
                 .checked_add(1)
                 .ok_or(PartReason::LimitExceeded)?;
+            if n.children(W, "pPr")
+                .any(|p| p.child(W, "framePr").is_some())
+            {
+                self.output.partial = true;
+                return Ok(());
+            }
             let mut text = String::new();
             self.run(n, &mut text)?;
             self.output.push(
@@ -199,13 +205,24 @@ impl Document<'_> {
         }
     }
     fn run(&mut self, n: &Node, text: &mut String) -> Parse<()> {
-        if n.is(W, "r")
-            && n.child(W, "rPr").is_some_and(|p| {
-                p.child(W, "vanish").is_some() || p.child(W, "webHidden").is_some()
-            })
-        {
-            self.output.partial = true;
-            return Ok(());
+        if n.is(W, "r") {
+            let mut hidden = false;
+            for properties in n.children(W, "rPr") {
+                properties.unique_children(W, &["vanish", "webHidden"])?;
+                for name in ["vanish", "webHidden"] {
+                    if let Some(property) = properties.child(W, name) {
+                        hidden |= match property.attr(W, "val") {
+                            None | Some("true" | "on" | "1") => true,
+                            Some("false" | "off" | "0") => false,
+                            _ => return Err(PartReason::FormatUnsupported),
+                        };
+                    }
+                }
+            }
+            if hidden {
+                self.output.partial = true;
+                return Ok(());
+            }
         }
         if n.is(W, "t") {
             text.push_str(&n.text);
