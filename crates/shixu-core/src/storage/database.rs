@@ -39,7 +39,7 @@ impl Database {
                 tx.execute("INSERT INTO protection_metadata VALUES (1,?1)", [&sealed])
                     .map_err(storage_error)?;
             }
-            1 => {
+            1 | 2 => {
                 let sealed: Vec<u8> = tx
                     .query_row(
                         "SELECT sentinel FROM protection_metadata WHERE id=1",
@@ -52,6 +52,10 @@ impl Database {
                 }
             }
             _ => return Err(AppError::Unsupported),
+        }
+        if version < 2 {
+            tx.execute_batch(include_str!("migrations/0002_source_recovery.sql"))
+                .map_err(storage_error)?;
         }
         tx.commit().map_err(storage_error)?;
         Ok(Self {

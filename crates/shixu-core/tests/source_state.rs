@@ -216,3 +216,76 @@ fn cursor_size_exact_boundary() {
     );
     assert_eq!(s.cursor(&c, "g").unwrap(), Some("x".repeat(4096)));
 }
+#[test]
+fn durable_source_binding_rejects_reconfiguration_and_accepts_group_reordering() {
+    let path = std::env::temp_dir().join(format!("shixu-n2-binding-{}.db", Uuid::new_v4()));
+    let mut c = config();
+    c.allowed_group_ids.push("second".into());
+    {
+        let s = MessageStore::new(Arc::new(
+            Database::open(&path, Arc::new(SyntheticProtector(AtomicBool::new(false)))).unwrap(),
+        ));
+        assert_eq!(s.bind_source(&c), Ok(false));
+    }
+    let s = MessageStore::new(Arc::new(
+        Database::open(&path, Arc::new(SyntheticProtector(AtomicBool::new(false)))).unwrap(),
+    ));
+    let mut reordered = c.clone();
+    reordered.allowed_group_ids.reverse();
+    assert_eq!(s.bind_source(&reordered), Ok(true));
+    for i in 0..4 {
+        let mut changed = c.clone();
+        match i {
+            0 => changed.account_id = "synthetic-B".into(),
+            1 => changed.adapter_type = "other".into(),
+            2 => changed.allowed_group_ids.push("third".into()),
+            _ => changed.timezone = "Asia/Shanghai".into(),
+        };
+        assert_eq!(s.bind_source(&changed), Err(AppError::InvalidInput));
+    }
+    drop(s);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn durable_recovery_anchor_progress_and_epoch_are_independent_of_live_cursor() {
+    let (s, _) = store();
+    let c = config();
+    s.bind_source(&c).unwrap();
+    s.append_with_cursor(&c, message(&c), "c1").unwrap();
+    s.begin_recovery(&c, 10).unwrap();
+    let first = s.recoveries(&c).unwrap().remove(0);
+    let mut live = message(&c);
+    live.native_message_id = "n3".into();
+    s.append_with_cursor(&c, live, "c3").unwrap();
+    assert_eq!(s.recoveries(&c).unwrap()[0], first);
+    s.advance_recovery(&c, "g", first.epoch, "c1", "c2", false)
+        .unwrap();
+    s.begin_recovery(&c, 20).unwrap();
+    let resumed = s.recoveries(&c).unwrap().remove(0);
+    assert_eq!(resumed.anchor.as_deref(), Some("c1"));
+    assert_eq!(resumed.recovery_cursor.as_deref(), Some("c2"));
+    assert_eq!(resumed.since, 10);
+    assert!(resumed.epoch > first.epoch);
+    assert_eq!(
+        s.advance_recovery(&c, "g", first.epoch, "c2", "c4", true),
+        Err(AppError::Conflict)
+    );
+    assert_eq!(s.cursor(&c, "g").unwrap().as_deref(), Some("c3"));
+    s.advance_recovery(&c, "g", resumed.epoch, "c2", "c4", true)
+        .unwrap();
+    s.begin_recovery(&c, 30).unwrap();
+    let next = s.recoveries(&c).unwrap().remove(0);
+    assert_eq!(next.anchor.as_deref(), Some("c3"));
+    assert_eq!(next.since, 30);
+    assert!(!next.complete);
+}
+#[test]
+fn legacy_unbound_identity_requires_explicit_new_source() {
+    let (s, _) = store();
+    let c = config();
+    s.append(&c, message(&c)).unwrap();
+    assert_eq!(s.bind_source(&c), Err(AppError::Conflict));
+    let mut next = c;
+    next.source_id = SourceId::from_uuid(Uuid::from_u128(11));
+    assert_eq!(s.bind_source(&next), Ok(false));
+}

@@ -4,7 +4,6 @@ use shixu_core::{
     contracts::{AppResult, UtcMillis, error::AppError, notification::*, vault::SecretBytes},
     notifications::{AppendOutcome, MessageStore, source::*},
 };
-use std::collections::{HashMap, HashSet};
 /// Own on a dedicated receive worker: persistence acknowledgments and deliveries
 /// must be serialized. At most one live delivery awaits durable acknowledgment.
 /// Construction/configuration is internal trusted application configuration;
@@ -17,8 +16,7 @@ pub struct NativeQQAdapter<T: ReceiveTransport> {
     config: Option<SourceConfig>,
     health: SourceHealth,
     pending: Option<Delivery>,
-    identities: HashMap<SourceId, SourceConfig>,
-    recovered_groups: HashSet<String>,
+    recovery_write_failed: bool,
 }
 impl<T: ReceiveTransport> NativeQQAdapter<T> {
     pub fn new(
@@ -35,8 +33,7 @@ impl<T: ReceiveTransport> NativeQQAdapter<T> {
             config: None,
             health: SourceHealth::default(),
             pending: None,
-            identities: HashMap::new(),
-            recovered_groups: HashSet::new(),
+            recovery_write_failed: false,
         }
     }
     /// Call only after a successful calendar apply acknowledgment for this source.
@@ -45,6 +42,27 @@ impl<T: ReceiveTransport> NativeQQAdapter<T> {
             return Err(AppError::InvalidInput);
         }
         self.health.applied(at);
+        Ok(())
+    }
+    /// Scope equal opaque cursor values by source, group and recovery epoch.
+    pub fn recovery_handle(&self, group: &str) -> AppResult<String> {
+        let c = self.ready()?;
+        self.store
+            .recoveries(c)?
+            .into_iter()
+            .find(|r| r.group_id == group && !r.complete)
+            .map(|r| r.handle(c.source_id))
+            .ok_or(AppError::InvalidInput)
+    }
+    fn refresh_gaps(&mut self) -> AppResult<()> {
+        if let Some(c) = &self.config {
+            let states = self.store.recoveries(c)?;
+            self.health.gaps = states
+                .iter()
+                .filter(|r| !r.complete)
+                .map(|r| Gap { since: r.since })
+                .collect();
+        }
         Ok(())
     }
     fn normalize(&self, c: &SourceConfig, mut d: Delivery) -> AppResult<Delivery> {
@@ -62,7 +80,14 @@ impl<T: ReceiveTransport> NativeQQAdapter<T> {
     }
     fn failure(&mut self, error: AppError) {
         self.health.failed(error, (self.now)());
-        self.recovered_groups.clear();
+        if let Some(c) = &self.config {
+            self.recovery_write_failed = self.store.begin_recovery(c, (self.now)()).is_err();
+            if !self.recovery_write_failed {
+                let _ = self.refresh_gaps();
+            }
+        }
+        // If recovery persistence failed, retain the conservative in-memory gap.
+        // Resuming this durable binding creates a gap before reads after restart.
     }
     fn ready(&self) -> AppResult<&SourceConfig> {
         match self.health.connection_state {
@@ -80,6 +105,12 @@ impl<T: ReceiveTransport> NativeQQAdapter<T> {
     /// Durable acknowledgment. Failure keeps the pending delivery and gap. Never
     /// refreshes last_applied_at; calendar application must report that separately.
     pub fn persist_pending(&mut self) -> AppResult<AppendOutcome> {
+        if self.recovery_write_failed {
+            let c = self.config.as_ref().ok_or(AppError::Disconnected)?;
+            self.store.begin_recovery(c, (self.now)())?;
+            self.recovery_write_failed = false;
+            self.refresh_gaps()?;
+        }
         let d = self.pending.as_ref().ok_or(AppError::Conflict)?;
         let c = self.config.as_ref().ok_or(AppError::Disconnected)?;
         match self
@@ -116,14 +147,9 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
         {
             return Err(AppError::InvalidInput);
         }
-        if let Some(old) = self.identities.get(&config.source_id)
-            && (old.account_id != config.account_id
-                || old.adapter_type != config.adapter_type
-                || old.allowed_group_ids != config.allowed_group_ids
-                || old.timezone != config.timezone)
-        {
-            return Err(AppError::InvalidInput);
-        }
+        config.allowed_group_ids.sort();
+        config.allowed_group_ids.dedup();
+        let resumed = self.store.bind_source(&config)?;
         if self.config.is_some() {
             self.transport
                 .disconnect()
@@ -136,10 +162,13 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
             .is_some_and(|old| old.source_id != config.source_id);
         if changed {
             self.health = SourceHealth::default();
-            self.recovered_groups.clear();
         }
-        self.identities.insert(config.source_id, config.clone());
         self.config = Some(config.clone());
+        if resumed {
+            self.store.begin_recovery(&config, (self.now)())?;
+        }
+        self.recovery_write_failed = false;
+        self.refresh_gaps()?;
         let caps = match self.transport.connect(&self.endpoint, &config, token) {
             Ok(c) => c,
             Err(e) => {
@@ -207,19 +236,30 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
         {
             return Err(AppError::Unsupported);
         }
-        // Never accept a caller's unscoped cursor: resolve exactly one current
-        // source/account/group durable cursor before invoking the receive transport.
-        let mut owners = vec![];
-        for group in &c.allowed_group_ids {
-            if self.store.cursor(&c, group)?.as_deref() == Some(cursor) {
-                owners.push(group.clone());
-            }
-        }
+        // Recovery progress is independent of the live cursor. A handle selects
+        // one group/epoch even when opaque cursor strings collide across groups.
+        let recoveries = self.store.recoveries(&c)?;
+        let owners: Vec<_> = recoveries
+            .into_iter()
+            .filter(|r| {
+                !r.complete
+                    && if cursor.starts_with("recovery-v1-") {
+                        r.handle(c.source_id) == cursor
+                    } else {
+                        r.recovery_cursor.as_deref() == Some(cursor)
+                    }
+            })
+            .collect();
         if owners.len() != 1 {
             return Err(AppError::InvalidInput);
         }
-        let group = &owners[0];
-        let batch = match self.transport.backfill(group, cursor) {
+        let recovery = &owners[0];
+        let group = &recovery.group_id;
+        let from = recovery
+            .recovery_cursor
+            .as_deref()
+            .ok_or(AppError::Unsupported)?;
+        let batch = match self.transport.backfill(group, from) {
             Ok(b) => b,
             Err(e) => {
                 self.failure(e);
@@ -236,15 +276,22 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
             return Err(AppError::InvalidInput);
         }
         let mut messages = vec![];
+        let mut next = from.to_string();
         for d in batch.deliveries {
             let d = self.normalize(&c, d).inspect_err(|e| self.failure(*e))?;
             self.health.received((self.now)());
-            match self
-                .store
-                .append_with_cursor(&c, d.message.clone(), &d.cursor)
+            if d.cursor.is_empty()
+                || d.cursor.len() > 4096
+                || d.cursor.contains(['/', '\\', ':'])
+                || d.cursor.chars().any(char::is_control)
             {
+                self.failure(AppError::InvalidInput);
+                return Err(AppError::InvalidInput);
+            }
+            match self.store.append(&c, d.message.clone()) {
                 Ok(AppendOutcome::Stored | AppendOutcome::Duplicate) => {
                     self.health.persisted((self.now)());
+                    next = d.cursor;
                     messages.push(d.message);
                 }
                 Ok(_) => {
@@ -257,17 +304,10 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
                 }
             }
         }
-        if batch.complete {
-            self.recovered_groups.insert(group.clone());
-        } else {
-            self.recovered_groups.remove(group);
-        }
-        if c.allowed_group_ids
-            .iter()
-            .all(|g| self.recovered_groups.contains(g))
-        {
-            self.health.gaps.clear();
-        }
+        self.store
+            .advance_recovery(&c, group, recovery.epoch, from, &next, batch.complete)
+            .inspect_err(|e| self.failure(*e))?;
+        self.refresh_gaps()?;
         Ok(messages)
     }
 }

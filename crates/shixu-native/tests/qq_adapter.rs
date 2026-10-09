@@ -493,3 +493,281 @@ fn backfill_persistence_failure_keeps_gap() {
     assert!(!a.health().gaps.is_empty());
     assert_eq!(a.health().last_persisted_at, Some(100));
 }
+#[test]
+fn live_cursor_does_not_skip_original_missing_interval() {
+    let (mut a, _, _) = connected(
+        vec![
+            Ok(Some(delivery("c1"))),
+            Err(AppError::Disconnected),
+            Ok(Some({
+                let mut d = delivery("c3");
+                d.message.native_message_id = "synthetic-n3".into();
+                d
+            })),
+        ],
+        vec![Ok(BackfillBatch {
+            group_id: "synthetic-group".into(),
+            deliveries: vec![{
+                let mut d = delivery("c2");
+                d.message.native_message_id = "synthetic-n2".into();
+                d
+            }],
+            complete: true,
+        })],
+    );
+    a.next_message().unwrap();
+    a.persist_pending().unwrap();
+    a.next_message().unwrap_err();
+    a.connect(config(), token()).unwrap();
+    a.next_message().unwrap();
+    a.persist_pending().unwrap();
+    assert_eq!(a.backfill("c3"), Err(AppError::InvalidInput));
+    assert!(!a.health().gaps.is_empty());
+    assert_eq!(a.backfill("c1").unwrap().len(), 1);
+    assert!(a.health().gaps.is_empty());
+}
+#[test]
+fn partial_recovery_and_live_receive_keep_recovery_progress() {
+    let (mut a, _, _) = connected(
+        vec![
+            Ok(Some(delivery("c1"))),
+            Err(AppError::Disconnected),
+            Ok(Some({
+                let mut d = delivery("c4");
+                d.message.native_message_id = "n4".into();
+                d
+            })),
+        ],
+        vec![
+            Ok(BackfillBatch {
+                group_id: "synthetic-group".into(),
+                deliveries: vec![delivery("c2")],
+                complete: false,
+            }),
+            Ok(BackfillBatch {
+                group_id: "synthetic-group".into(),
+                deliveries: vec![delivery("c3")],
+                complete: true,
+            }),
+        ],
+    );
+    a.next_message().unwrap();
+    a.persist_pending().unwrap();
+    a.next_message().unwrap_err();
+    a.connect(config(), token()).unwrap();
+    a.backfill("c1").unwrap();
+    a.next_message().unwrap();
+    a.persist_pending().unwrap();
+    assert_eq!(a.backfill("c4"), Err(AppError::InvalidInput));
+    assert!(!a.health().gaps.is_empty());
+    a.backfill("c2").unwrap();
+    assert!(a.health().gaps.is_empty());
+}
+#[test]
+fn source_switch_preserves_unresolved_gap_without_backfill() {
+    let (mut a, _, _) = setup(
+        vec![Ok(Some(delivery("c1"))), Err(AppError::Disconnected)],
+        vec![],
+        vec![SourceCapability::LiveMessages],
+        false,
+    );
+    a.connect(config(), token()).unwrap();
+    a.next_message().unwrap();
+    a.persist_pending().unwrap();
+    a.next_message().unwrap_err();
+    let mut b = config();
+    b.source_id = SourceId::from_uuid(Uuid::from_u128(17));
+    b.account_id = "synthetic-B".into();
+    a.connect(b, token()).unwrap();
+    a.connect(config(), token()).unwrap();
+    assert!(!a.health().gaps.is_empty());
+    assert_eq!(a.backfill("c1"), Err(AppError::Unsupported));
+    assert!(!a.health().gaps.is_empty());
+}
+fn reopened_adapter(
+    path: &std::path::Path,
+    events: Vec<AppResult<Option<Delivery>>>,
+) -> NativeQQAdapter<SyntheticTransport> {
+    let db = Database::open(
+        path,
+        Arc::new(SyntheticProtection(Arc::new(AtomicBool::new(false)))),
+    )
+    .unwrap();
+    let t = SyntheticTransport {
+        caps: vec![SourceCapability::LiveMessages],
+        events: events.into(),
+        batches: VecDeque::new(),
+        calls: Arc::new(AtomicUsize::new(0)),
+        auth_fail: false,
+    };
+    NativeQQAdapter::new(
+        t,
+        LoopbackEndpoint::parse("127.0.0.1:3001").unwrap(),
+        MessageStore::new(Arc::new(db)),
+        || 100,
+    )
+}
+#[test]
+fn restart_preserves_gap_and_durable_immutable_source_binding() {
+    let path = std::env::temp_dir().join(format!("shixu-n2-native-{}.db", Uuid::new_v4()));
+    {
+        let mut a = reopened_adapter(
+            &path,
+            vec![Ok(Some(delivery("c1"))), Err(AppError::Disconnected)],
+        );
+        a.connect(config(), token()).unwrap();
+        a.next_message().unwrap();
+        a.persist_pending().unwrap();
+        a.next_message().unwrap_err();
+    }
+    for i in 0..4 {
+        let mut a = reopened_adapter(&path, vec![]);
+        let mut c = config();
+        match i {
+            0 => c.account_id = "synthetic-B".into(),
+            1 => c.adapter_type = "other".into(),
+            2 => c.allowed_group_ids.push("second".into()),
+            _ => c.timezone = "Asia/Shanghai".into(),
+        };
+        assert_eq!(a.connect(c, token()), Err(AppError::InvalidInput));
+    }
+    {
+        let mut a = reopened_adapter(&path, vec![]);
+        a.connect(config(), token()).unwrap();
+        assert!(!a.health().gaps.is_empty());
+        assert_eq!(a.backfill("c1"), Err(AppError::Unsupported));
+        assert!(!a.health().gaps.is_empty());
+    }
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn equal_group_cursors_have_independent_scoped_recovery_handles() {
+    let mut c = config();
+    c.allowed_group_ids.push("synthetic-second".into());
+    let mut second = delivery("1");
+    second.message.group_id = "synthetic-second".into();
+    let (mut a, _, _) = setup(
+        vec![
+            Ok(Some(delivery("1"))),
+            Ok(Some(second)),
+            Err(AppError::Disconnected),
+        ],
+        vec![
+            Ok(BackfillBatch {
+                group_id: "synthetic-group".into(),
+                deliveries: vec![],
+                complete: true,
+            }),
+            Ok(BackfillBatch {
+                group_id: "synthetic-second".into(),
+                deliveries: vec![],
+                complete: true,
+            }),
+        ],
+        config().capability_set,
+        false,
+    );
+    a.connect(c.clone(), token()).unwrap();
+    for _ in 0..2 {
+        a.next_message().unwrap();
+        a.persist_pending().unwrap();
+    }
+    a.next_message().unwrap_err();
+    a.connect(c, token()).unwrap();
+    let first = a.recovery_handle("synthetic-group").unwrap();
+    let second = a.recovery_handle("synthetic-second").unwrap();
+    assert_ne!(first, second);
+    a.backfill(&first).unwrap();
+    assert!(!a.health().gaps.is_empty());
+    a.backfill(&second).unwrap();
+    assert!(a.health().gaps.is_empty());
+}
+#[test]
+fn failed_recovery_write_never_hides_disconnection_gap() {
+    let path = std::env::temp_dir().join(format!("shixu-n2-gap-fault-{}.db", Uuid::new_v4()));
+    {
+        let mut a = reopened_adapter(&path, vec![Ok(Some(delivery("c1")))]);
+        a.connect(config(), token()).unwrap();
+        a.next_message().unwrap();
+        a.persist_pending().unwrap();
+        let sql = rusqlite::Connection::open(&path).unwrap();
+        sql.execute_batch("CREATE TRIGGER synthetic_reject_recovery BEFORE INSERT ON source_recovery BEGIN SELECT RAISE(ABORT,'synthetic'); END;").unwrap();
+        a.disconnect().unwrap();
+        assert!(!a.health().gaps.is_empty());
+        assert_eq!(a.health().connection_state, ConnectionState::Disconnected);
+        sql.execute_batch("DROP TRIGGER synthetic_reject_recovery;")
+            .unwrap();
+    }
+    {
+        let mut a = reopened_adapter(&path, vec![]);
+        a.connect(config(), token()).unwrap();
+        assert!(!a.health().gaps.is_empty());
+    }
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn stale_scoped_handle_is_invalidated_on_reconnect() {
+    let (mut a, _, _) = connected(
+        vec![Ok(Some(delivery("c1"))), Err(AppError::Disconnected)],
+        vec![],
+    );
+    a.next_message().unwrap();
+    a.persist_pending().unwrap();
+    a.next_message().unwrap_err();
+    a.connect(config(), token()).unwrap();
+    let old = a.recovery_handle("synthetic-group").unwrap();
+    a.connect(config(), token()).unwrap();
+    let current = a.recovery_handle("synthetic-group").unwrap();
+    assert_ne!(old, current);
+    assert_eq!(a.backfill(&old), Err(AppError::InvalidInput));
+    assert!(!a.health().gaps.is_empty());
+}
+#[test]
+fn restart_without_clean_disconnect_requires_conservative_recovery() {
+    let path = std::env::temp_dir().join(format!("shixu-n2-crash-{}.db", Uuid::new_v4()));
+    {
+        let mut a = reopened_adapter(&path, vec![Ok(Some(delivery("c1")))]);
+        a.connect(config(), token()).unwrap();
+        a.next_message().unwrap();
+        a.persist_pending().unwrap();
+        assert!(a.health().gaps.is_empty());
+    }
+    {
+        let mut a = reopened_adapter(&path, vec![]);
+        a.connect(config(), token()).unwrap();
+        assert!(!a.health().gaps.is_empty());
+        assert_eq!(a.backfill("c1"), Err(AppError::Unsupported));
+    }
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn pending_retry_cannot_advance_live_cursor_before_failed_gap_write_recovers() {
+    let path = std::env::temp_dir().join(format!("shixu-n2-gap-retry-{}.db", Uuid::new_v4()));
+    {
+        let mut live = delivery("c3");
+        live.message.native_message_id = "n3".into();
+        let mut a = reopened_adapter(&path, vec![Ok(Some(delivery("c1"))), Ok(Some(live))]);
+        a.connect(config(), token()).unwrap();
+        a.next_message().unwrap();
+        a.persist_pending().unwrap();
+        a.next_message().unwrap();
+        let sql = rusqlite::Connection::open(&path).unwrap();
+        sql.execute_batch("CREATE TRIGGER synthetic_reject_cursor BEFORE UPDATE OF cursor ON sources BEGIN SELECT RAISE(ABORT,'synthetic'); END; CREATE TRIGGER synthetic_reject_recovery BEFORE INSERT ON source_recovery BEGIN SELECT RAISE(ABORT,'synthetic'); END;").unwrap();
+        assert_eq!(a.persist_pending(), Err(AppError::Conflict));
+        sql.execute_batch("DROP TRIGGER synthetic_reject_cursor;")
+            .unwrap();
+        assert_eq!(a.persist_pending(), Err(AppError::Conflict));
+        let cursor: String = sql
+            .query_row("SELECT cursor FROM sources", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cursor, "c1");
+        sql.execute_batch("DROP TRIGGER synthetic_reject_recovery;")
+            .unwrap();
+        assert_eq!(a.persist_pending(), Ok(AppendOutcome::Stored));
+        let anchor: String = sql
+            .query_row("SELECT anchor FROM source_recovery", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(anchor, "c1");
+    }
+    std::fs::remove_file(path).unwrap();
+}

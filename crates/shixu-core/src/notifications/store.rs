@@ -158,6 +158,89 @@ impl MessageStore {
             .map_err(storage_error)
         })
     }
+    /// Bind immutable technical identity once. Group membership is a canonical
+    /// set, independent of ordering; capabilities/enabled are runtime settings.
+    /// Returns true if this source already existed (resume requires recovery).
+    pub fn bind_source(&self, config: &SourceConfig) -> AppResult<bool> {
+        let mut groups = config.allowed_group_ids.clone();
+        groups.sort();
+        groups.dedup();
+        if config.adapter_type.is_empty()
+            || config.account_id.is_empty()
+            || config.timezone.is_empty()
+            || groups.is_empty()
+            || groups.iter().any(|g| g.is_empty())
+        {
+            return Err(AppError::InvalidInput);
+        }
+        let groups_json = serde_json::to_string(&groups).map_err(|_| AppError::InvalidInput)?;
+        self.db.transaction(|tx|{
+            let old:Option<(String,String,String,String)>=tx.query_row("SELECT adapter_type,account_id,groups_json,timezone FROM source_bindings WHERE source_id=?1",[config.source_id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage_error)?;
+            if let Some(old)=old {
+                if old!=(config.adapter_type.clone(),config.account_id.clone(),groups_json,config.timezone.clone()){return Err(AppError::InvalidInput);}
+                return Ok(true);
+            }
+            // Legacy rows have no authoritative group-set/timezone binding.
+            // Fail closed: assigning their ID a new config would invent identity.
+            let legacy:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM sources WHERE source_id=?1)",[config.source_id.to_string()],|r|r.get(0)).map_err(storage_error)?;
+            if legacy{return Err(AppError::Conflict);}
+            tx.execute("INSERT INTO source_bindings(source_id,adapter_type,account_id,groups_json,timezone) VALUES (?1,?2,?3,?4,?5)",params![config.source_id.to_string(),config.adapter_type,config.account_id,groups_json,config.timezone]).map_err(storage_error)?;
+            Ok(false)
+        })
+    }
+    /// Start/invalidate an interval proof. Keep incomplete original anchors and
+    /// recovery progress; completed groups begin again at the last live cursor.
+    /// Epoch change invalidates every previously issued handle/completion.
+    pub fn begin_recovery(&self, config: &SourceConfig, since: UtcMillis) -> AppResult<()> {
+        self.bind_source(config)?;
+        self.db.transaction(|tx|{
+            let epoch:i64=tx.query_row("SELECT recovery_epoch FROM source_bindings WHERE source_id=?1",[config.source_id.to_string()],|r|r.get(0)).map_err(storage_error)?;
+            let epoch=epoch.checked_add(1).ok_or(AppError::Conflict)?;
+            tx.execute("UPDATE source_bindings SET recovery_epoch=?2 WHERE source_id=?1",params![config.source_id.to_string(),epoch]).map_err(storage_error)?;
+            for group in &config.allowed_group_ids {
+                let cursor:Option<String>=tx.query_row("SELECT NULLIF(cursor,'') FROM sources WHERE namespace=?1",[namespace(config,group)],|r|r.get(0)).optional().map_err(storage_error)?.flatten();
+                tx.execute("INSERT INTO source_recovery VALUES (?1,?2,?3,?4,?5,?5,0) ON CONFLICT(source_id,group_id) DO UPDATE SET epoch=excluded.epoch,since=CASE WHEN source_recovery.complete=0 THEN source_recovery.since ELSE excluded.since END,anchor=CASE WHEN source_recovery.complete=0 THEN source_recovery.anchor ELSE excluded.anchor END,recovery_cursor=CASE WHEN source_recovery.complete=0 THEN source_recovery.recovery_cursor ELSE excluded.recovery_cursor END,complete=0",params![config.source_id.to_string(),group,epoch,since,cursor]).map_err(storage_error)?;
+            }
+            Ok(())
+        })
+    }
+    pub fn recoveries(
+        &self,
+        config: &SourceConfig,
+    ) -> AppResult<Vec<super::source::GroupRecovery>> {
+        self.bind_source(config)?;
+        self.db.transaction(|tx|{
+            let mut stmt=tx.prepare("SELECT group_id,epoch,since,anchor,recovery_cursor,complete FROM source_recovery WHERE source_id=?1 ORDER BY group_id").map_err(storage_error)?;
+            let rows=stmt.query_map([config.source_id.to_string()],|r|Ok(super::source::GroupRecovery{group_id:r.get(0)?,epoch:r.get::<_,i64>(1)? as u64,since:r.get(2)?,anchor:r.get(3)?,recovery_cursor:r.get(4)?,complete:r.get(5)?})).map_err(storage_error)?;
+            rows.map(|r|r.map_err(storage_error)).collect()
+        })
+    }
+    /// Record contiguous backfill progress only after every delivery persisted.
+    /// CAS protects against stale epoch/completion from another receive owner.
+    pub fn advance_recovery(
+        &self,
+        config: &SourceConfig,
+        group: &str,
+        epoch: u64,
+        from: &str,
+        next: &str,
+        complete: bool,
+    ) -> AppResult<()> {
+        if epoch > i64::MAX as u64
+            || !config.allowed_group_ids.iter().any(|g| g == group)
+            || next.is_empty()
+            || next.len() > 4096
+            || next.contains(['/', '\\', ':'])
+            || next.chars().any(char::is_control)
+        {
+            return Err(AppError::InvalidInput);
+        }
+        self.bind_source(config)?;
+        self.db.transaction(|tx|{
+            let updated=tx.execute("UPDATE source_recovery SET recovery_cursor=?5,complete=?6 WHERE source_id=?1 AND group_id=?2 AND epoch=?3 AND recovery_cursor=?4 AND complete=0",params![config.source_id.to_string(),group,epoch as i64,from,next,complete]).map_err(storage_error)?;
+            if updated!=1{return Err(AppError::Conflict);}Ok(())
+        })
+    }
     pub fn pending(&self, limit: u32) -> AppResult<Vec<MessageEnvelope>> {
         self.db.transaction(|tx| {
         let mut stmt = tx.prepare("SELECT payload,processing_state FROM messages WHERE payload IS NOT NULL AND processing_state IN ('persisted','parsing','retryable_failure','pending') ORDER BY received_at,message_key LIMIT ?1").map_err(storage_error)?;

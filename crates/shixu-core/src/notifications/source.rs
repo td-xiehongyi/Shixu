@@ -77,5 +77,30 @@ pub trait QQAdapter {
     fn disconnect(&mut self) -> AppResult<()>;
     fn health(&self) -> SourceHealth;
     fn next_message(&mut self) -> AppResult<Option<MessageEnvelope>>;
+    /// Adapter-defined source/group/epoch recovery handle, or an unambiguous
+    /// recovery progress cursor. A live cursor is not a missing-interval anchor.
     fn backfill(&mut self, cursor: &str) -> AppResult<Vec<MessageEnvelope>>;
+}
+
+/// Durable per-group interval proof. Live acknowledgments never change anchor or
+/// recovery_cursor. An absent anchor means no verified recovery starting point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupRecovery {
+    pub group_id: String,
+    pub epoch: u64,
+    pub since: UtcMillis,
+    pub anchor: Option<String>,
+    pub recovery_cursor: Option<String>,
+    pub complete: bool,
+}
+impl GroupRecovery {
+    /// Public QQAdapter::backfill accepts this source/group/epoch-scoped handle.
+    pub fn handle(&self, source: SourceId) -> String {
+        use std::fmt::Write;
+        let mut result = format!("recovery-v1-{source}-{}-", self.epoch);
+        for b in self.group_id.bytes() {
+            write!(&mut result, "{b:02x}").expect("String write is infallible");
+        }
+        result
+    }
 }

@@ -14,3 +14,4 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Secu
 [dev-dependencies]
 serde_json.workspace = true
 uuid.workspace = true
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
