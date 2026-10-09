@@ -251,37 +251,86 @@ impl MessageStore {
         rows.map(|row| { let (payload,state) = row.map_err(storage_error)?; let mut message: MessageEnvelope = self.db.unprotect(&payload)?; message.processing_state = serde_json::from_value(serde_json::Value::String(state)).map_err(|_| AppError::ParseFailed)?; Ok(message) }).collect()
     })
     }
-    /// Preconditions for asynchronous callers (N3): hold message-generation
-    /// coordination spanning job dispatch through completion, including edits,
-    /// revocations and retries; reject stale completions before calling this API.
-    /// This API has no expected_revision argument. The SQL operation mutex alone
-    /// does NOT serialize a whole parse job or prevent stale evidence writes.
-    pub fn record_parts(&self, key: &MessageKey, parts: Vec<PartResult>) -> AppResult<()> {
-        self.db.transaction(|tx| {
-        let data: Option<Vec<u8>> = tx.query_row("SELECT payload FROM messages WHERE message_key=?1 AND payload IS NOT NULL AND revoked=0", [key.to_string()], |r| r.get(0)).optional().map_err(storage_error)?;
+    /// Atomically reject completion from a stale worker generation. All callers
+    /// must capture the revision at dispatch; no unguarded write API exists.
+    pub fn record_parts(
+        &self,
+        key: &MessageKey,
+        expected_revision: u64,
+        parts: Vec<PartResult>,
+    ) -> AppResult<()> {
+        if expected_revision == 0 || expected_revision > i64::MAX as u64 {
+            return Err(AppError::InvalidInput);
+        }
+        self.db
+            .transaction(|tx| self.record_parts_tx(tx, key, expected_revision, parts))
+    }
+    pub(crate) fn record_parts_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        key: &MessageKey,
+        expected_revision: u64,
+        parts: Vec<PartResult>,
+    ) -> AppResult<()> {
+        let data: Option<Vec<u8>> = tx.query_row("SELECT payload FROM messages WHERE message_key=?1 AND revision=?2 AND payload IS NOT NULL AND revoked=0", params![key.to_string(),expected_revision as i64], |r| r.get(0)).optional().map_err(storage_error)?;
         let mut envelope: MessageEnvelope = self.db.unprotect(&data.ok_or(AppError::Conflict)?)?;
-        if parts.is_empty() { return Ok(()); }
-        let previous: Option<(i64,Vec<u8>)> = tx.query_row("SELECT revision,payload FROM part_results WHERE message_key=?1", [key.to_string()], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage_error)?;
+        if parts.is_empty() {
+            return Ok(());
+        }
+        let previous: Option<(i64, Vec<u8>)> = tx
+            .query_row(
+                "SELECT revision,payload FROM part_results WHERE message_key=?1",
+                [key.to_string()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(storage_error)?;
         let mut merged = std::collections::HashMap::new();
         if let Some((revision, sealed)) = previous
-            && revision == envelope.revision as i64 {
+            && revision == envelope.revision as i64
+        {
             let previous: Vec<PartResult> = self.db.unprotect(&sealed)?;
-            for result in previous { merged.insert(result.part_id, result); }
+            for result in previous {
+                merged.insert(result.part_id, result);
+            }
         }
         let mut seen = std::collections::HashSet::new();
-        for result in &parts { if !seen.insert(result.part_id) || result.blocks.iter().any(|b| b.part_id != result.part_id) { return Err(AppError::InvalidInput); }
-            let part = envelope.parts.iter_mut().find(|p| p.part_id == result.part_id).ok_or(AppError::InvalidInput)?; part.parse_state = result.status; part.failure_code = result.reason_code;
+        for result in &parts {
+            if !seen.insert(result.part_id)
+                || result.blocks.iter().any(|b| b.part_id != result.part_id)
+            {
+                return Err(AppError::InvalidInput);
+            }
+            let part = envelope
+                .parts
+                .iter_mut()
+                .find(|p| p.part_id == result.part_id)
+                .ok_or(AppError::InvalidInput)?;
+            part.parse_state = result.status;
+            part.failure_code = result.reason_code;
         }
-        for result in parts { merged.insert(result.part_id, result); }
+        for result in parts {
+            merged.insert(result.part_id, result);
+        }
         // Preserve omitted current-revision evidence; retries replace only their
         // own part result. Envelope order makes persistence deterministic.
-        let results: Vec<PartResult> = envelope.parts.iter().filter_map(|part| merged.remove(&part.part_id)).collect();
-        if !merged.is_empty() { return Err(AppError::ParseFailed); }
-        let payload = self.db.protect(&results)?; let message_payload = self.db.protect(&envelope)?;
+        let results: Vec<PartResult> = envelope
+            .parts
+            .iter()
+            .filter_map(|part| merged.remove(&part.part_id))
+            .collect();
+        if !merged.is_empty() {
+            return Err(AppError::ParseFailed);
+        }
+        let payload = self.db.protect(&results)?;
+        let message_payload = self.db.protect(&envelope)?;
         tx.execute("INSERT INTO part_results VALUES (?1,?2,?3) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,payload=excluded.payload", params![key.to_string(),envelope.revision as i64,payload]).map_err(storage_error)?;
-        tx.execute("UPDATE messages SET payload=?2 WHERE message_key=?1", params![key.to_string(),message_payload]).map_err(storage_error)?;
+        tx.execute(
+            "UPDATE messages SET payload=?2 WHERE message_key=?1",
+            params![key.to_string(), message_payload],
+        )
+        .map_err(storage_error)?;
         Ok(())
-    })
     }
     pub fn cleanup(&self, now: UtcMillis) -> AppResult<u64> {
         let cutoff = now

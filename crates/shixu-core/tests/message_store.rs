@@ -308,11 +308,11 @@ fn parts_and_evidence_are_protected_and_invalid_parts_are_atomic() {
         }],
         reason_code: None,
     };
-    s.record_parts(&key, vec![result.clone()]).unwrap();
+    s.record_parts(&key, 1, vec![result.clone()]).unwrap();
     let mut invalid = result.clone();
     invalid.part_id = PartId::from_uuid(Uuid::new_v4());
     assert_eq!(
-        s.record_parts(&key, vec![result, invalid]),
+        s.record_parts(&key, 1, vec![result, invalid]),
         Err(AppError::InvalidInput)
     );
     assert_eq!(
@@ -330,7 +330,7 @@ fn parts_and_evidence_are_protected_and_invalid_parts_are_atomic() {
         }
     }
     assert_eq!(
-        s.record_parts(&MessageKey::from_uuid(Uuid::new_v4()), vec![]),
+        s.record_parts(&MessageKey::from_uuid(Uuid::new_v4()), 1, vec![]),
         Err(AppError::Conflict)
     );
 }
@@ -623,7 +623,7 @@ fn equal_content_advances_trusted_revision_and_rejects_stale_edit_after_reopen()
     let s = store(&t);
     s.append(&c, m.clone()).unwrap();
     let evidence = successful_result(m.parts[0].part_id, "synthetic original evidence");
-    s.record_parts(&key, vec![evidence.clone()]).unwrap();
+    s.record_parts(&key, 1, vec![evidence.clone()]).unwrap();
     let mut newer = m.clone();
     newer.revision = 3;
     newer.received_at = 123;
@@ -708,8 +708,8 @@ fn independent_part_results_merge_retries_and_empty_updates_across_reopen() {
     s.append(&c, m.clone()).unwrap();
     let a = successful_result(m.parts[0].part_id, "synthetic evidence A");
     let b = successful_result(m.parts[1].part_id, "synthetic evidence B");
-    s.record_parts(&key, vec![a.clone()]).unwrap();
-    s.record_parts(&key, vec![b.clone()]).unwrap();
+    s.record_parts(&key, 1, vec![a.clone()]).unwrap();
+    s.record_parts(&key, 1, vec![b.clone()]).unwrap();
     drop(s);
     let s = store(&t);
     let (envelope, revision, results) = saved_message_and_results(&t);
@@ -725,8 +725,8 @@ fn independent_part_results_merge_retries_and_empty_updates_across_reopen() {
     retry_a.status = PartStatus::PartialParse;
     retry_a.reason_code = Some(PartReason::PartialSource);
     retry_a.blocks[0].text = "synthetic retry evidence A".into();
-    s.record_parts(&key, vec![retry_a.clone()]).unwrap();
-    s.record_parts(&key, vec![]).unwrap();
+    s.record_parts(&key, 1, vec![retry_a.clone()]).unwrap();
+    s.record_parts(&key, 1, vec![]).unwrap();
     drop(s);
     let reopened = store(&t);
     let (envelope, revision, results) = saved_message_and_results(&t);
@@ -747,12 +747,186 @@ fn empty_part_update_does_not_erase_saved_evidence() {
     let s = store(&t);
     s.append(&c, m.clone()).unwrap();
     let result = successful_result(m.parts[0].part_id, "synthetic retained evidence");
-    s.record_parts(&key, vec![result.clone()]).unwrap();
-    s.record_parts(&key, vec![]).unwrap();
+    s.record_parts(&key, 1, vec![result.clone()]).unwrap();
+    s.record_parts(&key, 1, vec![]).unwrap();
     drop(s);
     let _reopened = store(&t);
     let (envelope, _, results) = saved_message_and_results(&t);
     assert_eq!(results, vec![result]);
     assert_eq!(envelope.parts[0].parse_state, PartStatus::Success);
     assert_eq!(envelope.parts[1].parse_state, PartStatus::PendingDownload);
+}
+
+#[test]
+fn stale_worker_cannot_write_reused_part_ids_after_message_edit() {
+    let t = TempDir::new();
+    let s = store(&t);
+    let mut c = config();
+    c.capability_set.push(SourceCapability::Edits);
+    let m = message_with_two_parts(&c);
+    let key = message_identity(&c, &m).unwrap().key;
+    s.append(&c, m.clone()).unwrap();
+    let captured = s.pending(1).unwrap().remove(0);
+    let stale = successful_result(captured.parts[0].part_id, "synthetic stale event evidence");
+    let mut edit = m;
+    edit.revision = 2;
+    edit.text = "synthetic changed date".into();
+    s.append(&c, edit).unwrap();
+    assert_eq!(
+        s.record_parts(&key, captured.revision, vec![stale]),
+        Err(AppError::Conflict)
+    );
+    assert_eq!(count(&t, "part_results"), 0);
+    let current = s.pending(1).unwrap().remove(0);
+    assert_eq!(current.revision, 2);
+    assert_eq!(current.processing_state, ProcessingState::Persisted);
+    assert_eq!(current.parts[0].parse_state, PartStatus::PendingDownload);
+}
+
+#[test]
+fn attachment_jobs_persist_retry_with_virtual_clock_and_auth_is_terminal() {
+    use shixu_core::notifications::parts::TaskQueue;
+    let t = TempDir::new();
+    let s = store(&t);
+    let c = config();
+    let m = message_with_two_parts(&c);
+    let key = message_identity(&c, &m).unwrap().key;
+    s.append(&c, m).unwrap();
+    let db = Arc::new(Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap());
+    let q = TaskQueue::new(db);
+    let limits = ParserLimits::v01();
+    assert_eq!(q.enqueue(&key, 1, 0, &limits), Ok(2));
+    let a = q.claim(0, &limits).unwrap().unwrap();
+    assert!(q.claim(0, &limits).unwrap().is_none());
+    q.finish(
+        &a,
+        PartResult {
+            part_id: a.part.part_id,
+            status: PartStatus::DownloadFailed,
+            blocks: vec![],
+            reason_code: Some(PartReason::AuthRequired),
+        },
+        true,
+        0,
+    )
+    .unwrap();
+    let mut now = 0;
+    for delay in [60_000, 300_000, 1_800_000] {
+        let job = q.claim(now, &limits).unwrap().unwrap();
+        q.finish(
+            &job,
+            PartResult {
+                part_id: job.part.part_id,
+                status: PartStatus::DownloadFailed,
+                blocks: vec![],
+                reason_code: Some(PartReason::DownloadUnavailable),
+            },
+            true,
+            now,
+        )
+        .unwrap();
+        now += delay;
+        assert!(q.claim(now - 1, &limits).unwrap().is_none());
+    }
+    drop(q);
+    let q = TaskQueue::new(Arc::new(
+        Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+    ));
+    let job = q.claim(now, &limits).unwrap().unwrap();
+    q.finish(
+        &job,
+        PartResult {
+            part_id: job.part.part_id,
+            status: PartStatus::DownloadFailed,
+            blocks: vec![],
+            reason_code: Some(PartReason::DownloadUnavailable),
+        },
+        true,
+        now,
+    )
+    .unwrap();
+    assert!(q.claim(i64::MAX, &limits).unwrap().is_none());
+    assert_eq!(
+        s.pending(1).unwrap()[0].processing_state,
+        ProcessingState::Persisted
+    );
+}
+#[test]
+fn attachment_jobs_enforce_100_capacity_and_stale_completion_is_atomic() {
+    use shixu_core::notifications::parts::TaskQueue;
+    let t = TempDir::new();
+    let s = store(&t);
+    let mut c = config();
+    c.capability_set.push(SourceCapability::Edits);
+    let q = TaskQueue::new(Arc::new(
+        Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+    ));
+    let limits = ParserLimits::v01();
+    for n in 0..50 {
+        let mut m = message_with_two_parts(&c);
+        m.native_message_id = format!("job-{n}");
+        let key = message_identity(&c, &m).unwrap().key;
+        s.append(&c, m).unwrap();
+        assert_eq!(q.enqueue(&key, 1, 0, &limits), Ok(2));
+    }
+    let mut extra = message_with_two_parts(&c);
+    extra.native_message_id = "extra".into();
+    let key = message_identity(&c, &extra).unwrap().key;
+    s.append(&c, extra).unwrap();
+    assert_eq!(q.enqueue(&key, 1, 0, &limits), Err(AppError::StorageFull));
+    let job = q.claim(0, &limits).unwrap().unwrap();
+    let mut edit = s
+        .pending(101)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.message_key == job.message_key)
+        .unwrap();
+    edit.revision = 2;
+    edit.text = "synthetic edit".into();
+    s.append(&c, edit).unwrap();
+    assert_eq!(
+        q.finish(&job, successful_result(job.part.part_id, "stale"), false, 0),
+        Err(AppError::Conflict)
+    );
+    assert_eq!(count(&t, "part_results"), 0);
+}
+
+#[test]
+fn attachment_startup_recovery_invalidates_old_lease_and_preserves_new_completion() {
+    use shixu_core::notifications::parts::TaskQueue;
+    let t = TempDir::new();
+    let s = store(&t);
+    let c = config();
+    let m = message_with_two_parts(&c);
+    let key = message_identity(&c, &m).unwrap().key;
+    s.append(&c, m).unwrap();
+    let q = TaskQueue::new(Arc::new(
+        Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
+    ));
+    let l = ParserLimits::v01();
+    assert_eq!(q.enqueue(&key, 1, 0, &l), Ok(2));
+    assert_eq!(q.enqueue(&key, 1, 0, &l), Ok(0));
+    let old = q.claim(0, &l).unwrap().unwrap();
+    assert_eq!(q.recover_after_children_stopped(), Ok(1));
+    let new = q.claim(0, &l).unwrap().unwrap();
+    assert_eq!(old.part.part_id, new.part.part_id);
+    assert_eq!(
+        q.finish(
+            &old,
+            successful_result(old.part.part_id, "old lease"),
+            false,
+            0
+        ),
+        Err(AppError::Conflict)
+    );
+    q.finish(
+        &new,
+        successful_result(new.part.part_id, "new lease"),
+        false,
+        0,
+    )
+    .unwrap();
+    let (_, revision, results) = saved_message_and_results(&t);
+    assert_eq!(revision, 1);
+    assert_eq!(results[0].blocks[0].text, "new lease");
 }
