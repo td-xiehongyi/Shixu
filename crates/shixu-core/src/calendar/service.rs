@@ -108,9 +108,22 @@ impl EventService {
         let id = id.parse()?;
         self.db.transaction(|tx| Ok(self.event(tx, id)?.origin))
     }
+    /// Explicit optional-model boundary. Every candidate is re-grounded inside
+    /// the same durable transaction; this does not trust provider metadata or
+    /// widen plain apply's canonical N6-only contract.
+    pub fn apply_model(&self, batch: ExtractBatch) -> AppResult<ApplySummary> {
+        self.apply_guarded(batch, true)
+    }
     pub fn apply(&self, batch: ExtractBatch) -> AppResult<ApplySummary> {
+        self.apply_guarded(batch, false)
+    }
+    fn apply_guarded(&self, batch: ExtractBatch, allow_model: bool) -> AppResult<ApplySummary> {
         self.db.transaction(|tx| {
-            let (m, canonical) = validate(&self.db, tx, &batch)?;
+            let (m, canonical) = if allow_model {
+                super::match_event::validate_model(&self.db, tx, &batch)?
+            } else {
+                validate(&self.db, tx, &batch)?
+            };
             let mut summary = ApplySummary {
                 created: 0,
                 updated: 0,
@@ -147,6 +160,11 @@ impl EventService {
                         .any(|c| c.candidate_key == p.candidate.candidate_key)
             });
             for candidate in &batch.candidates {
+                let provenance = if canonical.candidates.contains(candidate) {
+                    canonical.extractor_version.clone()
+                } else {
+                    format!("n7.guarded-create.1;timezone={}", candidate.time.timezone)
+                };
                 if ambiguous_edit
                     && candidate.action == CandidateAction::Create
                     && !previous
@@ -159,6 +177,7 @@ impl EventService {
                             message_key: m.message_key,
                             message_revision: m.revision,
                             source_order: batch.source_order,
+                            extractor_version: Some(provenance.clone()),
                             source_id: m.source_id,
                             account_id: m.account_id.clone(),
                             group_id: m.group_id.clone(),
@@ -169,7 +188,14 @@ impl EventService {
                     )?;
                     summary.conflicts += 1;
                 } else {
-                    self.apply_candidate(tx, &m, batch.source_order, candidate, &mut summary)?;
+                    self.apply_candidate(
+                        tx,
+                        &m,
+                        batch.source_order,
+                        candidate,
+                        &provenance,
+                        &mut summary,
+                    )?;
                 }
             }
             // An omitted pending candidate is not authority to replay the old
@@ -290,7 +316,14 @@ impl EventService {
             };
             if let Some((index, candidate)) = accepted {
                 // Apply this exact freshly grounded value, not source.candidate.
-                self.apply_candidate(tx, &current, fresh.source_order, &candidate, summary)?;
+                self.apply_candidate(
+                    tx,
+                    &current,
+                    fresh.source_order,
+                    &candidate,
+                    &fresh.extractor_version,
+                    summary,
+                )?;
                 record.batch.candidates[index] = candidate;
                 record.batch.part_results = fresh.part_results.clone();
                 record.incomplete = fresh
@@ -357,6 +390,7 @@ impl EventService {
         m: &MessageEnvelope,
         order: u64,
         c: &Candidate,
+        provenance: &str,
         summary: &mut ApplySummary,
     ) -> AppResult<()> {
         let prior: Option<Vec<u8>> = tx
@@ -394,6 +428,7 @@ impl EventService {
             message_key: m.message_key,
             message_revision: m.revision,
             source_order: order,
+            extractor_version: Some(provenance.into()),
             source_id: m.source_id,
             account_id: m.account_id.clone(),
             group_id: m.group_id.clone(),

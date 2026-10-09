@@ -107,6 +107,21 @@ pub(crate) fn validate(
     tx: &Transaction<'_>,
     batch: &ExtractBatch,
 ) -> AppResult<(MessageEnvelope, ExtractBatch)> {
+    validate_with_model(db, tx, batch, false)
+}
+pub(crate) fn validate_model(
+    db: &Database,
+    tx: &Transaction<'_>,
+    batch: &ExtractBatch,
+) -> AppResult<(MessageEnvelope, ExtractBatch)> {
+    validate_with_model(db, tx, batch, true)
+}
+fn validate_with_model(
+    db: &Database,
+    tx: &Transaction<'_>,
+    batch: &ExtractBatch,
+    allow_model: bool,
+) -> AppResult<(MessageEnvelope, ExtractBatch)> {
     let m = message(db, tx, batch.message_key)?;
     let revision: i64 = tx
         .query_row(
@@ -145,7 +160,10 @@ pub(crate) fn validate(
     let groups: Vec<String> = serde_json::from_str(&groups).map_err(|_| AppError::ParseFailed)?;
     if account != m.account_id
         || !groups.contains(&m.group_id)
-        || batch.extractor_version != format!("n6.rules.1;timezone={zone}")
+        || (batch.extractor_version != format!("n6.rules.1;timezone={zone}")
+            && !(allow_model
+                && batch.extractor_version
+                    == crate::notifications::model::composite_version(&zone)))
     {
         return Err(AppError::InvalidInput);
     }
@@ -199,6 +217,25 @@ pub(crate) fn validate(
         }
     }
     let canonical = extract(&m, &blocks, &context, &zone)?;
+    if allow_model {
+        let fallback_evidence: Vec<_> = batch
+            .candidates
+            .iter()
+            .filter(|c| {
+                !canonical
+                    .candidates
+                    .iter()
+                    .any(|rule| rule.candidate_key == c.candidate_key)
+            })
+            .flat_map(|c| c.evidence.clone())
+            .collect();
+        crate::notifications::model::bounded(&fallback_evidence)?;
+        if !fallback_evidence.is_empty()
+            && batch.extractor_version != crate::notifications::model::composite_version(&zone)
+        {
+            return Err(AppError::InvalidInput);
+        }
+    }
     let check = |e: &EvidenceBlock| -> AppResult<()> {
         if let Some(target) = context_evidence_target(e)? {
             let target = context
@@ -229,11 +266,59 @@ pub(crate) fn validate(
                 return Err(AppError::InvalidInput);
             }
         }
-        let expected = canonical
+        let fallback;
+        let expected = match canonical
             .candidates
             .iter()
             .find(|candidate| candidate.candidate_key == c.candidate_key)
-            .ok_or(AppError::InvalidInput)?;
+        {
+            Some(expected) => expected,
+            None if allow_model => {
+                if c.evidence.len() != 1 {
+                    return Err(AppError::InvalidInput);
+                }
+                fallback =
+                    crate::notifications::model::grounded_candidate(&m, &c.evidence[0], &zone)?;
+                let mut current_evidence = blocks.clone();
+                current_evidence.push(EvidenceBlock {
+                    part_id: body_part_id(&m),
+                    page_or_sheet: None,
+                    cell_range_or_bbox: Some(EvidenceLocation::TextSpan {
+                        start: 0,
+                        end: u32::try_from(m.text.len()).map_err(|_| AppError::InvalidInput)?,
+                    }),
+                    text: m.text.clone(),
+                    method: Method::NativeText,
+                    engine_version: "n6.body.utf8-bytes.1".into(),
+                    quality_flags: vec![],
+                });
+                for block in &mut current_evidence {
+                    if parts
+                        .iter()
+                        .any(|p| p.part_id == block.part_id && p.status == PartStatus::PartialParse)
+                        && !block.quality_flags.contains(&QualityFlag::PartialSource)
+                    {
+                        block.quality_flags.push(QualityFlag::PartialSource);
+                    }
+                }
+                // Full original layout units are required for fallback Creates:
+                // a true subspan can still strip negation or competing dates.
+                if !current_evidence.contains(&c.evidence[0]) {
+                    return Err(AppError::InvalidInput);
+                }
+                crate::notifications::model::validate_corroboration(
+                    &m,
+                    &fallback,
+                    &current_evidence,
+                    &zone,
+                )?;
+                if c.candidate_key != fallback.candidate_key {
+                    return Err(AppError::InvalidInput);
+                }
+                &fallback
+            }
+            None => return Err(AppError::InvalidInput),
+        };
         if c.title != expected.title
             || c.kind != expected.kind
             || c.action != expected.action

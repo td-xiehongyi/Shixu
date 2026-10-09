@@ -30,6 +30,10 @@ pub struct EventSource {
     pub message_key: MessageKey,
     pub message_revision: u64,
     pub source_order: u64,
+    /// Optional only for protected pre-N7 payloads. This is audit metadata;
+    /// durable semantic validation, never this string, grants acceptance.
+    #[serde(default)]
+    pub extractor_version: Option<String>,
     pub source_id: SourceId,
     pub account_id: String,
     pub group_id: String,

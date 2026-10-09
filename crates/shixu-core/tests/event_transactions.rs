@@ -1653,3 +1653,517 @@ fn review2_r2_multiple_evidence_cannot_hide_supplied_or_contradictory_old_endpoi
         "contradictory/omitted cross-evidence endpoints: {violations:?}"
     );
 }
+
+// N7 uses synthetic captured responses through the actual guarded calendar API.
+fn n7_model(f: &Fixture, m: &MessageEnvelope) -> ExtractBatch {
+    use shixu_core::notifications::{
+        consent::{ConsentStore, ModelConsent},
+        model::{ModelRequest, ModelService, ModelTransport},
+    };
+    struct Model(MessageEnvelope);
+    impl ModelTransport for Model {
+        fn send(&self, r: &ModelRequest) -> AppResult<String> {
+            let e = EvidenceBlock {
+                part_id: shixu_core::notifications::extract::body_part_id(&self.0),
+                page_or_sheet: None,
+                cell_range_or_bbox: Some(EvidenceLocation::TextSpan {
+                    start: 0,
+                    end: self.0.text.len() as u32,
+                }),
+                text: self.0.text.clone(),
+                method: Method::NativeText,
+                engine_version: "n6.body.utf8-bytes.1".into(),
+                quality_flags: vec![],
+            };
+            let c = Candidate {
+                candidate_key: CandidateKey::from_uuid(Uuid::new_v4()),
+                action: CandidateAction::Create,
+                title: "高数测验".into(),
+                kind: "exam".into(),
+                time: shixu_core::notifications::time::parse_time(&e.text, r.sent_at, &r.timezone)?,
+                location: None,
+                evidence: vec![e],
+                target_message_key: None,
+            };
+            Ok(serde_json::to_string(&vec![c]).unwrap())
+        }
+    }
+    let consent = ConsentStore::new(ModelConsent {
+        enabled: true,
+        provider_id: Some("synthetic".into()),
+        allowed_group_ids: vec!["g1".into()],
+        allow_attachment_text: false,
+        revision: 1,
+    });
+    let transport = Model(m.clone());
+    let svc = ModelService {
+        consent: &consent,
+        transport: &transport,
+    };
+    svc.dispatch(svc.prepare(m, &[], &[], &f.config).unwrap())
+        .unwrap()
+        .batch
+}
+#[test]
+fn n7_grounded_fake_model_reaches_actual_calendar_once() {
+    let f = Fixture::new();
+    let m = f.msg("2026年10月12日9:00高数测验", 1791504000000, None);
+    let batch = n7_model(&f, &m);
+    assert_eq!(batch.candidates.len(), 1);
+    assert_eq!(
+        f.service().apply(batch.clone()),
+        Err(AppError::InvalidInput)
+    );
+    assert_eq!(f.service().apply_model(batch.clone()).unwrap().created, 1);
+    assert_eq!(f.service().apply_model(batch).unwrap().created, 0);
+    assert_eq!(f.events().len(), 1);
+    assert_eq!(f.events()[0].local_date.as_deref(), Some("2026-10-12"));
+}
+#[test]
+fn n7_calendar_revalidates_forgery_and_durable_revision() {
+    let f = Fixture::new();
+    let m = f.msg("2026年10月12日9:00高数测验", 1791504000000, None);
+    let batch = n7_model(&f, &m);
+    assert_eq!(batch.candidates.len(), 1);
+    for mutation in 0..5 {
+        let mut b = batch.clone();
+        match mutation {
+            0 => b.candidates[0].time.local_date = Some("2026-10-13".into()),
+            1 => b.candidates[0].evidence[0].part_id = PartId::from_uuid(Uuid::new_v4()),
+            2 => b.candidates[0].title = "伪造测验".into(),
+            3 => b.source_order += 1,
+            _ => b.candidates[0].evidence[0].engine_version = "n6.reply-year.fake".into(),
+        };
+        assert!(f.service().apply_model(b).is_err());
+    }
+    let mut edit = m.clone();
+    edit.revision += 1;
+    edit.text = "2026年10月14日9:00高数测验".into();
+    f.persist(edit);
+    assert_eq!(f.service().apply_model(batch), Err(AppError::Conflict));
+    assert!(f.events().is_empty());
+}
+#[test]
+fn n7_model_cannot_strip_negation_using_a_durable_subspan() {
+    let f = Fixture::new();
+    let m = f.msg("不举行2026年10月12日9:00高数测验", 1791504000000, None);
+    let mut cropped = m.clone();
+    cropped.text = "2026年10月12日9:00高数测验".into();
+    let mut batch = n7_model(&f, &cropped);
+    batch.part_results = f.batch(&m, &[]).part_results;
+    assert_eq!(batch.candidates.len(), 1);
+    let evidence = &mut batch.candidates[0].evidence[0];
+    evidence.cell_range_or_bbox = Some(EvidenceLocation::TextSpan {
+        start: "不举行".len() as u32,
+        end: m.text.len() as u32,
+    });
+    assert_eq!(f.service().apply_model(batch), Err(AppError::InvalidInput));
+    assert!(f.events().is_empty());
+}
+fn n7_from_block(
+    f: &Fixture,
+    m: &MessageEnvelope,
+    blocks: &[EvidenceBlock],
+    selected: EvidenceBlock,
+    title: &str,
+) -> ExtractBatch {
+    use shixu_core::notifications::{
+        consent::{ConsentStore, ModelConsent},
+        model::{ModelRequest, ModelService, ModelTransport},
+    };
+    struct Model {
+        selected: EvidenceBlock,
+        title: String,
+    }
+    impl ModelTransport for Model {
+        fn send(&self, r: &ModelRequest) -> AppResult<String> {
+            let mut time = shixu_core::notifications::time::parse_time(
+                &self.selected.text,
+                r.sent_at,
+                &r.timezone,
+            )?;
+            if !self.selected.quality_flags.is_empty() {
+                time.precision = Precision::UnknownDate;
+                time.local_date = None;
+                time.start_at = None;
+                time.end_at = None;
+            }
+            let c = Candidate {
+                candidate_key: CandidateKey::from_uuid(Uuid::new_v4()),
+                action: CandidateAction::Create,
+                title: self.title.clone(),
+                kind: if self.title.ends_with("测验") {
+                    "exam"
+                } else {
+                    "activity"
+                }
+                .into(),
+                time,
+                location: None,
+                evidence: vec![self.selected.clone()],
+                target_message_key: None,
+            };
+            Ok(serde_json::to_string(&vec![c]).unwrap())
+        }
+    }
+    let store = ConsentStore::new(ModelConsent {
+        enabled: true,
+        provider_id: Some("synthetic".into()),
+        allowed_group_ids: vec!["g1".into()],
+        allow_attachment_text: true,
+        revision: 1,
+    });
+    let transport = Model {
+        selected,
+        title: title.into(),
+    };
+    let svc = ModelService {
+        consent: &store,
+        transport: &transport,
+    };
+    svc.dispatch(svc.prepare(m, blocks, &[], &f.config).unwrap())
+        .unwrap()
+        .batch
+}
+#[test]
+fn n7_durable_attachment_and_partial_quality_are_required() {
+    for partial in [false, true] {
+        let f = Fixture::new();
+        let mut m = f.msg("见附件", 1791504000000, None);
+        let mut part = image_part(&m);
+        if partial {
+            part.parse_state = PartStatus::PartialParse;
+        }
+        let id = part.part_id;
+        m.parts.push(part);
+        m.revision = 2;
+        let m = f.persist(m);
+        let mut block = parser_block(id, "明天9:00高数测验");
+        if partial {
+            block.quality_flags.push(QualityFlag::PartialSource);
+        }
+        let batch = n7_from_block(
+            &f,
+            &m,
+            std::slice::from_ref(&block),
+            block.clone(),
+            "高数测验",
+        );
+        assert_eq!(batch.candidates.len(), 1);
+        assert!(f.service().apply_model(batch.clone()).is_err());
+        MessageStore::new(f.db.clone())
+            .record_parts(
+                &m.message_key,
+                m.revision,
+                vec![PartResult {
+                    part_id: id,
+                    status: if partial {
+                        PartStatus::PartialParse
+                    } else {
+                        PartStatus::Success
+                    },
+                    blocks: vec![block],
+                    reason_code: None,
+                }],
+            )
+            .unwrap();
+        assert_eq!(f.service().apply_model(batch.clone()).unwrap().created, 1);
+        assert_eq!(
+            f.events()[0].time_precision,
+            if partial {
+                Precision::UnknownDate
+            } else {
+                Precision::Exact
+            }
+        );
+        if partial {
+            assert!(f.events()[0].local_date.is_none());
+            let mut forged = batch;
+            for e in &mut forged.candidates[0].evidence {
+                e.quality_flags.clear();
+            }
+            assert!(f.service().apply_model(forged).is_err());
+        }
+    }
+}
+#[test]
+fn n7_negated_same_subject_attachment_cannot_be_ignored() {
+    let f = Fixture::new();
+    let mut m = f.msg("2026年10月12日9:00高数测验", 1791504000000, None);
+    let part = image_part(&m);
+    let id = part.part_id;
+    m.parts.push(part);
+    m.revision = 2;
+    let m = f.persist(m);
+    let baseline = n7_model(&f, &m);
+    let block = parser_block(id, "不举行2026年10月12日9:00高数测验");
+    save_parser(&f, &m, block.clone());
+    let mut batch = baseline;
+    batch.part_results = extract(&m, &[block], &[], &f.config.timezone)
+        .unwrap()
+        .part_results;
+    assert_eq!(f.service().apply_model(batch), Err(AppError::InvalidInput));
+    assert!(f.events().is_empty());
+}
+#[test]
+fn n7_model_checks_durable_timezone_namespace_original_anchor_and_utf8() {
+    for mutation in 0..5 {
+        let f = Fixture::new();
+        let m = f.msg("2026年10月12日9:00高数测验", 1791504000000, None);
+        let mut batch = n7_model(&f, &m);
+        let c = rusqlite::Connection::open(&f.path).unwrap();
+        match mutation {
+            0 => {
+                c.execute("UPDATE source_bindings SET timezone='UTC'", [])
+                    .unwrap();
+            }
+            1 => {
+                c.execute("UPDATE sources SET group_id='g2'", []).unwrap();
+            }
+            2 => {
+                batch.source_order = m.received_at as u64 + 1;
+            }
+            3 => {
+                batch.candidates[0].evidence[0].cell_range_or_bbox =
+                    Some(EvidenceLocation::TextSpan {
+                        start: 1,
+                        end: m.text.len() as u32,
+                    });
+            }
+            _ => {
+                batch.candidates[0].target_message_key =
+                    Some(MessageKey::from_uuid(Uuid::new_v4()));
+            }
+        }
+        assert!(f.service().apply_model(batch).is_err());
+        assert!(f.events().is_empty());
+    }
+}
+#[test]
+fn n7_retry_timeout_keeps_actual_rule_event_unique_and_undo_suppresses_model() {
+    use shixu_core::notifications::{
+        consent::{ConsentStore, ModelConsent},
+        model::{ModelRequest, ModelService, ModelTransport},
+    };
+    struct Timeout;
+    impl ModelTransport for Timeout {
+        fn send(&self, _: &ModelRequest) -> AppResult<String> {
+            Err(AppError::Disconnected)
+        }
+    }
+    let f = Fixture::new();
+    let m = f.msg("明天9:00高数考试", 1791504000000, None);
+    let store = ConsentStore::new(ModelConsent {
+        enabled: true,
+        provider_id: Some("synthetic".into()),
+        allowed_group_ids: vec!["g1".into()],
+        allow_attachment_text: false,
+        revision: 1,
+    });
+    let svc = ModelService {
+        consent: &store,
+        transport: &Timeout,
+    };
+    let first = svc
+        .dispatch(svc.prepare(&m, &[], &[], &f.config).unwrap())
+        .unwrap();
+    assert!(first.retryable);
+    assert_eq!(f.service().apply_model(first.batch).unwrap().created, 1);
+    let retry = svc
+        .dispatch(svc.prepare(&m, &[], &[], &f.config).unwrap())
+        .unwrap();
+    assert_eq!(first.request_id, retry.request_id);
+    assert_eq!(f.service().apply_model(retry.batch).unwrap().created, 0);
+    let n = f.msg("明天9:00高数测验", m.sent_at + 1, None);
+    let batch = n7_model(&f, &n);
+    let applied = f.service().apply_model(batch.clone()).unwrap();
+    let e = f
+        .events()
+        .into_iter()
+        .find(|e| e.title == "高数测验")
+        .unwrap();
+    f.service()
+        .undo(UndoRequest {
+            change_id: applied.change_ids[0],
+            expected_revision: e.revision,
+        })
+        .unwrap();
+    assert_eq!(f.service().apply_model(batch).unwrap().created, 0);
+    assert_eq!(f.events().len(), 2);
+    assert!(
+        f.events()
+            .iter()
+            .any(|e| e.title == "高数测验" && e.status == EventStatus::Removed)
+    );
+}
+#[test]
+fn n7_missing_year_and_competing_dates_remain_pending() {
+    for text in [
+        "10月12日9:00高数测验",
+        "2026年10月12日2026年10月13日高数测验",
+    ] {
+        let f = Fixture::new();
+        let m = f.msg(text, 1791504000000, None);
+        let batch = n7_model(&f, &m);
+        assert_eq!(batch.candidates.len(), 1);
+        assert_eq!(batch.candidates[0].time.precision, Precision::UnknownDate);
+        assert_eq!(f.service().apply_model(batch).unwrap().created, 1);
+        assert!(f.events()[0].local_date.is_none());
+        assert_eq!(
+            MessageStore::new(f.db.clone()).pending(10).unwrap()[0].processing_state,
+            ProcessingState::Pending
+        );
+    }
+}
+#[test]
+fn n7_bound_historical_role_cannot_authenticate_a_create() {
+    let f = Fixture::new();
+    let original = f.msg("2025年10月12日9:00高数测验", 1791504000000, None);
+    let m = f.msg(
+        "2026年10月12日9:00高数测验",
+        original.sent_at + 1,
+        Some(original.message_key),
+    );
+    let batch = n7_model(&f, &m);
+    assert_eq!(batch.candidates.len(), 1);
+    let mut forged = batch.clone();
+    let evidence = &mut forged.candidates[0].evidence[0];
+    evidence.engine_version = format!(
+        "n6.body.utf8-bytes.1;n6_context_year_target={}",
+        original.message_key
+    );
+    forged.candidates[0].target_message_key = Some(original.message_key);
+    assert!(f.service().apply_model(forged).is_err());
+    let mut forged = batch;
+    let e = &mut forged.candidates[0].evidence[0];
+    e.part_id = shixu_core::notifications::extract::body_part_id(&original);
+    e.text = original.text.clone();
+    e.engine_version = format!(
+        "n6.body.utf8-bytes.1;n6_context_year_target={}",
+        original.message_key
+    );
+    e.cell_range_or_bbox = Some(EvidenceLocation::TextSpan {
+        start: 0,
+        end: original.text.len() as u32,
+    });
+    forged.candidates[0].target_message_key = Some(original.message_key);
+    assert!(f.service().apply_model(forged).is_err());
+    assert!(f.events().is_empty());
+}
+#[test]
+fn n7_literal_defense_create_reaches_calendar_with_original_relative_anchor() {
+    let f = Fixture::new();
+    let m = f.msg("明天9:00研究生答辩", 1791504000000, None);
+    let body = EvidenceBlock {
+        part_id: shixu_core::notifications::extract::body_part_id(&m),
+        page_or_sheet: None,
+        cell_range_or_bbox: Some(EvidenceLocation::TextSpan {
+            start: 0,
+            end: m.text.len() as u32,
+        }),
+        text: m.text.clone(),
+        method: Method::NativeText,
+        engine_version: "n6.body.utf8-bytes.1".into(),
+        quality_flags: vec![],
+    };
+    let batch = n7_from_block(&f, &m, &[], body, "研究生答辩");
+    assert_eq!(batch.candidates.len(), 1);
+    let expected =
+        shixu_core::notifications::time::parse_time(&m.text, m.sent_at, &f.config.timezone)
+            .unwrap();
+    assert_eq!(f.service().apply_model(batch).unwrap().created, 1);
+    assert_eq!(f.events()[0].kind, "activity");
+    assert_eq!(f.events()[0].local_date, expected.local_date);
+    assert_eq!(f.events()[0].start_at, expected.start_at);
+}
+#[test]
+fn n7_protected_history_records_model_provenance_without_changing_character_origin() {
+    let f = Fixture::new();
+    let m = f.msg("2026年10月12日9:00高数测验", 1791504000000, None);
+    let batch = n7_model(&f, &m);
+    let result = f.service().apply_model(batch.clone()).unwrap();
+    let e = f.events()[0].clone();
+    let source = f.service().sources(&e.event_id.to_string()).unwrap();
+    let source_json = serde_json::to_value(&source[0]).unwrap();
+    assert_eq!(
+        source_json.get("extractor_version"),
+        Some(&serde_json::json!(
+            "n7.guarded-create.1;timezone=Asia/Shanghai"
+        ))
+    );
+    assert_eq!(
+        batch.extractor_version,
+        "n6.rules.1+n7.guarded-create.1;timezone=Asia/Shanghai"
+    );
+    assert_eq!(
+        source[0].candidate.evidence[0].engine_version,
+        "n6.body.utf8-bytes.1"
+    );
+    assert_eq!(source[0].candidate.evidence[0].method, Method::NativeText);
+    assert_eq!(
+        serde_json::to_value(
+            f.service().history(&e.event_id.to_string()).unwrap()[0]
+                .source
+                .as_ref()
+                .unwrap()
+        )
+        .unwrap()["extractor_version"],
+        source_json["extractor_version"]
+    );
+    assert_eq!(result.created, 1);
+    let mut metadata_only = batch;
+    metadata_only.candidates[0].time.local_date = Some("2026-10-13".into());
+    assert!(f.service().apply_model(metadata_only).is_err());
+}
+#[test]
+fn n7_mixed_sources_keep_rule_priority_and_legacy_source_payloads_readable() {
+    let f = Fixture::new();
+    let mut m = f.msg("2026年10月12日9:00高数考试", 1791504000000, None);
+    let part = image_part(&m);
+    let id = part.part_id;
+    m.parts.push(part);
+    m.revision = 2;
+    let m = f.persist(m);
+    let block = parser_block(id, "2026年10月13日9:00高数测验");
+    save_parser(&f, &m, block.clone());
+    let rules = extract(&m, std::slice::from_ref(&block), &[], &f.config.timezone).unwrap();
+    let batch = n7_from_block(
+        &f,
+        &m,
+        std::slice::from_ref(&block),
+        block.clone(),
+        "高数测验",
+    );
+    assert_eq!(batch.candidates[0], rules.candidates[0]);
+    assert_eq!(batch.candidates.len(), 2);
+    assert_eq!(f.service().apply_model(batch).unwrap().created, 2);
+    for e in f.events() {
+        let source = f
+            .service()
+            .sources(&e.event_id.to_string())
+            .unwrap()
+            .remove(0);
+        let mut payload = serde_json::to_value(&source).unwrap();
+        assert_eq!(
+            payload["extractor_version"],
+            serde_json::json!(if e.title == "高数考试" {
+                "n6.rules.1;timezone=Asia/Shanghai"
+            } else {
+                "n7.guarded-create.1;timezone=Asia/Shanghai"
+            })
+        );
+        payload.as_object_mut().unwrap().remove("extractor_version");
+        let legacy: shixu_core::calendar::changes::EventSource =
+            serde_json::from_value(payload).unwrap();
+        assert!(legacy.extractor_version.is_none());
+    }
+    assert_eq!(
+        f.events()
+            .iter()
+            .find(|e| e.title == "高数考试")
+            .unwrap()
+            .local_date
+            .as_deref(),
+        Some("2026-10-12")
+    );
+}

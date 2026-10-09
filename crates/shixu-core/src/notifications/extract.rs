@@ -58,7 +58,7 @@ pub(crate) fn subject(title: &str) -> String {
     }
     value.chars().filter(|c| c.is_alphanumeric()).collect()
 }
-fn rejection(text: &str) -> bool {
+pub(crate) fn rejection(text: &str) -> bool {
     negated_change(text)
         || [
             "?",
@@ -130,7 +130,7 @@ fn event_token(text: &str) -> Option<(&'static str, usize, usize)> {
     }
     None
 }
-fn title_range(text: &str, token_start: usize, token_end: usize) -> (usize, usize) {
+pub(crate) fn title_range(text: &str, token_start: usize, token_end: usize) -> (usize, usize) {
     // Select a contiguous source substring; normalize only for identity, never title.
     static PREFIX: OnceLock<Regex> = OnceLock::new();
     let prefix=PREFIX.get_or_init(||Regex::new(r"^(?:\s|[：:，,（()）]|通知|原定|取消|已取消|定于|将于|将|今天|明天|后天|昨天|下周|近期|上午|下午|晚上|全天|整天|\d{4}年\d{1,2}月\d{1,2}[日号]|\d{1,2}月\d{1,2}[日号]|\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[:：]\d{2}|\d{1,2}[点时](?:\d{1,2}分?|半)?|[—–~～-])+" ).expect("static title prefix"));
@@ -165,7 +165,7 @@ fn coordinated_remainder(text: &str) -> Option<usize> {
         .map(|(i, _)| i)
         .min()
 }
-fn explicit_location(text: &str) -> Option<String> {
+pub(crate) fn explicit_location(text: &str) -> Option<String> {
     ["地点：", "地点:"]
         .iter()
         .find_map(|token| text.find(token).map(|i| &text[i + token.len()..]))
