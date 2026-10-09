@@ -33,6 +33,15 @@ export const settings: SettingsSnapshot = {
   },
   autostart: false,
   transport_supported: false,
+  runtime: {
+    running: false,
+    pending_rules: 0,
+    attachment_queue: 0,
+    model_queue: 0,
+    last_calendar_commit: null,
+    last_error: null,
+    sources: [],
+  },
 };
 export const notice: MessageEnvelope = {
   calendar_applied: true,

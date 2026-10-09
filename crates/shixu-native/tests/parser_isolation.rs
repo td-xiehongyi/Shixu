@@ -567,3 +567,41 @@ fn review_cache_edit_at_five_logical_parts_preserves_all_prior_originals() {
     assert!(originals.iter().all(|p| p.exists()));
     assert!(!edited.to_string_lossy().contains("sensitive-marker"));
 }
+#[test]
+fn d5_database_pause_blocks_cache_publication_and_startup_cleanup() {
+    let p = Arc::new(SyntheticProtector);
+    let db =
+        shixu_core::storage::Database::open(std::path::Path::new(":memory:"), p.clone()).unwrap();
+    let t = Temp::new();
+    let cache = ProtectedCache::create_coordinated(&t.0, p.clone(), &db).unwrap();
+    let mut s = DownloadService::new(
+        Transport {
+            calls: 0,
+            expired: false,
+            thumbnail: false,
+            responses: vec![Ok(Response::Body(Box::new(Cursor::new(
+                b"%PDF-synthetic".to_vec(),
+            ))))]
+            .into(),
+        },
+        FrozenClock,
+        cache,
+        vec!["files.example.test".into()],
+    );
+    let pause = db.pause_writes().unwrap();
+    assert_eq!(
+        s.fetch_detailed(&reference(), &ParserLimits::v01()),
+        Err(PartReason::PermissionDenied)
+    );
+    drop(s);
+    let pending = t.0.join(format!(".pending-{}", Uuid::new_v4()));
+    std::fs::write(&pending, b"ciphertext-only").unwrap();
+    assert!(matches!(
+        ProtectedCache::create_coordinated(&t.0, p.clone(), &db),
+        Err(AppError::Conflict)
+    ));
+    assert!(pending.exists());
+    drop(pause);
+    let _cache = ProtectedCache::create_coordinated(&t.0, p, &db).unwrap();
+    assert!(!pending.exists());
+}

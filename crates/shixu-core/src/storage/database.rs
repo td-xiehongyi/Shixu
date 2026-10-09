@@ -12,6 +12,8 @@ const SENTINEL: &[u8] = b"shixu-local-protection-v1";
 /// Shared core-only SQLite owner. No connection or SQL access is exposed publicly.
 /// D1 must use `transaction` so message/calendar writes commit atomically.
 pub struct Database {
+    pub(crate) runtime_owned: std::sync::atomic::AtomicBool,
+    coordinator: Arc<super::coordinator::WriteCoordinator>,
     connection: Mutex<Connection>,
     protector: Arc<dyn DataProtector>,
 }
@@ -39,7 +41,7 @@ impl Database {
                 tx.execute("INSERT INTO protection_metadata VALUES (1,?1)", [&sealed])
                     .map_err(storage_error)?;
             }
-            1..=6 => {
+            1..=7 => {
                 let sealed: Vec<u8> = tx
                     .query_row(
                         "SELECT sentinel FROM protection_metadata WHERE id=1",
@@ -73,16 +75,29 @@ impl Database {
             tx.execute_batch(include_str!("migrations/0006_settings.sql"))
                 .map_err(storage_error)?;
         }
+        if version < 7 {
+            tx.execute_batch(include_str!("migrations/0007_runtime.sql"))
+                .map_err(storage_error)?;
+        }
         tx.commit().map_err(storage_error)?;
         Ok(Self {
+            runtime_owned: std::sync::atomic::AtomicBool::new(false),
+            coordinator: Arc::default(),
             connection: Mutex::new(connection),
             protector,
         })
+    }
+    pub fn coordinator(&self) -> Arc<super::coordinator::WriteCoordinator> {
+        self.coordinator.clone()
+    }
+    pub fn pause_writes(&self) -> AppResult<super::coordinator::PauseGuard> {
+        self.coordinator.pause()
     }
     pub(crate) fn transaction<T>(
         &self,
         action: impl FnOnce(&Transaction<'_>) -> AppResult<T>,
     ) -> AppResult<T> {
+        let _permit = self.coordinator.enter()?;
         let mut connection = self.connection.lock().map_err(|_| AppError::Disconnected)?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)

@@ -44,6 +44,8 @@ impl SettingsStore {
  else { let legacy:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM sources WHERE source_id=?1)",[config.source_id.to_string()],|r|r.get(0)).map_err(storage_error)?;if legacy{return Err(AppError::Conflict);}
  let count:u32=tx.query_row("SELECT count(*) FROM source_settings",[],|r|r.get(0)).map_err(storage_error)?;if count>=100{return Err(AppError::InvalidInput);}
  tx.execute("INSERT INTO source_bindings(source_id,adapter_type,account_id,groups_json,timezone) VALUES (?1,?2,?3,?4,?5)",params![config.source_id.to_string(),config.adapter_type,config.account_id,serde_json::to_string(&config.allowed_group_ids).map_err(|_|AppError::InvalidInput)?,config.timezone]).map_err(storage_error)?;}
+ // Re-enable/reconfigure deferred durable notices; revoked source rows never block other sources.
+ tx.execute("UPDATE runtime_work SET pending=1 WHERE message_key IN (SELECT m.message_key FROM messages m JOIN sources s USING(namespace) WHERE s.source_id=?1 AND m.payload IS NOT NULL)",[config.source_id.to_string()]).map_err(storage_error)?;
  // Epoch advances explicitly in durable settings; identity/cursors/history are never reset.
  tx.execute("INSERT INTO source_settings VALUES (?1,1,?2) ON CONFLICT(source_id) DO UPDATE SET epoch=epoch+1,payload=excluded.payload",params![config.source_id.to_string(),self.db.protect(&config)?]).map_err(storage_error)?;
  Ok(())})

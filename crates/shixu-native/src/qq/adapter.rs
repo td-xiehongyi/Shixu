@@ -344,3 +344,29 @@ pub fn stable_attachment_ref(
     }
     SourceFileRef::try_from(reference)
 }
+impl<T: ReceiveTransport> shixu_core::runtime::workers::ReceivePort for NativeQQAdapter<T> {
+    fn poll(&mut self) -> AppResult<Option<shixu_core::runtime::workers::Delivery>> {
+        if self.pending.is_none() {
+            let _ = QQAdapter::next_message(self)?;
+        }
+        Ok(self
+            .pending
+            .as_ref()
+            .map(|d| shixu_core::runtime::workers::Delivery {
+                message: d.message.clone(),
+                cursor: d.cursor.clone(),
+            }))
+    }
+    fn acknowledge(&mut self, cursor: &str) -> AppResult<()> {
+        if self.pending.as_ref().is_none_or(|d| d.cursor != cursor) {
+            return Err(AppError::Conflict);
+        }
+        match self.persist_pending()? {
+            AppendOutcome::Stored | AppendOutcome::Duplicate => Ok(()),
+            _ => Err(AppError::Conflict),
+        }
+    }
+    fn disconnect(&mut self) -> AppResult<()> {
+        QQAdapter::disconnect(self)
+    }
+}

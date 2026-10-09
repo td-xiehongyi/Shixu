@@ -376,8 +376,59 @@ pub struct WireSourceSetting {
 }
 #[derive(Serialize)]
 pub struct WireSettings {
+    pub runtime: WireRuntime,
     pub sources: Vec<WireSourceSetting>,
     pub model: WireConsent,
     pub autostart: bool,
     pub transport_supported: bool,
+}
+
+#[derive(Serialize)]
+pub struct WireRuntime {
+    pub running: bool,
+    pub pending_rules: u32,
+    pub attachment_queue: u32,
+    pub model_queue: u32,
+    pub last_calendar_commit: Option<i64>,
+    pub last_error: Option<shixu_core::contracts::error::AppError>,
+    pub sources: Vec<WireRuntimeSource>,
+}
+#[derive(Serialize)]
+pub struct WireRuntimeSource {
+    pub source_id: SourceId,
+    pub connection_state: &'static str,
+    pub last_received_at: Option<i64>,
+    pub last_persisted_at: Option<i64>,
+    pub last_applied_at: Option<i64>,
+    pub gap: bool,
+}
+impl From<shixu_core::runtime::supervisor::RuntimeStatus> for WireRuntime {
+    fn from(s: shixu_core::runtime::supervisor::RuntimeStatus) -> Self {
+        use shixu_core::notifications::source::ConnectionState;
+        Self {
+            running: s.running,
+            pending_rules: s.pending_rules,
+            attachment_queue: s.attachment_queue,
+            model_queue: s.model_queue,
+            last_calendar_commit: s.last_calendar_commit,
+            last_error: s.last_error,
+            sources: s
+                .sources
+                .into_iter()
+                .map(|(source_id, h)| WireRuntimeSource {
+                    source_id,
+                    connection_state: match h.connection_state {
+                        ConnectionState::Connected => "connected",
+                        ConnectionState::Disconnected => "disconnected",
+                        ConnectionState::WaitingForLogin => "waiting_for_login",
+                        ConnectionState::Incompatible => "incompatible",
+                    },
+                    last_received_at: h.last_received_at,
+                    last_persisted_at: h.last_persisted_at,
+                    last_applied_at: h.last_applied_at,
+                    gap: !h.gaps.is_empty(),
+                })
+                .collect(),
+        }
+    }
 }

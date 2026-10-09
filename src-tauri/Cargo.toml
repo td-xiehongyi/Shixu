@@ -17,7 +17,7 @@ zeroize = { workspace = true, features = ["serde"] }
 
 [target.'cfg(windows)'.dependencies]
 shixu-native = { path = "../crates/shixu-native" }
-tauri = { version = "=2.12.2", default-features = false, features = ["wry", "compression", "common-controls-v6"] }
+tauri = { version = "=2.12.2", default-features = false, features = ["wry", "compression", "common-controls-v6", "tray-icon"] }
 
 [target.'cfg(windows)'.build-dependencies]
 tauri-build = "=2.7.1"

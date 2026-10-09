@@ -5,3 +5,5 @@ pub mod contracts;
 pub mod notifications;
 pub mod storage;
 pub mod vault;
+
+pub mod runtime;

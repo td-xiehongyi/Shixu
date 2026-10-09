@@ -247,6 +247,7 @@ pub fn dispatch(
             let _: EmptyArgs = decode(payload)?;
             let settings = state.settings()?;
             serialized(wire::WireSettings {
+                runtime: state.runtime()?.status().into(),
                 sources: settings
                     .sources()?
                     .into_iter()
@@ -263,6 +264,7 @@ pub fn dispatch(
         "save_source_config" => {
             let a: SourceArgs = decode(payload)?;
             state.settings()?.save_source(a.config)?;
+            state.runtime()?.refresh_sources()?;
             Ok(serde_json::Value::Null)
         }
         "set_model_consent" => {

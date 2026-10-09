@@ -1,3 +1,4 @@
+pub mod coordinator;
 pub mod database;
 use crate::contracts::AppResult;
 pub use database::Database;

@@ -299,7 +299,25 @@ export interface SourceSetting {
   config: SourceConfig;
   epoch: Revision;
 }
+export interface RuntimeSnapshot {
+  running: boolean;
+  pending_rules: number;
+  attachment_queue: number;
+  model_queue: number;
+  last_calendar_commit: number | null;
+  last_error: AppErrorCode | null;
+  sources: {
+    source_id: string;
+    connection_state:
+      "connected" | "disconnected" | "waiting_for_login" | "incompatible";
+    last_received_at: number | null;
+    last_persisted_at: number | null;
+    last_applied_at: number | null;
+    gap: boolean;
+  }[];
+}
 export interface SettingsSnapshot {
+  runtime: RuntimeSnapshot;
   sources: SourceSetting[];
   model: ModelConsent;
   autostart: boolean;

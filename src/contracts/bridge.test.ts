@@ -295,3 +295,22 @@ it("actual_core_long_source_native_fixture_decodes_without_expanding_limits", as
     }),
   ).toHaveLength(1);
 });
+it("runtime_status_is_bounded_and_payload_free", async () => {
+  const { settings } = await import("../test/d4");
+  const runtime = {
+    running: true,
+    pending_rules: 2,
+    attachment_queue: 1,
+    model_queue: 0,
+    last_calendar_commit: null,
+    last_error: "STORAGE_FULL",
+    sources: [],
+  };
+  const bridge = createMainBridge(async () => ({ ...settings, runtime }));
+  expect((await bridge.settingsRead()).runtime).toEqual(runtime);
+  const malformed = createMainBridge(async () => ({
+    ...settings,
+    runtime: { ...runtime, model_queue: -1 },
+  }));
+  await expect(malformed.settingsRead()).rejects.toThrow("INVALID_INPUT");
+});

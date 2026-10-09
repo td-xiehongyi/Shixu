@@ -13,6 +13,15 @@ const initial: SettingsSnapshot = {
   },
   autostart: false,
   transport_supported: false,
+  runtime: {
+    running: false,
+    pending_rules: 0,
+    attachment_queue: 0,
+    model_queue: 0,
+    last_calendar_commit: null,
+    last_error: null,
+    sources: [],
+  },
 };
 export function SettingsPage({
   port = mainBridge,
@@ -65,6 +74,43 @@ export function SettingsPage({
       <h1>设置</h1>
       <p>QQ 未连接；接收、持久化、入历和后台运行须分别验证。</p>
       <p>模型服务尚未接通；保存授权不会发起网络请求。</p>
+      {ready && (
+        <section aria-label="后台状态">
+          <h2>后台状态</h2>
+          <p>
+            {data.runtime.running ? "调度运行中" : "调度未启动"} · 待入历{" "}
+            {data.runtime.pending_rules} · 附件 {data.runtime.attachment_queue}{" "}
+            · 模型 {data.runtime.model_queue}
+          </p>
+          {data.runtime.last_error && (
+            <p role="status">
+              {data.runtime.last_error === "STORAGE_FULL"
+                ? "存储空间不足；接收或入历尚未完成。"
+                : "后台任务尚未完成，请检查来源连接与权限。"}
+            </p>
+          )}
+          {data.runtime.sources.map((source) => (
+            <p key={source.source_id}>
+              来源 {source.source_id} ·{" "}
+              {source.connection_state === "connected"
+                ? "已接收在线消息"
+                : "未连接"}{" "}
+              · 接收 {source.last_received_at ?? "无"} · 持久化{" "}
+              {source.last_persisted_at ?? "无"} · 入历{" "}
+              {source.last_applied_at ?? "无"}
+              {source.gap ? " · 存在未核实缺口" : ""}
+            </p>
+          ))}
+          <button
+            disabled={busy}
+            onClick={() => {
+              void change(async () => {});
+            }}
+          >
+            刷新后台状态
+          </button>
+        </section>
+      )}
       <section>
         <h2>通知来源</h2>
         <p className="muted">

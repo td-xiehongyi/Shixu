@@ -46,9 +46,28 @@ pub struct ProtectedCache {
     root: PathBuf,
     protector: Arc<dyn DataProtector>,
     _lock: File,
+    coordinator: Arc<shixu_core::storage::coordinator::WriteCoordinator>,
 }
 impl ProtectedCache {
+    /// Runtime cache creation, staging cleanup and publication share the DB barrier.
+    pub fn create_coordinated(
+        root: &Path,
+        protector: Arc<dyn DataProtector>,
+        db: &shixu_core::storage::Database,
+    ) -> AppResult<Self> {
+        Self::create_with_coordinator(root, protector, db.coordinator())
+    }
+    /// Standalone cache for portable tests/tools; cannot participate in an app DB pause.
+    /// The runtime must use create_coordinated. Windows remains Unsupported.
     pub fn create(root: &Path, protector: Arc<dyn DataProtector>) -> AppResult<Self> {
+        Self::create_with_coordinator(root, protector, Arc::default())
+    }
+    fn create_with_coordinator(
+        root: &Path,
+        protector: Arc<dyn DataProtector>,
+        coordinator: Arc<shixu_core::storage::coordinator::WriteCoordinator>,
+    ) -> AppResult<Self> {
+        let _permit = coordinator.enter()?;
         #[cfg(not(unix))]
         {
             let _ = (root, protector);
@@ -131,6 +150,7 @@ impl ProtectedCache {
                 root: root.to_owned(),
                 protector,
                 _lock: lock,
+                coordinator,
             })
         }
     }
@@ -140,6 +160,10 @@ impl ProtectedCache {
         plain: &[u8],
         limits: &ParserLimits,
     ) -> Result<PathBuf, PartReason> {
+        let _permit = self
+            .coordinator
+            .enter()
+            .map_err(|_| PartReason::PermissionDenied)?;
         let sealed = Zeroizing::new(
             self.protector
                 .protect(plain)

@@ -3,3 +3,5 @@ pub mod commands;
 #[cfg(windows)]
 pub mod runtime;
 pub mod wire;
+
+pub mod lifecycle;

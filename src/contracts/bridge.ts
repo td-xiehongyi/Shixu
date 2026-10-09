@@ -525,7 +525,57 @@ function details(v: unknown): CalendarDetails {
   return d as unknown as CalendarDetails;
 }
 function settings(v: unknown): SettingsSnapshot {
-  const d = object(v, ["sources", "model", "autostart", "transport_supported"]);
+  const d = object(v, [
+    "sources",
+    "model",
+    "autostart",
+    "transport_supported",
+    "runtime",
+  ]);
+  const r = object(d.runtime, [
+    "running",
+    "pending_rules",
+    "attachment_queue",
+    "model_queue",
+    "last_calendar_commit",
+    "last_error",
+    "sources",
+  ]);
+  bool(r.running);
+  nullable(r.last_calendar_commit, millis);
+  nullable(r.last_error, (v) => enumeration(v, codes));
+  for (const key of ["pending_rules", "attachment_queue", "model_queue"]) {
+    if (
+      !Number.isSafeInteger(r[key]) ||
+      (r[key] as number) < 0 ||
+      (r[key] as number) > 4294967295
+    )
+      invalid();
+  }
+  array(r.sources, 100, (v) => {
+    const s = object(v, [
+      "source_id",
+      "connection_state",
+      "last_received_at",
+      "last_persisted_at",
+      "last_applied_at",
+      "gap",
+    ]);
+    id(s.source_id);
+    enumeration(s.connection_state, [
+      "connected",
+      "disconnected",
+      "waiting_for_login",
+      "incompatible",
+    ]);
+    bool(s.gap);
+    for (const key of [
+      "last_received_at",
+      "last_persisted_at",
+      "last_applied_at",
+    ])
+      nullable(s[key], millis);
+  });
   array(d.sources, 100, (v) => {
     const row = object(v, ["config", "epoch"]);
     source(row.config);

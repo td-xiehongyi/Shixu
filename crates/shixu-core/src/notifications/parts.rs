@@ -129,6 +129,14 @@ impl TaskQueue {
             Ok(())
         })
     }
+    /// The owner calls this only after this exact parser invocation has returned.
+    /// Never releases a replacement lease belonging to another worker.
+    pub(crate) fn release_stopped(&self, job: &TaskLease) -> AppResult<()> {
+        self.db.transaction(|tx|{
+            tx.execute("DELETE FROM attachment_tasks WHERE message_key=?1 AND part_id=?2 AND state='running' AND (lease=?3 OR lease IS NULL) AND EXISTS(SELECT 1 FROM messages m WHERE m.message_key=attachment_tasks.message_key AND (m.revision!=attachment_tasks.revision OR m.revoked=1))",params![job.message_key.to_string(),job.part.part_id.to_string(),job.token]).map_err(storage_error)?;
+            tx.execute("UPDATE attachment_tasks SET state='queued',lease=NULL WHERE message_key=?1 AND part_id=?2 AND state='running' AND (lease=?3 OR lease IS NULL)",params![job.message_key.to_string(),job.part.part_id.to_string(),job.token]).map_err(storage_error)?;Ok(())
+        })
+    }
     /// Startup recovery only after the native supervisor has proved every old child
     /// dead. Invalidates old leases; never call merely because a timer expired.
     pub fn recover_after_children_stopped(&self) -> AppResult<u64> {

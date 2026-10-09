@@ -869,3 +869,68 @@ fn noncontiguous_partial_replays_original_interval_after_reopen_and_live_arrival
     }
     std::fs::remove_file(path).unwrap();
 }
+#[test]
+fn d5_native_receive_port_retains_delivery_until_database_commit() {
+    use shixu_core::{
+        notifications::consent::{ConsentStore, ModelConsent},
+        runtime::{Supervisor, workers::ReceivePort},
+    };
+    let c = config();
+    let fail = Arc::new(AtomicBool::new(false));
+    let db = Arc::new(
+        Database::open(
+            std::path::Path::new(":memory:"),
+            Arc::new(SyntheticProtection(fail.clone())),
+        )
+        .unwrap(),
+    );
+    let calls = Arc::new(AtomicUsize::new(0));
+    let transport = SyntheticTransport {
+        caps: c.capability_set.clone(),
+        events: vec![Ok(Some(delivery("cursor-one")))].into(),
+        batches: VecDeque::new(),
+        calls: calls.clone(),
+        auth_fail: false,
+    };
+    let mut adapter = NativeQQAdapter::new(
+        transport,
+        LoopbackEndpoint::parse("127.0.0.1:3001").unwrap(),
+        MessageStore::new(db.clone()),
+        || 100,
+    );
+    QQAdapter::connect(&mut adapter, c.clone(), token()).unwrap();
+    let supervisor = Supervisor::new(
+        db.clone(),
+        Arc::new(ConsentStore::new(ModelConsent::default())),
+    );
+    supervisor.start(vec![c.clone()]).unwrap();
+    let first = ReceivePort::poll(&mut adapter)
+        .unwrap()
+        .expect("normalized native delivery");
+    assert_eq!(
+        MessageStore::new(db.clone())
+            .cursor(&c, &first.message.group_id)
+            .unwrap(),
+        None
+    );
+    fail.store(true, Ordering::SeqCst);
+    assert_eq!(
+        supervisor.receive(first.message.clone(), &first.cursor),
+        Err(AppError::StorageFull)
+    );
+    let retry = ReceivePort::poll(&mut adapter).unwrap().unwrap();
+    assert_eq!(retry.cursor, first.cursor);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    fail.store(false, Ordering::SeqCst);
+    supervisor
+        .receive(retry.message.clone(), &retry.cursor)
+        .unwrap();
+    ReceivePort::acknowledge(&mut adapter, &retry.cursor).unwrap();
+    assert!(ReceivePort::poll(&mut adapter).unwrap().is_none());
+    assert_eq!(
+        MessageStore::new(db)
+            .cursor(&c, &retry.message.group_id)
+            .unwrap(),
+        Some("cursor-one".into())
+    );
+}

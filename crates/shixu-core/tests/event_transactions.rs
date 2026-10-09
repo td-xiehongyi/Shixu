@@ -650,7 +650,7 @@ fn legacy_schema_upgrades_preserve_protected_messages_and_parser_rows() {
             rusqlite::params![m.message_key.to_string(), sealed],
         )
         .unwrap();
-        c.execute_batch("DROP TABLE message_source_proof; DROP TABLE source_settings; DROP TABLE desktop_settings; DROP TABLE calendar_suppressions; DROP TABLE calendar_changes; DROP TABLE calendar_sources; DROP TABLE calendar_batches; DROP TABLE calendar_events;").unwrap();
+        c.execute_batch("DROP TRIGGER runtime_message_insert; DROP TRIGGER runtime_message_update; DROP TABLE model_attempts; DROP TABLE runtime_work; DROP TABLE message_source_proof; DROP TABLE source_settings; DROP TABLE desktop_settings; DROP TABLE calendar_suppressions; DROP TABLE calendar_changes; DROP TABLE calendar_sources; DROP TABLE calendar_batches; DROP TABLE calendar_events;").unwrap();
         if version < 4 {
             c.execute_batch("ALTER TABLE attachment_tasks DROP COLUMN retry_limit;")
                 .unwrap();
@@ -672,7 +672,7 @@ fn legacy_schema_upgrades_preserve_protected_messages_and_parser_rows() {
         assert_eq!(
             c.query_row::<i64, _, _>("PRAGMA user_version", [], |r| r.get(0))
                 .unwrap(),
-            6
+            7
         );
         assert_eq!(
             c.query_row::<i64, _, _>("SELECT count(*) FROM part_results", [], |r| r.get(0))

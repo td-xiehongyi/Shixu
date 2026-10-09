@@ -41,3 +41,26 @@ it("saving_new_source_then_editing_preserves_source_identity", async () => {
   expect(saved[0].source_id).toBe(saved[1].source_id);
   await r.close();
 });
+it("shows_runtime_queues_and_storage_failure_without_claiming_connected", async () => {
+  const snapshot: SettingsSnapshot = {
+    ...initialSettings,
+    runtime: {
+      running: true,
+      pending_rules: 3,
+      attachment_queue: 2,
+      model_queue: 1,
+      last_calendar_commit: null,
+      last_error: "STORAGE_FULL",
+      sources: [],
+    },
+  };
+  const r = await render(
+    <SettingsPage port={port({ settingsRead: async () => snapshot })} />,
+  );
+  expect(r.host.textContent).toContain("待入历 3");
+  expect(r.host.textContent).toContain("附件 2");
+  expect(r.host.textContent).toContain("模型 1");
+  expect(r.host.textContent).toContain("存储空间不足");
+  expect(r.host.textContent).toContain("QQ 未连接");
+  await r.close();
+});
