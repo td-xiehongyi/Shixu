@@ -91,7 +91,7 @@ pub(crate) fn validate_database(db: &Database, c: &Connection) -> AppResult<()> 
             }
         }
     }
-    Ok(())
+    super::validation::validate(db, c)
 }
 pub(crate) fn columns(c: &Connection, table: &str) -> AppResult<Vec<(String, String)>> {
     let mut stmt = c

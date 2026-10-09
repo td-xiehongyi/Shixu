@@ -37,8 +37,14 @@ impl CalendarBackup {
         let mut tables = BTreeMap::new();
         for table in TABLES {
             let cols = columns(&copy, table)?;
+            // History consumers use insertion order; UUID order is unrelated to chronology.
+            let order = if *table == "calendar_changes" {
+                "rowid"
+            } else {
+                "1"
+            };
             let mut stmt = copy
-                .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                .prepare(&format!("SELECT * FROM {table} ORDER BY {order}"))
                 .map_err(storage_error)?;
             let mut rows = stmt.query([]).map_err(storage_error)?;
             let mut values = vec![];

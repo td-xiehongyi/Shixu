@@ -617,3 +617,260 @@ fn dangling_owner_link_is_rejected_without_creating_target() {
     assert!(CalendarBackup::new(f.db.clone(), f.consent.clone(), &root).is_err());
     assert!(!target.exists());
 }
+
+fn source_transfer(f: &F) -> serde_json::Value {
+    let c = config();
+    SettingsStore::new(f.db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    let runtime = shixu_core::runtime::Supervisor::new(f.db.clone(), f.consent.clone());
+    runtime.start(vec![c.clone()]).unwrap();
+    runtime
+        .receive(notice(&c, "2026年10月12日9:00高数考试"), "cursor")
+        .unwrap();
+    runtime.process_pending(0).unwrap();
+    serde_json::from_slice(&f.backup.export_json(true, true).unwrap()).unwrap()
+}
+fn assert_rejected_mutations(
+    f: &F,
+    original: &serde_json::Value,
+    mutations: &[(&str, serde_json::Value)],
+) {
+    f.backup
+        .import_json(&serde_json::to_vec(original).unwrap(), 1)
+        .unwrap();
+    let before = f.backup.export_json(true, true).unwrap();
+    let mut accepted = vec![];
+    for (path, value) in mutations {
+        let mut altered = original.clone();
+        *altered
+            .pointer_mut(path)
+            .unwrap_or_else(|| panic!("missing fixture {path}")) = value.clone();
+        if f.backup
+            .import_json(&serde_json::to_vec(&altered).unwrap(), 2)
+            .is_ok()
+        {
+            accepted.push(*path);
+        }
+        assert_eq!(
+            f.backup.export_json(true, true).unwrap(),
+            before,
+            "live data changed for {path}"
+        );
+    }
+    assert!(
+        accepted.is_empty(),
+        "accepted malformed imports: {accepted:?}"
+    );
+    f.event("live owner remains usable");
+}
+#[test]
+fn migration_rejects_key_revision_and_source_relationship_mismatches() {
+    let f = F::new();
+    let original = source_transfer(&f);
+    let id = serde_json::json!(uuid::Uuid::new_v4().to_string());
+    assert_rejected_mutations(
+        &f,
+        &original,
+        &[
+            ("/tables/calendar_events/0/1/event/event_id", id.clone()),
+            (
+                "/tables/calendar_events/0/1/event/revision",
+                serde_json::json!(0),
+            ),
+            ("/tables/calendar_events/0/1/last_message", id.clone()),
+            ("/tables/calendar_changes/0/2/change_id", id.clone()),
+            ("/tables/calendar_changes/0/2/event_id", id.clone()),
+            ("/tables/calendar_changes/0/2/after/event_id", id.clone()),
+            (
+                "/tables/calendar_sources/0/3/candidate/candidate_key",
+                id.clone(),
+            ),
+            ("/tables/calendar_sources/0/3/message_key", id.clone()),
+            ("/tables/calendar_sources/0/3/event_id", id.clone()),
+            ("/tables/calendar_sources/0/3/source_id", id.clone()),
+            (
+                "/tables/calendar_sources/0/3/message_revision",
+                serde_json::json!(2),
+            ),
+            (
+                "/tables/calendar_changes/0/2/source/account_id",
+                serde_json::json!("other"),
+            ),
+            ("/tables/calendar_batches/0/1/batch/message_key", id.clone()),
+            (
+                "/tables/calendar_batches/0/1/batch/message_revision",
+                serde_json::json!(2),
+            ),
+            ("/tables/messages/0/8/message_key", id.clone()),
+            ("/tables/messages/0/8/source_id", id.clone()),
+            ("/tables/messages/0/8/revision", serde_json::json!(2)),
+            ("/tables/source_settings/0/2/source_id", id.clone()),
+            ("/tables/message_source_proof/0/2/source_id", id),
+        ],
+    );
+}
+#[test]
+fn migration_rejects_semantically_invalid_current_and_nested_times() {
+    let f = F::new();
+    let mut original = source_transfer(&f);
+    let event = EventService::new(f.db.clone())
+        .query(EventQuery {
+            from_date: None,
+            through_date: None,
+            statuses: vec![],
+            include_pending: true,
+        })
+        .unwrap()
+        .remove(0);
+    EventService::new(f.db.clone())
+        .edit(
+            &event.event_id.to_string(),
+            event.revision,
+            EventPatch {
+                event_id: event.event_id,
+                expected_revision: event.revision,
+                title: Some("edited".into()),
+                time: None,
+                location: None,
+                status: None,
+            },
+        )
+        .unwrap();
+    original =
+        serde_json::from_slice(&f.backup.export_json(true, true).unwrap()).unwrap_or(original);
+    let historical_index = original["tables"]["calendar_changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|r| !r[2]["before"].is_null())
+        .unwrap();
+    let source_index = original["tables"]["calendar_changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|r| !r[2]["source"].is_null())
+        .unwrap();
+    let before = format!("/tables/calendar_changes/{historical_index}/2/before/local_date");
+    let nested =
+        format!("/tables/calendar_changes/{source_index}/2/source/candidate/time/local_date");
+    assert_rejected_mutations(
+        &f,
+        &original,
+        &[
+            (
+                "/tables/calendar_events/0/1/event/local_date",
+                serde_json::json!("2026-02-30"),
+            ),
+            (
+                "/tables/calendar_events/0/1/event/timezone",
+                serde_json::json!("Nowhere/Invalid"),
+            ),
+            (
+                "/tables/calendar_events/0/1/event/end_at",
+                serde_json::json!(1),
+            ),
+            (
+                "/tables/calendar_events/0/1/event/time_precision",
+                serde_json::json!("date_only"),
+            ),
+            (
+                "/tables/calendar_changes/0/2/after/local_date",
+                serde_json::json!("2026-02-30"),
+            ),
+            (&before, serde_json::json!("2026-02-30")),
+            (&nested, serde_json::json!("2026-02-30")),
+            (
+                "/tables/calendar_sources/0/3/candidate/time/local_date",
+                serde_json::json!("2026-02-30"),
+            ),
+            (
+                "/tables/calendar_batches/0/1/batch/candidates/0/time/local_date",
+                serde_json::json!("2026-02-30"),
+            ),
+        ],
+    );
+}
+#[test]
+fn migration_preserves_all_valid_time_precisions() {
+    let f = F::new();
+    let service = EventService::new(f.db.clone());
+    for precision in [
+        Precision::UnknownDate,
+        Precision::DateOnly,
+        Precision::ExplicitAllDay,
+        Precision::Exact,
+    ] {
+        let e = f.event("valid precision");
+        service
+            .edit(
+                &e.event_id.to_string(),
+                e.revision,
+                EventPatch {
+                    event_id: e.event_id,
+                    expected_revision: e.revision,
+                    title: None,
+                    time: Some(TimeValue {
+                        precision,
+                        local_date: (precision != Precision::UnknownDate)
+                            .then(|| "2026-10-12".into()),
+                        start_at: (precision == Precision::Exact).then_some(1791766800000),
+                        end_at: None,
+                        timezone: "Asia/Shanghai".into(),
+                        raw_time_text: "synthetic".into(),
+                    }),
+                    location: None,
+                    status: None,
+                },
+            )
+            .unwrap();
+    }
+    let data = f.backup.export_json(false, true).unwrap();
+    let preview = f.backup.import_json(&data, 1).unwrap();
+    let pause = f.db.pause_writes().unwrap();
+    f.backup
+        .restore(preview.preview_id, true, 2, &pause)
+        .unwrap();
+    drop(pause);
+    assert_eq!(f.count(), 4);
+}
+#[test]
+fn migration_preserves_121_change_chronology_ids_and_undo() {
+    let f = F::new();
+    let service = EventService::new(f.db.clone());
+    let mut e = f.event("initial");
+    for n in 0..120 {
+        e = service
+            .edit(
+                &e.event_id.to_string(),
+                e.revision,
+                EventPatch {
+                    event_id: e.event_id,
+                    expected_revision: e.revision,
+                    title: Some(format!("edit {n}")),
+                    time: None,
+                    location: None,
+                    status: None,
+                },
+            )
+            .unwrap();
+    }
+    let before = service.history(&e.event_id.to_string()).unwrap();
+    assert_eq!(before.len(), 121);
+    let data = f.backup.export_json(false, true).unwrap();
+    let preview = f.backup.import_json(&data, 1).unwrap();
+    let pause = f.db.pause_writes().unwrap();
+    f.backup
+        .restore(preview.preview_id, true, 2, &pause)
+        .unwrap();
+    drop(pause);
+    assert_eq!(service.history(&e.event_id.to_string()).unwrap(), before);
+    let restored = service
+        .undo(UndoRequest {
+            change_id: before.last().unwrap().change_id,
+            expected_revision: e.revision,
+        })
+        .unwrap();
+    assert_eq!(restored.title, "edit 118");
+    assert_eq!(restored.revision, 122);
+}

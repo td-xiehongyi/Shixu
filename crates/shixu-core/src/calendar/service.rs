@@ -14,7 +14,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct BatchRecord {
-    batch: ExtractBatch,
+    pub(crate) batch: ExtractBatch,
     incomplete: bool,
 }
 pub struct EventService {
