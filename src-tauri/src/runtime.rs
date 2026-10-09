@@ -116,7 +116,8 @@ pub fn run() {
             let directory = root.join("calendar");
             // Product storage is only the existing Windows DPAPI/ACL adapter.
             let state = match shixu_native::protection::DpapiProtector::open_database(&directory) {
-                Ok(db) => AppState::from_database(Arc::new(db)),
+                Ok(db) => AppState::from_database(Arc::new(db))
+                    .with_backups(&directory.join("backups"))?,
                 Err(_) => AppState::default(),
             };
             if let Ok(supervisor) = state.runtime() {
@@ -127,6 +128,7 @@ pub fn run() {
                 }
                 let workers = supervisor.spawn_workers(WorkerPorts {
                     parser: Some(Arc::new(NativeParser)),
+                    backup: state.backup().ok(),
                     ..WorkerPorts::default()
                 })?;
                 app.manage(NativeWorkers(Mutex::new(Some(workers))));
@@ -175,7 +177,7 @@ pub fn run() {
                         return Err(AppError::InvalidInput);
                     };
                     // Boundary size check is structural, avoiding extra plaintext serialization.
-                    crate::commands::validate_json_size(payload)?;
+                    crate::commands::validate_command_size(command, payload)?;
                     let state = view.state::<AppState>();
                     let result = commands::dispatch(&context, command, payload.clone(), &state)?;
                     if command == "show_vault_window" {

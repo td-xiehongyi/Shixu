@@ -164,6 +164,14 @@ impl ProtectedCache {
             .coordinator
             .enter()
             .map_err(|_| PartReason::PermissionDenied)?;
+        self.store_paused(reference, plain, limits)
+    }
+    fn store_paused(
+        &self,
+        reference: &AttachmentRef,
+        plain: &[u8],
+        limits: &ParserLimits,
+    ) -> Result<PathBuf, PartReason> {
         let sealed = Zeroizing::new(
             self.protector
                 .protect(plain)
@@ -457,5 +465,110 @@ pub fn download_failure(part_id: PartId, reason: PartReason) -> PartResult {
         },
         blocks: vec![],
         reason_code: Some(reason),
+    }
+}
+
+/// Snapshot adapter over the ACTUAL immutable cache. Blob UUIDs identify manifest
+/// entries; native filenames remain authenticated message/part/reference/content
+/// bindings. No caller-supplied path or alternate uncoordinated cache is accepted.
+impl shixu_core::backup::calendar::BackupBlobs for ProtectedCache {
+    fn coordinator(&self) -> Arc<shixu_core::storage::coordinator::WriteCoordinator> {
+        self.coordinator.clone()
+    }
+    fn read(
+        &self,
+        part: &MessagePart,
+        pause: &shixu_core::storage::coordinator::PauseGuard,
+    ) -> AppResult<Option<Vec<u8>>> {
+        if !pause.authenticates(&self.coordinator) {
+            return Err(AppError::Conflict);
+        }
+        let expected = part.content_hash.as_ref().ok_or(AppError::InvalidInput)?;
+        let prefix = format!("{}.{}.", part.message_key, part.part_id);
+        let mut candidates = false;
+        for e in std::fs::read_dir(&self.root).map_err(io_error)? {
+            let e = e.map_err(io_error)?;
+            if !e.file_name().to_string_lossy().starts_with(&prefix) {
+                continue;
+            }
+            candidates = true;
+            let m = std::fs::symlink_metadata(e.path()).map_err(io_error)?;
+            if !m.is_file() || m.file_type().is_symlink() || m.len() > 25 * 1024 * 1024 {
+                return Err(AppError::InvalidInput);
+            }
+            let mut bytes = vec![];
+            File::open(e.path())
+                .map_err(io_error)?
+                .take(25 * 1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(io_error)?;
+            let plain = Zeroizing::new(self.protector.unprotect(&bytes)?);
+            use sha2::{Digest, Sha256};
+            let hash = Sha256::digest(&plain)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            if &hash == expected {
+                let binding = Zeroizing::new(
+                    serde_json::to_vec(&(part.message_key, part.part_id, &part.source_file_ref))
+                        .map_err(|_| AppError::InvalidInput)?,
+                );
+                let mut h = Sha256::new();
+                h.update((binding.len() as u64).to_be_bytes());
+                h.update(&binding);
+                h.update(&plain);
+                let identity = h
+                    .finalize()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>();
+                if e.file_name().to_string_lossy() != format!("{prefix}{identity}.blob") {
+                    return Err(AppError::InvalidInput);
+                }
+                return Ok(Some(bytes));
+            }
+        }
+        if candidates {
+            Err(AppError::InvalidInput)
+        } else {
+            Ok(None)
+        }
+    }
+    fn publish(
+        &self,
+        part: &MessagePart,
+        sealed: &[u8],
+        pause: &shixu_core::storage::coordinator::PauseGuard,
+    ) -> AppResult<()> {
+        if !pause.authenticates(&self.coordinator) {
+            return Err(AppError::Conflict);
+        }
+        let plain = Zeroizing::new(self.protector.unprotect(sealed)?);
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(&plain)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        if part.content_hash.as_ref() != Some(&hash) {
+            return Err(AppError::InvalidInput);
+        }
+        let reference = AttachmentRef {
+            part_id: part.part_id,
+            message_key: part.message_key,
+            source_file_ref: part.source_file_ref.clone(),
+            content_hash: part.content_hash.clone(),
+            encrypted_blob_ref: part.encrypted_blob_ref,
+            fetch_state: part.fetch_state,
+            retained_until: part.retained_until,
+        };
+        self.store_paused(&reference, &plain, &ParserLimits::v01())
+            .map_err(|r| {
+                if r == PartReason::StorageFull {
+                    AppError::StorageFull
+                } else {
+                    AppError::InvalidInput
+                }
+            })?;
+        Ok(())
     }
 }

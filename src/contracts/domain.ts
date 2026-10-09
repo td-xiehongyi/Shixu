@@ -341,3 +341,16 @@ export interface CalendarDetails {
   history: EventChange[];
   sources: EventSource[];
 }
+
+export interface BackupSummary {
+  created_at: number;
+  events: string;
+  messages: string;
+  present: string;
+  never_fetched: string;
+  cleaned: string;
+  not_migrated: string;
+}
+export interface BackupPreview extends BackupSummary {
+  preview_id: string;
+}

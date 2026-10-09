@@ -2,6 +2,15 @@ fn main() {
     #[cfg(windows)]
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "backup_previous",
+            "backup_list",
+            "backup_snapshot",
+            "backup_preview",
+            "backup_restore",
+            "backup_delete",
+            "backup_export",
+            "backup_import",
+            "backup_vault",
             "calendar_create_manual",
             "calendar_details",
             "notification_list",

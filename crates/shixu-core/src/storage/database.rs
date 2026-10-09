@@ -93,6 +93,35 @@ impl Database {
     pub fn pause_writes(&self) -> AppResult<super::coordinator::PauseGuard> {
         self.coordinator.pause()
     }
+    /// Narrow crate-only privileged access. The non-cloneable live guard must
+    /// belong to this exact database, with all admitted writers already drained.
+    pub(crate) fn paused<T>(
+        &self,
+        guard: &super::coordinator::PauseGuard,
+        action: impl FnOnce(&mut Connection) -> AppResult<T>,
+    ) -> AppResult<T> {
+        if !guard.authenticates(&self.coordinator) {
+            return Err(AppError::Conflict);
+        }
+        let mut connection = self.connection.lock().map_err(|_| AppError::Disconnected)?;
+        action(&mut connection)
+    }
+    pub(crate) fn empty_copy(&self) -> AppResult<Database> {
+        Self::open(Path::new(":memory:"), self.protector.clone())
+    }
+    pub(crate) fn verify_identity(&self, connection: &Connection) -> AppResult<()> {
+        let sealed: Vec<u8> = connection
+            .query_row(
+                "SELECT sentinel FROM protection_metadata WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(storage_error)?;
+        if self.protector.unprotect(&sealed)? != SENTINEL {
+            return Err(AppError::AuthFailed);
+        }
+        Ok(())
+    }
     pub(crate) fn transaction<T>(
         &self,
         action: impl FnOnce(&Transaction<'_>) -> AppResult<T>,

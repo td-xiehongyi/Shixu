@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   canonicalRevision,
   createMainBridge,
@@ -14,6 +14,15 @@ describe("strict native bridge contract", () => {
     expect((bridge as Record<string, unknown>).vaultReveal).toBeUndefined();
     expect(Object.keys(bridge).sort()).toEqual(
       [
+        "backupDelete",
+        "backupExport",
+        "backupImport",
+        "backupList",
+        "backupPreview",
+        "backupPrevious",
+        "backupRestore",
+        "backupSnapshot",
+        "backupVault",
         "createManualEvent",
         "calendarDetails",
         "notificationList",
@@ -313,4 +322,30 @@ it("runtime_status_is_bounded_and_payload_free", async () => {
     runtime: { ...runtime, model_queue: -1 },
   }));
   await expect(malformed.settingsRead()).rejects.toThrow("INVALID_INPUT");
+});
+
+it("backup_bridge_rejects_unconfirmed_output_and_unbounded_or_forged_results", async () => {
+  const invoke = vi.fn(async () => ({
+    created_at: 0,
+    events: 2,
+    messages: "0",
+    present: "0",
+    never_fetched: "0",
+    cleaned: "0",
+    not_migrated: "0",
+  }));
+  const bridge = createMainBridge(invoke);
+  await expect(bridge.backupExport(false, false)).rejects.toThrow(
+    "INVALID_INPUT",
+  );
+  expect(invoke).not.toHaveBeenCalled();
+  await expect(bridge.backupRestore("../fake", true)).rejects.toThrow(
+    "INVALID_INPUT",
+  );
+  expect(invoke).not.toHaveBeenCalled();
+  await expect(bridge.backupSnapshot()).rejects.toThrow("INVALID_INPUT");
+  await expect(
+    bridge.backupImport(" ".repeat(20 * 1024 * 1024 + 1)),
+  ).rejects.toThrow("INVALID_INPUT");
+  expect(invoke).toHaveBeenCalledTimes(1);
 });

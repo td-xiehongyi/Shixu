@@ -1,5 +1,7 @@
 import { invoke as nativeInvoke, isTauri } from "@tauri-apps/api/core";
 import type {
+  BackupSummary,
+  BackupPreview,
   CalendarDetails,
   MessageEnvelope,
   PartResult,
@@ -246,7 +248,10 @@ async function call(
   payload: Record<string, unknown> = {},
 ): Promise<unknown> {
   try {
-    if (new TextEncoder().encode(JSON.stringify(payload)).length > 65536)
+    if (
+      command !== "backup_import" &&
+      new TextEncoder().encode(JSON.stringify(payload)).length > 65536
+    )
       invalid();
     return await invoke(command, payload);
   } catch (error) {
@@ -586,8 +591,94 @@ function settings(v: unknown): SettingsSnapshot {
   bool(d.transport_supported);
   return d as unknown as SettingsSnapshot;
 }
+function backupSummary(
+  value: unknown,
+  preview = false,
+): BackupSummary | BackupPreview {
+  const d = object(value, [
+    "created_at",
+    "events",
+    "messages",
+    "present",
+    "never_fetched",
+    "cleaned",
+    "not_migrated",
+    ...(preview ? ["preview_id"] : []),
+  ]);
+  millis(d.created_at);
+  for (const key of [
+    "events",
+    "messages",
+    "present",
+    "never_fetched",
+    "cleaned",
+    "not_migrated",
+  ])
+    canonicalRevision(d[key]);
+  if (preview) id(d.preview_id);
+  return d as unknown as BackupSummary | BackupPreview;
+}
 export function createMainBridge(invoke: Invoke) {
   return Object.freeze({
+    async backupList(): Promise<BackupSummary[]> {
+      const r = await call(invoke, "backup_list");
+      array(r, 7, backupSummary);
+      return r as BackupSummary[];
+    },
+    async backupSnapshot(): Promise<BackupSummary> {
+      return backupSummary(await call(invoke, "backup_snapshot"));
+    },
+    async backupPreview(day: number): Promise<BackupPreview> {
+      if (!Number.isSafeInteger(day)) invalid();
+      return backupSummary(
+        await call(invoke, "backup_preview", { day }),
+        true,
+      ) as BackupPreview;
+    },
+    async backupPrevious(): Promise<BackupPreview> {
+      return backupSummary(
+        await call(invoke, "backup_previous"),
+        true,
+      ) as BackupPreview;
+    },
+    async backupRestore(previewId: string, confirmed: boolean): Promise<void> {
+      id(previewId);
+      bool(confirmed);
+      if (!confirmed) invalid();
+      await call(invoke, "backup_restore", {
+        preview_id: previewId,
+        confirmed,
+      });
+    },
+    async backupDelete(day: number): Promise<void> {
+      if (!Number.isSafeInteger(day)) invalid();
+      await call(invoke, "backup_delete", { day });
+    },
+    async backupExport(
+      includeRawMessages = false,
+      confirmed = false,
+    ): Promise<string> {
+      bool(includeRawMessages);
+      bool(confirmed);
+      if (!confirmed) invalid();
+      return text(
+        await call(invoke, "backup_export", {
+          include_raw_messages: includeRawMessages,
+          confirmed,
+        }),
+        20 * 1024 * 1024,
+      );
+    },
+    async backupImport(data: string): Promise<BackupPreview> {
+      text(data, 20 * 1024 * 1024);
+      return backupSummary(
+        await call(invoke, "backup_import", { data }),
+        true,
+      ) as BackupPreview;
+    },
+    async backupVault(): Promise<BackupSummary> {
+      return backupSummary(await call(invoke, "backup_vault"));
+    },
     async createManualEvent(value: EventPatch): Promise<CalendarEvent> {
       patch(value);
       return decodeEvent(

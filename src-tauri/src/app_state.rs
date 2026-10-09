@@ -11,6 +11,7 @@ use shixu_core::{
 use std::sync::Arc;
 /// One database and live consent authority shared with the background runtime.
 pub struct AppState {
+    backup: Option<Arc<shixu_core::backup::CalendarBackup>>,
     runtime: Option<Arc<shixu_core::runtime::Supervisor>>,
     calendar: Option<EventService>,
     db: Option<Arc<Database>>,
@@ -19,6 +20,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            backup: None,
             runtime: None,
             calendar: None,
             db: None,
@@ -39,6 +41,7 @@ impl AppState {
             .bind(db.coordinator())
             .expect("fresh consent binding");
         Self {
+            backup: None,
             runtime: Some(Arc::new(shixu_core::runtime::Supervisor::new(
                 db.clone(),
                 consent.clone(),
@@ -47,6 +50,17 @@ impl AppState {
             db: Some(db),
             consent,
         }
+    }
+    pub fn with_backups(mut self, root: &std::path::Path) -> AppResult<Self> {
+        self.backup = Some(Arc::new(shixu_core::backup::CalendarBackup::new(
+            self.database()?,
+            self.consent.clone(),
+            root,
+        )?));
+        Ok(self)
+    }
+    pub fn backup(&self) -> AppResult<Arc<shixu_core::backup::CalendarBackup>> {
+        self.backup.clone().ok_or(AppError::Unsupported)
     }
     pub fn runtime(&self) -> AppResult<Arc<shixu_core::runtime::Supervisor>> {
         self.runtime.clone().ok_or(AppError::Unsupported)

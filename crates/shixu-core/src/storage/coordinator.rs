@@ -64,3 +64,9 @@ impl Drop for PauseGuard {
         }
     }
 }
+
+impl PauseGuard {
+    pub fn authenticates(&self, coordinator: &Arc<WriteCoordinator>) -> bool {
+        Arc::ptr_eq(&self.coordinator, coordinator)
+    }
+}

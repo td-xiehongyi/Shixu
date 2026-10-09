@@ -20,6 +20,7 @@ pub trait ReceivePort: Send {
 }
 #[derive(Default)]
 pub struct WorkerPorts {
+    pub backup: Option<Arc<crate::backup::CalendarBackup>>,
     pub receiver: Option<Box<dyn ReceivePort>>,
     pub parser: Option<Arc<dyn AttachmentParser>>,
     pub model: Option<Arc<dyn ModelTransport + Send + Sync>>,
@@ -83,6 +84,17 @@ impl Supervisor {
         threads.push(spawn(wake.clone(), self.clone(), move || {
             s.process_pending(now()).map(|_| ())
         }));
+        if let Some(backup) = ports.backup {
+            let mut next = 0;
+            threads.push(spawn(wake.clone(), self.clone(), move || {
+                let at = now();
+                if at < next {
+                    return Ok(());
+                }
+                next = at.saturating_add(60_000);
+                backup.automatic_snapshot(at).map(|_| ())
+            }));
+        }
         if let Some(parser) = ports.parser {
             let s = self.clone();
             threads.push(spawn(wake.clone(), self.clone(), move || {

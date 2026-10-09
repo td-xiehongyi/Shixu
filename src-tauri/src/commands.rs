@@ -6,6 +6,15 @@ use crate::{
 use serde::Deserialize;
 use shixu_core::contracts::{AppResult, calendar::EventQuery, error::AppError};
 pub const COMMANDS: &[&str] = &[
+    "backup_previous",
+    "backup_list",
+    "backup_snapshot",
+    "backup_preview",
+    "backup_restore",
+    "backup_delete",
+    "backup_export",
+    "backup_import",
+    "backup_vault",
     "calendar_create_manual",
     "calendar_details",
     "notification_list",
@@ -41,6 +50,15 @@ pub fn authorize(context: &CallingContext<'_>, command: &str) -> AppResult<()> {
         "main" => matches!(
             command,
             "calendar_query"
+                | "backup_previous"
+                | "backup_list"
+                | "backup_snapshot"
+                | "backup_preview"
+                | "backup_restore"
+                | "backup_delete"
+                | "backup_export"
+                | "backup_import"
+                | "backup_vault"
                 | "calendar_edit"
                 | "calendar_undo"
                 | "show_vault_window"
@@ -152,7 +170,7 @@ pub fn dispatch(
     state: &AppState,
 ) -> AppResult<serde_json::Value> {
     authorize(context, command)?;
-    validate_json_size(&payload)?;
+    validate_command_size(command, &payload)?;
     // Do not serialize secret-bearing vault payloads into temporary strings.
     if command.starts_with("vault_") {
         validate_vault(command, payload)?;
@@ -160,6 +178,70 @@ pub fn dispatch(
     }
 
     match command {
+        "backup_previous" => {
+            let _: EmptyArgs = decode(payload)?;
+            serialized(preview_summary(
+                state.backup()?.preview_previous(backup_now()?)?,
+            ))
+        }
+        "backup_list" => {
+            let _: EmptyArgs = decode(payload)?;
+            serialized(
+                state
+                    .backup()?
+                    .list()?
+                    .into_iter()
+                    .map(backup_summary)
+                    .collect::<Vec<_>>(),
+            )
+        }
+        "backup_snapshot" => {
+            let _: EmptyArgs = decode(payload)?;
+            serialized(backup_summary(
+                state.backup()?.automatic_snapshot(backup_now()?)?,
+            ))
+        }
+        "backup_preview" => {
+            let a: BackupDay = decode(payload)?;
+            serialized(preview_summary(
+                state.backup()?.preview(a.day, backup_now()?)?,
+            ))
+        }
+        "backup_restore" => {
+            let a: BackupConfirm = decode(payload)?;
+            let db = state.database()?;
+            let pause = db.pause_writes()?;
+            state
+                .backup()?
+                .restore(a.preview_id, a.confirmed, backup_now()?, &pause)?;
+            drop(pause);
+            let _ = state.runtime()?.refresh_sources();
+            Ok(serde_json::Value::Null)
+        }
+        "backup_delete" => {
+            let a: BackupDay = decode(payload)?;
+            state.backup()?.delete(a.day)?;
+            Ok(serde_json::Value::Null)
+        }
+        "backup_export" => {
+            let a: BackupExport = decode(payload)?;
+            let bytes = state
+                .backup()?
+                .export_json(a.include_raw_messages, a.confirmed)?;
+            serialized(String::from_utf8(bytes).map_err(|_| AppError::InvalidInput)?)
+        }
+        "backup_import" => {
+            let a: BackupImport = decode(payload)?;
+            serialized(preview_summary(
+                state
+                    .backup()?
+                    .import_json(a.data.as_bytes(), backup_now()?)?,
+            ))
+        }
+        "backup_vault" => {
+            let _: EmptyArgs = decode(payload)?;
+            serialized(backup_summary(state.backup()?.vault_snapshot()?))
+        }
         "calendar_create_manual" => {
             let a: ManualArgs = decode(payload)?;
             serialized(wire::event(
@@ -477,4 +559,65 @@ pub fn validate_json_size(value: &serde_json::Value) -> AppResult<()> {
         Ok(())
     }
     count(value, 0, &mut 65536)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BackupDay {
+    day: i64,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BackupConfirm {
+    preview_id: shixu_core::contracts::backup::RestorePreviewId,
+    confirmed: bool,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BackupExport {
+    include_raw_messages: bool,
+    confirmed: bool,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BackupImport {
+    data: String,
+}
+fn backup_now() -> AppResult<i64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().min(i64::MAX as u128) as i64)
+        .map_err(|_| AppError::Unsupported)
+}
+fn backup_summary(m: shixu_core::contracts::backup::BackupManifest) -> serde_json::Value {
+    use shixu_core::contracts::backup::BlobState;
+    serde_json::json!({"created_at":m.created_at,"events":m.entity_counts.events.to_string(),"messages":m.entity_counts.messages.to_string(),"present":m.blobs.iter().filter(|b|b.state==BlobState::Present).count().to_string(),"never_fetched":m.blobs.iter().filter(|b|b.state==BlobState::NeverFetched).count().to_string(),"cleaned":m.blobs.iter().filter(|b|b.state==BlobState::Cleaned).count().to_string(),"not_migrated":m.blobs.iter().filter(|b|b.state==BlobState::NotMigrated).count().to_string()})
+}
+fn preview_summary(p: shixu_core::contracts::backup::RestorePreview) -> serde_json::Value {
+    let mut v = backup_summary(shixu_core::contracts::backup::BackupManifest {
+        schema_version: p.schema_version,
+        created_at: p.created_at,
+        entity_counts: p.entity_counts,
+        blobs: p.blobs,
+    });
+    v["preview_id"] = p.preview_id.to_string().into();
+    v
+}
+/// The only large IPC command is a single explicit JSON import string. No path,
+/// SQL, command or arbitrary filesystem argument is accepted.
+pub fn validate_command_size(command: &str, value: &serde_json::Value) -> AppResult<()> {
+    if command == "backup_import" {
+        let object = value.as_object().ok_or(AppError::InvalidInput)?;
+        if object.len() != 1
+            || object
+                .get("data")
+                .and_then(|v| v.as_str())
+                .is_none_or(|s| s.len() > shixu_core::backup::migration::MAX_IMPORT)
+        {
+            return Err(AppError::InvalidInput);
+        }
+        Ok(())
+    } else {
+        validate_json_size(value)
+    }
 }

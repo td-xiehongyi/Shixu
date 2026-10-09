@@ -18,6 +18,15 @@
     "allow-settings-read",
     "allow-save-source-config",
     "allow-set-model-consent",
-    "allow-set-autostart"
+    "allow-set-autostart",
+    "allow-backup-list",
+    "allow-backup-snapshot",
+    "allow-backup-preview",
+    "allow-backup-restore",
+    "allow-backup-delete",
+    "allow-backup-export",
+    "allow-backup-import",
+    "allow-backup-vault",
+    "allow-backup-previous"
   ]
 }

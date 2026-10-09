@@ -1,3 +1,4 @@
+import { BackupPanel } from "./BackupPanel";
 import { useEffect, useState } from "react";
 import { mainBridge } from "../../contracts/bridge";
 import type { SettingsSnapshot, SourceConfig } from "../../contracts/domain";
@@ -284,6 +285,12 @@ export function SettingsPage({
           秒尝试清除本次内容。锁库不暂停日历和通知。
         </p>
       </section>
+      <BackupPanel
+        port={port}
+        onRestored={async () => {
+          setData(await port.settingsRead());
+        }}
+      />
       <div className="demo-setting">
         <label>
           <input

@@ -13,7 +13,7 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use std::sync::Arc;
 use uuid::Uuid;
 #[derive(serde::Serialize, serde::Deserialize)]
-struct BatchRecord {
+pub(crate) struct BatchRecord {
     batch: ExtractBatch,
     incomplete: bool,
 }
