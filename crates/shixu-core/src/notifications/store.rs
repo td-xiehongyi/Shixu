@@ -82,7 +82,14 @@ impl MessageStore {
         }
         let digest = content_digest(&envelope)?;
         self.db.transaction(|tx| {
+        let current = super::settings::current(&self.db, tx, config.source_id)?;
+        if let Some((_, authorized))=&current && authorized!=config {return Err(AppError::Conflict);}
         let existing: Option<StoredMessage> = tx.query_row("SELECT revision,content_digest,payload,revoked FROM messages WHERE message_key=?1", [identity.key.to_string()], |r| Ok(StoredMessage {revision:r.get(0)?,sealed_digest:r.get(1)?,existing_payload:r.get(2)?,revoked:r.get(3)?})).optional().map_err(storage_error)?;
+        let prior_proof=if existing.is_some() && current.is_some(){
+          // A pre-settings retained notice must keep its original binding on later edits.
+          let stored:Option<Vec<u8>>=tx.query_row("SELECT payload FROM messages WHERE message_key=?1",[identity.key.to_string()],|r|r.get(0)).optional().map_err(storage_error)?.flatten();
+          stored.map(|payload|{let original:MessageEnvelope=self.db.unprotect(&payload)?;super::settings::proof(&self.db,tx,&original)}).transpose()?
+        }else{None};
         if let Some(StoredMessage { revision, sealed_digest, existing_payload, revoked }) = existing {
             // Stable native identity keeps its original source-time anchor, even
             // when an edit arrives before calendar extraction or changes content.
@@ -126,6 +133,10 @@ impl MessageStore {
         let native_id = if identity.degraded { identity.key.to_string() } else { envelope.native_message_id.clone() };
         tx.execute("INSERT INTO sources VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(namespace) DO NOTHING", params![ns,config.source_id.to_string(),config.adapter_type,config.account_id,envelope.group_id,""]).map_err(storage_error)?;
         tx.execute("INSERT INTO messages VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,received_at=excluded.received_at,processing_state=excluded.processing_state,revoked=excluded.revoked,payload=excluded.payload,content_digest=excluded.content_digest", params![identity.key.to_string(),ns,native_id,identity.degraded,envelope.revision as i64,envelope.received_at,state_name(envelope.processing_state),envelope.revoked,payload,protected_digest]).map_err(storage_error)?;
+        // First interpretation stays fixed across edits, whitelist and timezone changes.
+        let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM message_source_proof WHERE message_key=?1)",[identity.key.to_string()],|r|r.get(0)).map_err(storage_error)?;
+        let bound:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM source_bindings WHERE source_id=?1)",[config.source_id.to_string()],|r|r.get(0)).map_err(storage_error)?;
+        if !exists && bound && current.is_some() {tx.execute("INSERT INTO message_source_proof VALUES (?1,?2,?3)",params![identity.key.to_string(),current.as_ref().map_or(0,|v|v.0) as i64,self.db.protect(prior_proof.as_ref().unwrap_or(config))?]).map_err(storage_error)?;}
         tx.execute("DELETE FROM part_results WHERE message_key=?1", [identity.key.to_string()]).map_err(storage_error)?;
         if envelope.revoked { tx.execute("INSERT OR IGNORE INTO suppressions VALUES (?1,'source_revoked')", [identity.key.to_string()]).map_err(storage_error)?; }
         if let Some(cursor) = cursor {
@@ -186,6 +197,7 @@ impl MessageStore {
         }
         let groups_json = serde_json::to_string(&groups).map_err(|_| AppError::InvalidInput)?;
         self.db.transaction(|tx|{
+            if let Some((_,current))=super::settings::current(&self.db,tx,config.source_id)? { if current==*config{return Ok(true);}return Err(AppError::Conflict); }
             let old:Option<(String,String,String,String)>=tx.query_row("SELECT adapter_type,account_id,groups_json,timezone FROM source_bindings WHERE source_id=?1",[config.source_id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage_error)?;
             if let Some(old)=old {
                 if old!=(config.adapter_type.clone(),config.account_id.clone(),groups_json,config.timezone.clone()){return Err(AppError::InvalidInput);}
@@ -254,6 +266,22 @@ impl MessageStore {
             let updated=tx.execute("UPDATE source_recovery SET recovery_cursor=CASE WHEN ?6 THEN ?5 ELSE anchor END,complete=?6 WHERE source_id=?1 AND group_id=?2 AND epoch=?3 AND anchor=?4 AND complete=0",params![config.source_id.to_string(),group,epoch as i64,from,next,complete]).map_err(storage_error)?;
             if updated!=1{return Err(AppError::Conflict);}Ok(())
         })
+    }
+    /// Bounded newest retained messages across ALL processing states; no secret references.
+    pub fn list(&self, source: Option<SourceId>, limit: u32) -> AppResult<Vec<MessageEnvelope>> {
+        if limit == 0 || limit > 100 {
+            return Err(AppError::InvalidInput);
+        }
+        self.db.transaction(|tx|{
+          let mut stmt=tx.prepare("SELECT m.payload,m.processing_state FROM messages m JOIN sources s USING(namespace) WHERE m.payload IS NOT NULL AND (?1 IS NULL OR s.source_id=?1) ORDER BY m.received_at DESC,m.message_key LIMIT ?2").map_err(storage_error)?;
+          stmt.query_map(params![source.map(|s|s.to_string()),limit],|r|Ok((r.get::<_,Vec<u8>>(0)?,r.get::<_,String>(1)?))).map_err(storage_error)?.map(|r|{let(payload,state)=r.map_err(storage_error)?;let mut m:MessageEnvelope=self.db.unprotect(&payload)?;m.processing_state=serde_json::from_value(serde_json::Value::String(state)).map_err(|_|AppError::ParseFailed)?;Ok(m)}).collect()
+        })
+    }
+    pub fn current_parts(&self, key: MessageKey) -> AppResult<Vec<PartResult>> {
+        self.db.transaction(|tx|{
+       let row:Option<Vec<u8>>=tx.query_row("SELECT p.payload FROM part_results p JOIN messages m ON m.message_key=p.message_key AND m.revision=p.revision WHERE m.message_key=?1 AND m.revoked=0",[key.to_string()],|r|r.get(0)).optional().map_err(storage_error)?;
+       row.map(|p|self.db.unprotect(&p)).transpose().map(|v|v.unwrap_or_default())
+    })
     }
     pub fn pending(&self, limit: u32) -> AppResult<Vec<MessageEnvelope>> {
         self.db.transaction(|tx| {

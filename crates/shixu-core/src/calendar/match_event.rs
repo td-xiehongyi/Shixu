@@ -148,16 +148,13 @@ fn validate_with_model(
             return Err(AppError::Conflict);
         }
     }
-    let binding: Option<(String, String, String,String)> = tx
-        .query_row(
-            "SELECT account_id,groups_json,timezone,adapter_type FROM source_bindings WHERE source_id=?1",
-            [m.source_id.to_string()],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?,r.get(3)?)),
-        )
-        .optional()
-        .map_err(storage_error)?;
-    let (account, groups, zone, adapter) = binding.ok_or(AppError::InvalidInput)?;
-    let groups: Vec<String> = serde_json::from_str(&groups).map_err(|_| AppError::ParseFailed)?;
+    let proof = crate::notifications::settings::proof(db, tx, &m)?;
+    let (account, groups, zone, adapter) = (
+        proof.account_id,
+        proof.allowed_group_ids,
+        proof.timezone,
+        proof.adapter_type,
+    );
     if account != m.account_id
         || !groups.contains(&m.group_id)
         || (batch.extractor_version != format!("n6.rules.1;timezone={zone}")
@@ -365,15 +362,7 @@ pub(crate) fn extract_current(
     key: MessageKey,
 ) -> AppResult<(MessageEnvelope, ExtractBatch)> {
     let m = message(db, tx, key)?;
-    let zone: String = tx
-        .query_row(
-            "SELECT timezone FROM source_bindings WHERE source_id=?1",
-            [m.source_id.to_string()],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(storage_error)?
-        .ok_or(AppError::InvalidInput)?;
+    let zone = crate::notifications::settings::proof(db, tx, &m)?.timezone;
     let header = ExtractBatch {
         message_key: key,
         message_revision: m.revision,

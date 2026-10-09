@@ -11,3 +11,5 @@ pub mod parts;
 pub mod reconnect;
 pub mod source;
 pub mod time;
+
+pub mod settings;

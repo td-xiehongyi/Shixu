@@ -91,15 +91,15 @@ pub fn event(value: CalendarEvent) -> AppResult<WireEvent> {
     times(value.start_at, value.end_at)?;
     Ok(WireEvent {
         event_id: value.event_id,
-        title: value.title,
-        kind: value.kind,
+        title: excerpt(&value.title, 4096),
+        kind: excerpt(&value.kind, 128),
         time_precision: value.time_precision,
         local_date: value.local_date,
         start_at: value.start_at,
         end_at: value.end_at,
         timezone: value.timezone,
-        raw_time_text: value.raw_time_text,
-        location: value.location,
+        raw_time_text: excerpt(&value.raw_time_text, 4096),
+        location: value.location.map(|s| excerpt(&s, 4096)),
         status: value.status,
         revision: value.revision.into(),
         user_overrides: value.user_overrides,
@@ -193,4 +193,191 @@ impl From<calendar::ApplySummary> for WireApplySummary {
             change_ids: v.change_ids,
         }
     }
+}
+
+/// Bounded UTF-8 read excerpt. Complete text remains protected in durable storage.
+pub fn excerpt(value: &str, max: usize) -> String {
+    let sanitized = value.replace('\0', "�");
+    let value = sanitized.as_str();
+    if value.len() <= max {
+        return value.to_owned();
+    }
+    let mut end = max - 3;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", value[..end].replace('\0', "�"))
+}
+use shixu_core::{
+    calendar::changes::EventOrigin, contracts::notification::*,
+    notifications::consent::ModelConsent,
+};
+#[derive(Serialize)]
+pub struct WireChange {
+    pub change_id: calendar::ChangeId,
+    pub before: Option<WireEvent>,
+    pub after: WireEvent,
+    pub undone: bool,
+}
+#[derive(Serialize)]
+pub struct WireSource {
+    pub message_key: MessageKey,
+    pub message_revision: Decimal,
+    pub group_id: String,
+    pub outcome: shixu_core::calendar::changes::SourceOutcome,
+    pub evidence: Vec<EvidenceBlock>,
+}
+#[derive(Serialize)]
+pub struct WireDetails {
+    pub origin: EventOrigin,
+    pub history: Vec<WireChange>,
+    pub sources: Vec<WireSource>,
+}
+pub fn blocks(value: Vec<EvidenceBlock>) -> Vec<EvidenceBlock> {
+    value
+        .into_iter()
+        .take(32)
+        .map(|mut b| {
+            b.text = excerpt(&b.text, 4096);
+            b.engine_version = excerpt(&b.engine_version, 128);
+            b
+        })
+        .collect()
+}
+#[derive(Serialize)]
+pub struct WireMessage {
+    pub calendar_applied: bool,
+    pub message_key: MessageKey,
+    pub source_id: SourceId,
+    pub account_id: String,
+    pub group_id: String,
+    pub native_message_id: String,
+    pub sent_at: i64,
+    pub received_at: i64,
+    pub sender_id: String,
+    pub text: String,
+    pub reply_to: Option<MessageKey>,
+    pub revision: Decimal,
+    pub revoked: bool,
+    pub processing_state: ProcessingState,
+    pub parts: Vec<WirePart>,
+}
+#[derive(Serialize)]
+pub struct WirePart {
+    pub part_id: PartId,
+    pub message_key: MessageKey,
+    pub kind: PartKind,
+    pub source_file_ref: Option<String>,
+    pub original_name: Option<String>,
+    pub declared_type: Option<String>,
+    pub detected_type: Option<String>,
+    pub byte_size: Option<Decimal>,
+    pub content_hash: Option<String>,
+    pub fetch_state: FetchState,
+    pub parse_state: PartStatus,
+    pub failure_code: Option<PartReason>,
+    pub encrypted_blob_ref: Option<String>,
+    pub retained_until: Option<i64>,
+}
+pub fn message(m: MessageEnvelope, calendar_applied: bool) -> AppResult<WireMessage> {
+    millis(m.sent_at)?;
+    millis(m.received_at)?;
+    Ok(WireMessage {
+        calendar_applied,
+        message_key: m.message_key,
+        source_id: m.source_id,
+        account_id: excerpt(&m.account_id, 128),
+        group_id: excerpt(&m.group_id, 128),
+        native_message_id: excerpt(&m.native_message_id, 128),
+        sent_at: m.sent_at,
+        received_at: m.received_at,
+        sender_id: excerpt(&m.sender_id, 128),
+        text: excerpt(&m.text, 4096),
+        reply_to: m.reply_to,
+        revision: m.revision.into(),
+        revoked: m.revoked,
+        processing_state: m.processing_state,
+        parts: m
+            .parts
+            .into_iter()
+            .take(5)
+            .map(|p| WirePart {
+                part_id: p.part_id,
+                message_key: p.message_key,
+                kind: p.kind,
+                source_file_ref: None,
+                original_name: p.original_name.map(|v| excerpt(&v, 256)),
+                declared_type: p.declared_type.map(|v| excerpt(&v, 128)),
+                detected_type: p.detected_type.map(|v| excerpt(&v, 128)),
+                byte_size: p.byte_size.map(Into::into),
+                content_hash: None,
+                fetch_state: p.fetch_state,
+                parse_state: p.parse_state,
+                failure_code: p.failure_code,
+                encrypted_blob_ref: None,
+                retained_until: p.retained_until,
+            })
+            .collect(),
+    })
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WireConsent {
+    pub enabled: bool,
+    pub provider_id: Option<String>,
+    pub allowed_group_ids: Vec<String>,
+    pub allow_attachment_text: bool,
+    pub revision: Decimal,
+}
+impl From<ModelConsent> for WireConsent {
+    fn from(v: ModelConsent) -> Self {
+        Self {
+            enabled: v.enabled,
+            provider_id: v.provider_id,
+            allowed_group_ids: v.allowed_group_ids,
+            allow_attachment_text: v.allow_attachment_text,
+            revision: v.revision.into(),
+        }
+    }
+}
+impl WireConsent {
+    pub fn into_core(self) -> AppResult<ModelConsent> {
+        if self.allowed_group_ids.len() > 100 {
+            return Err(AppError::InvalidInput);
+        }
+        for g in &self.allowed_group_ids {
+            text(g, 128)?;
+            if g.is_empty() {
+                return Err(AppError::InvalidInput);
+            }
+        }
+        if let Some(p) = &self.provider_id {
+            text(p, 128)?;
+            if p.is_empty() || p.chars().any(char::is_control) {
+                return Err(AppError::InvalidInput);
+            }
+        }
+        if self.enabled && (self.provider_id.is_none() || self.allowed_group_ids.is_empty()) {
+            return Err(AppError::InvalidInput);
+        }
+        Ok(ModelConsent {
+            enabled: self.enabled,
+            provider_id: self.provider_id,
+            allowed_group_ids: self.allowed_group_ids,
+            allow_attachment_text: self.allow_attachment_text,
+            revision: self.revision.0,
+        })
+    }
+}
+#[derive(Serialize)]
+pub struct WireSourceSetting {
+    pub config: SourceConfig,
+    pub epoch: Decimal,
+}
+#[derive(Serialize)]
+pub struct WireSettings {
+    pub sources: Vec<WireSourceSetting>,
+    pub model: WireConsent,
+    pub autostart: bool,
+    pub transport_supported: bool,
 }

@@ -160,6 +160,8 @@ export interface MessagePart {
   retained_until: UtcMillis | null;
 }
 export interface MessageEnvelope {
+  /** Read projection only: current revision has an applied calendar source. */
+  calendar_applied?: boolean;
   message_key: string;
   source_id: string;
   account_id: string;
@@ -284,4 +286,40 @@ export interface BackupManifest {
 }
 export interface RestorePreview extends BackupManifest {
   preview_id: string;
+}
+
+export interface ModelConsent {
+  enabled: boolean;
+  provider_id: string | null;
+  allowed_group_ids: string[];
+  allow_attachment_text: boolean;
+  revision: Revision;
+}
+export interface SourceSetting {
+  config: SourceConfig;
+  epoch: Revision;
+}
+export interface SettingsSnapshot {
+  sources: SourceSetting[];
+  model: ModelConsent;
+  autostart: boolean;
+  transport_supported: boolean;
+}
+export interface EventChange {
+  change_id: string;
+  before: CalendarEvent | null;
+  after: CalendarEvent;
+  undone: boolean;
+}
+export interface EventSource {
+  message_key: string;
+  message_revision: Revision;
+  group_id: string;
+  outcome: "applied" | "pending" | "conflict" | "suppressed" | "revoked";
+  evidence: EvidenceBlock[];
+}
+export interface CalendarDetails {
+  origin: "manual" | "source";
+  history: EventChange[];
+  sources: EventSource[];
 }

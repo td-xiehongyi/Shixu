@@ -39,7 +39,7 @@ impl Database {
                 tx.execute("INSERT INTO protection_metadata VALUES (1,?1)", [&sealed])
                     .map_err(storage_error)?;
             }
-            1..=5 => {
+            1..=6 => {
                 let sealed: Vec<u8> = tx
                     .query_row(
                         "SELECT sentinel FROM protection_metadata WHERE id=1",
@@ -67,6 +67,10 @@ impl Database {
         }
         if version < 5 {
             tx.execute_batch(include_str!("migrations/0005_calendar.sql"))
+                .map_err(storage_error)?;
+        }
+        if version < 6 {
+            tx.execute_batch(include_str!("migrations/0006_settings.sql"))
                 .map_err(storage_error)?;
         }
         tx.commit().map_err(storage_error)?;

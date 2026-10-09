@@ -2,6 +2,15 @@ fn main() {
     #[cfg(windows)]
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "calendar_create_manual",
+            "calendar_details",
+            "notification_list",
+            "notification_parts",
+            "retry_part",
+            "settings_read",
+            "save_source_config",
+            "set_model_consent",
+            "set_autostart",
             "calendar_query",
             "calendar_edit",
             "calendar_undo",

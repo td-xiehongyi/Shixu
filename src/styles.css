@@ -833,3 +833,143 @@ p {
     padding-bottom: 15px;
   }
 }
+/* D4 bounded calendar details, source text and settings. */
+.calendar-options {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin: 8px 0;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.calendar-options label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.automatic-note {
+  font-size: 12px;
+  color: #657571;
+  margin: 8px 0 14px;
+}
+.calendar-list {
+  padding: 12px 0;
+  border-top: 1px solid #e6e9e6;
+}
+.calendar-list h3 {
+  font-size: 14px;
+  color: #657571;
+  margin-bottom: 8px;
+}
+.calendar-list button {
+  display: block;
+  padding: 8px;
+  text-align: left;
+  border-radius: 6px;
+  background: #edf4ef;
+  margin: 4px 0;
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #20393266;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.event-dialog {
+  background: #fbfbf8;
+  padding: 24px;
+  width: 700px;
+  max-width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  border-radius: 12px;
+  box-shadow: 0 10px 60px #243b4033;
+}
+.event-dialog form,
+.settings-page form {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+.event-dialog label,
+.settings-page label {
+  display: grid;
+  gap: 5px;
+  font-size: 14px;
+}
+.event-dialog input,
+.event-dialog select,
+.settings-page input:not([type="checkbox"]),
+.settings-page select,
+.settings-page textarea {
+  padding: 9px;
+  border: 1px solid #ccd7d0;
+  background: white;
+  border-radius: 5px;
+  min-width: 0;
+}
+.event-dialog p,
+.event-dialog article {
+  margin: 10px 0;
+}
+.event-dialog article button {
+  color: var(--teal);
+  text-decoration: underline;
+}
+.source-evidence pre,
+.notice pre,
+.plain-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.source-evidence section {
+  padding: 12px;
+  background: #eef1ec;
+  margin: 8px 0;
+}
+.source-evidence small,
+.part-status small {
+  display: block;
+  color: #718078;
+}
+.settings-page {
+  max-width: 950px;
+}
+.settings-page section {
+  border-bottom: 1px solid #dce3dd;
+  padding: 22px 0;
+}
+.settings-page h2 {
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+.settings-page input[type="checkbox"] {
+  justify-self: start;
+}
+.part-status {
+  padding: 8px 0;
+  font-size: 12px;
+}
+.part-status button {
+  color: var(--teal);
+  text-decoration: underline;
+}
+.notifications.full {
+  max-width: 850px;
+}
+.calendar-main .fc {
+  font-size: 13px;
+}
+.calendar-main .fc .fc-daygrid-day-number {
+  color: #293943;
+}
+.calendar-main .fc .fc-event {
+  background: #d5ebe4;
+  border-color: #217e78;
+  color: #293943;
+}

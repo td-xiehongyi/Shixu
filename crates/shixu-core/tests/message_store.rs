@@ -1154,7 +1154,7 @@ fn review_schema3_upgrade_preserves_existing_retry_task() {
         conn.execute_batch("ALTER TABLE attachment_tasks DROP COLUMN retry_limit;")
             .unwrap();
     }
-    conn.execute_batch("DROP TABLE calendar_suppressions; DROP TABLE calendar_changes; DROP TABLE calendar_sources; DROP TABLE calendar_batches; DROP TABLE calendar_events; PRAGMA user_version=3;").unwrap();
+    conn.execute_batch("DROP TABLE message_source_proof; DROP TABLE source_settings; DROP TABLE desktop_settings; DROP TABLE calendar_suppressions; DROP TABLE calendar_changes; DROP TABLE calendar_sources; DROP TABLE calendar_batches; DROP TABLE calendar_events; PRAGMA user_version=3;").unwrap();
     drop(conn);
     let q = TaskQueue::new(Arc::new(
         Database::open(&t.db(), Arc::new(TestProtector::new(42))).unwrap(),
@@ -1163,7 +1163,7 @@ fn review_schema3_upgrade_preserves_existing_retry_task() {
     assert_eq!(
         conn.query_row::<i64, _, _>("PRAGMA user_version", [], |r| r.get(0))
             .unwrap(),
-        5
+        6
     );
     let row: (i64, i64, i64) = conn
         .query_row(

@@ -2,11 +2,22 @@
   "identifier": "main",
   "description": "Calendar main window only",
   "local": true,
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "allow-calendar-query",
     "allow-calendar-edit",
     "allow-calendar-undo",
-    "allow-show-vault-window"
+    "allow-show-vault-window",
+    "allow-calendar-create-manual",
+    "allow-calendar-details",
+    "allow-notification-list",
+    "allow-notification-parts",
+    "allow-retry-part",
+    "allow-settings-read",
+    "allow-save-source-config",
+    "allow-set-model-consent",
+    "allow-set-autostart"
   ]
 }

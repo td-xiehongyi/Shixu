@@ -1,0 +1,66 @@
+{
+  "purpose": "D4 standard calendar month and agenda, no premium scheduler or interaction/drag plugin",
+  "packages": [
+    {
+      "name": "@fullcalendar/core",
+      "version": "6.1.19",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/fullcalendar/fullcalendar.git",
+        "directory": "packages/core"
+      },
+      "registry_source": "https://registry.npmjs.org/@fullcalendar/core/-/core-6.1.19.tgz",
+      "license_file": "LICENSE.md",
+      "license_sha256": "4c0b0dae26c99e3b11be70b990a703be4deb75e21884104582e0e217786d3209"
+    },
+    {
+      "name": "@fullcalendar/react",
+      "version": "6.1.19",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/fullcalendar/fullcalendar-react.git"
+      },
+      "registry_source": "https://registry.npmjs.org/@fullcalendar/react/-/react-6.1.19.tgz",
+      "license_file": "LICENSE.txt",
+      "license_sha256": "8235fc24c22e91eae54d476a4445f0c566e2e9530adc70b8b8cd6089a61d4657"
+    },
+    {
+      "name": "@fullcalendar/daygrid",
+      "version": "6.1.19",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/fullcalendar/fullcalendar.git",
+        "directory": "packages/daygrid"
+      },
+      "registry_source": "https://registry.npmjs.org/@fullcalendar/daygrid/-/daygrid-6.1.19.tgz",
+      "license_file": "LICENSE.md",
+      "license_sha256": "4c0b0dae26c99e3b11be70b990a703be4deb75e21884104582e0e217786d3209"
+    },
+    {
+      "name": "@fullcalendar/list",
+      "version": "6.1.19",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/fullcalendar/fullcalendar.git",
+        "directory": "packages/list"
+      },
+      "registry_source": "https://registry.npmjs.org/@fullcalendar/list/-/list-6.1.19.tgz",
+      "license_file": "LICENSE.md",
+      "license_sha256": "4c0b0dae26c99e3b11be70b990a703be4deb75e21884104582e0e217786d3209"
+    },
+    {
+      "name": "preact",
+      "version": "10.12.1",
+      "license": "MIT",
+      "repository": "preactjs/preact",
+      "registry_source": "https://registry.npmjs.org/preact/-/preact-10.12.1.tgz",
+      "license_file": "LICENSE",
+      "license_sha256": "1fe6958409c8c257a70c587a18b6f7f412b179b456630790d30b2ec9a8e4b7d4"
+    }
+  ],
+  "lockfile": "pnpm-lock.yaml (integrity recorded per exact version)"
+}

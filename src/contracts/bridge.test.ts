@@ -14,6 +14,15 @@ describe("strict native bridge contract", () => {
     expect((bridge as Record<string, unknown>).vaultReveal).toBeUndefined();
     expect(Object.keys(bridge).sort()).toEqual(
       [
+        "createManualEvent",
+        "calendarDetails",
+        "notificationList",
+        "notificationParts",
+        "retryPart",
+        "settingsRead",
+        "saveSourceConfig",
+        "setModelConsent",
+        "setAutostart",
         "calendarEdit",
         "calendarQuery",
         "calendarUndo",
@@ -263,4 +272,26 @@ it("invalid_incoming_reveal_array_is_wiped_on_rejection", async () => {
     "INVALID_INPUT",
   );
   expect(incoming).toEqual([0, 0, 0]);
+});
+
+it("actual_core_long_source_native_fixture_decodes_without_expanding_limits", async () => {
+  const { default: wire } =
+    await import("../../src-tauri/tests/fixtures/long-source-event.json");
+  expect(
+    new TextEncoder().encode(wire.raw_time_text).length,
+  ).toBeLessThanOrEqual(4096);
+  expect(wire.raw_time_text.endsWith("…")).toBe(true);
+  expect(decodeEvent(wire).title).toBeTruthy();
+  expect(() =>
+    decodeEvent({ ...wire, raw_time_text: "证".repeat(2000) }),
+  ).toThrow("INVALID_INPUT");
+  const bridge = createMainBridge(async () => [wire]);
+  expect(
+    await bridge.calendarQuery({
+      from_date: null,
+      through_date: null,
+      statuses: [],
+      include_pending: true,
+    }),
+  ).toHaveLength(1);
 });

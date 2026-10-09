@@ -91,6 +91,33 @@ impl EventService {
     pub fn notices(&self) -> AppResult<Vec<EventSource>> {
         self.db.transaction(|tx| self.sources_tx(tx))
     }
+    /// Current-revision body application outcome, independent of pending/failed attachments.
+    pub fn message_applied(&self, key: MessageKey, revision: u64) -> AppResult<bool> {
+        self.db.transaction(|tx| {
+            let m = message(&self.db, tx, key)?;
+            if m.revision != revision || m.revoked {
+                return Ok(false);
+            }
+            let body = crate::notifications::extract::body_part_id(&m);
+            let mut stmt = tx
+                .prepare("SELECT payload FROM calendar_sources WHERE message_key=?1")
+                .map_err(storage_error)?;
+            for row in stmt
+                .query_map([key.to_string()], |r| r.get::<_, Vec<u8>>(0))
+                .map_err(storage_error)?
+            {
+                let source: EventSource = self.db.unprotect(&row.map_err(storage_error)?)?;
+                if source.message_revision == revision
+                    && source.event_id.is_some()
+                    && source.candidate.evidence.iter().any(|e| e.part_id == body)
+                    && source.outcome == SourceOutcome::Applied
+                {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })
+    }
     pub fn history(&self, id: &str) -> AppResult<Vec<EventChange>> {
         let id: EventId = id.parse()?;
         self.db.transaction(|tx| {

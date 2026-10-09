@@ -1,5 +1,11 @@
 import { invoke as nativeInvoke, isTauri } from "@tauri-apps/api/core";
 import type {
+  CalendarDetails,
+  MessageEnvelope,
+  PartResult,
+  SourceConfig,
+  ModelConsent,
+  SettingsSnapshot,
   AppErrorCode,
   CalendarEvent,
   EventPatch,
@@ -269,8 +275,314 @@ async function secretCall(
     wipe(payload);
   }
 }
+
+function bool(v: unknown): void {
+  if (typeof v !== "boolean") invalid();
+}
+function array(v: unknown, max: number, check: (v: unknown) => unknown): void {
+  if (!Array.isArray(v) || v.length > max) invalid();
+  for (const item of v as unknown[]) check(item);
+}
+function groups(v: unknown): void {
+  array(v, 100, (g) => text(g, 128));
+}
+function source(v: unknown): void {
+  const d = object(v, [
+    "source_id",
+    "adapter_type",
+    "account_id",
+    "allowed_group_ids",
+    "timezone",
+    "enabled",
+    "capability_set",
+  ]);
+  id(d.source_id);
+  text(d.adapter_type, 128);
+  text(d.account_id, 128);
+  groups(d.allowed_group_ids);
+  text(d.timezone, 128);
+  bool(d.enabled);
+  array(d.capability_set, 6, (c) =>
+    enumeration(c, [
+      "live_messages",
+      "backfill",
+      "attachments",
+      "replies",
+      "revocations",
+      "edits",
+    ]),
+  );
+}
+function consent(v: unknown): void {
+  const d = object(v, [
+    "enabled",
+    "provider_id",
+    "allowed_group_ids",
+    "allow_attachment_text",
+    "revision",
+  ]);
+  bool(d.enabled);
+  nullable(d.provider_id, (p) => text(p, 128));
+  groups(d.allowed_group_ids);
+  bool(d.allow_attachment_text);
+  canonicalRevision(d.revision);
+}
+const partStates = [
+  "pending_download",
+  "downloading",
+  "fetched",
+  "parsing",
+  "success",
+  "download_failed",
+  "unsupported",
+  "limit_exceeded",
+  "recognition_failed",
+  "partial_parse",
+];
+const reasons = [
+  "DOWNLOAD_UNAVAILABLE",
+  "FORMAT_UNSUPPORTED",
+  "LIMIT_EXCEEDED",
+  "RECOGNITION_FAILED",
+  "PARTIAL_SOURCE",
+  "TIMED_OUT",
+  "MEMORY_LIMIT",
+  "AUTH_REQUIRED",
+  "EXPIRED",
+  "PERMISSION_DENIED",
+  "STORAGE_FULL",
+];
+function evidence(v: unknown): void {
+  const d = object(v, [
+    "part_id",
+    "page_or_sheet",
+    "cell_range_or_bbox",
+    "text",
+    "method",
+    "engine_version",
+    "quality_flags",
+  ]);
+  id(d.part_id);
+  text(d.text);
+  text(d.engine_version, 128);
+  enumeration(d.method, ["native_text", "ocr", "cell"]);
+  array(d.quality_flags, 4, (f) =>
+    enumeration(f, [
+      "uncertain_date",
+      "ambiguous_layout",
+      "formula_derived",
+      "partial_source",
+    ]),
+  );
+  if (d.page_or_sheet !== null) {
+    const p = d.page_or_sheet as Record<string, unknown>;
+    if (p.kind === "sheet") {
+      object(p, ["kind", "name"]);
+      text(p.name, 128);
+    } else {
+      object(p, ["kind", "number"]);
+      enumeration(p.kind, ["page", "paragraph"]);
+      if (!Number.isSafeInteger(p.number) || (p.number as number) < 0)
+        invalid();
+    }
+  }
+  if (d.cell_range_or_bbox !== null) {
+    const p = d.cell_range_or_bbox as Record<string, unknown>;
+    if (p.kind === "cell_range") {
+      object(p, ["kind", "range"]);
+      text(p.range, 128);
+    } else {
+      const keys =
+        p.kind === "text_span"
+          ? ["start", "end"]
+          : ["x", "y", "width", "height"];
+      object(p, ["kind", ...keys]);
+      enumeration(p.kind, ["text_span", "bounding_box"]);
+      for (const key of keys)
+        if (
+          typeof p[key] !== "number" ||
+          !Number.isFinite(p[key]) ||
+          (p[key] as number) < 0
+        )
+          invalid();
+    }
+  }
+}
+function partResult(v: unknown): void {
+  const p = object(v, ["part_id", "status", "blocks", "reason_code"]);
+  id(p.part_id);
+  enumeration(p.status, partStates);
+  array(p.blocks, 32, evidence);
+  nullable(p.reason_code, (r) => enumeration(r, reasons));
+}
+function message(v: unknown): MessageEnvelope {
+  const d = object(v, [
+    "calendar_applied",
+    "message_key",
+    "source_id",
+    "account_id",
+    "group_id",
+    "native_message_id",
+    "sent_at",
+    "received_at",
+    "sender_id",
+    "text",
+    "reply_to",
+    "revision",
+    "revoked",
+    "processing_state",
+    "parts",
+  ]);
+  bool(d.calendar_applied);
+  id(d.message_key);
+  id(d.source_id);
+  for (const k of ["account_id", "group_id", "native_message_id", "sender_id"])
+    text(d[k], 128);
+  text(d.text);
+  millis(d.sent_at);
+  millis(d.received_at);
+  nullable(d.reply_to, id);
+  canonicalRevision(d.revision);
+  bool(d.revoked);
+  enumeration(d.processing_state, [
+    "persisted",
+    "parsing",
+    "committed",
+    "retryable_failure",
+    "unparseable",
+    "non_event",
+    "pending",
+    "source_revoked",
+  ]);
+  array(d.parts, 5, (v) => {
+    const p = object(v, [
+      "part_id",
+      "message_key",
+      "kind",
+      "source_file_ref",
+      "original_name",
+      "declared_type",
+      "detected_type",
+      "byte_size",
+      "content_hash",
+      "fetch_state",
+      "parse_state",
+      "failure_code",
+      "encrypted_blob_ref",
+      "retained_until",
+    ]);
+    id(p.part_id);
+    id(p.message_key);
+    enumeration(p.kind, ["text", "image", "file"]);
+    for (const k of ["source_file_ref", "content_hash", "encrypted_blob_ref"])
+      if (p[k] !== null) invalid();
+    nullable(p.original_name, (n) => text(n, 256));
+    for (const k of ["declared_type", "detected_type"])
+      nullable(p[k], (n) => text(n, 128));
+    nullable(p.byte_size, canonicalRevision);
+    nullable(p.retained_until, millis);
+    enumeration(p.fetch_state, [
+      "pending",
+      "fetching",
+      "fetched",
+      "unavailable",
+    ]);
+    enumeration(p.parse_state, partStates);
+    nullable(p.failure_code, (r) => enumeration(r, reasons));
+  });
+  return d as unknown as MessageEnvelope;
+}
+function details(v: unknown): CalendarDetails {
+  const d = object(v, ["origin", "history", "sources"]);
+  enumeration(d.origin, ["manual", "source"]);
+  array(d.history, 100, (v) => {
+    const h = object(v, ["change_id", "before", "after", "undone"]);
+    id(h.change_id);
+    nullable(h.before, decodeEvent);
+    decodeEvent(h.after);
+    bool(h.undone);
+  });
+  array(d.sources, 100, (v) => {
+    const s = object(v, [
+      "message_key",
+      "message_revision",
+      "group_id",
+      "outcome",
+      "evidence",
+    ]);
+    id(s.message_key);
+    canonicalRevision(s.message_revision);
+    text(s.group_id, 128);
+    enumeration(s.outcome, [
+      "applied",
+      "pending",
+      "conflict",
+      "suppressed",
+      "revoked",
+    ]);
+    array(s.evidence, 32, evidence);
+  });
+  return d as unknown as CalendarDetails;
+}
+function settings(v: unknown): SettingsSnapshot {
+  const d = object(v, ["sources", "model", "autostart", "transport_supported"]);
+  array(d.sources, 100, (v) => {
+    const row = object(v, ["config", "epoch"]);
+    source(row.config);
+    canonicalRevision(row.epoch);
+  });
+  consent(d.model);
+  bool(d.autostart);
+  bool(d.transport_supported);
+  return d as unknown as SettingsSnapshot;
+}
 export function createMainBridge(invoke: Invoke) {
   return Object.freeze({
+    async createManualEvent(value: EventPatch): Promise<CalendarEvent> {
+      patch(value);
+      return decodeEvent(
+        await call(invoke, "calendar_create_manual", { patch: value }),
+      );
+    },
+    async calendarDetails(eventId: string): Promise<CalendarDetails> {
+      id(eventId);
+      return details(await call(invoke, "calendar_details", { id: eventId }));
+    },
+    async notificationList(sourceId?: string): Promise<MessageEnvelope[]> {
+      if (sourceId !== undefined) id(sourceId);
+      const r = await call(invoke, "notification_list", {
+        source_id: sourceId ?? null,
+      });
+      array(r, 100, message);
+      return r as MessageEnvelope[];
+    },
+    async notificationParts(messageKey: string): Promise<PartResult[]> {
+      id(messageKey);
+      const r = await call(invoke, "notification_parts", {
+        message_key: messageKey,
+      });
+      array(r, 5, partResult);
+      return r as PartResult[];
+    },
+    async retryPart(partId: string): Promise<void> {
+      id(partId);
+      await call(invoke, "retry_part", { part_id: partId });
+    },
+    async settingsRead(): Promise<SettingsSnapshot> {
+      return settings(await call(invoke, "settings_read"));
+    },
+    async saveSourceConfig(value: SourceConfig): Promise<void> {
+      source(value);
+      await call(invoke, "save_source_config", { config: value });
+    },
+    async setModelConsent(value: ModelConsent): Promise<void> {
+      consent(value);
+      await call(invoke, "set_model_consent", { consent: value });
+    },
+    async setAutostart(enabled: boolean): Promise<void> {
+      bool(enabled);
+      await call(invoke, "set_autostart", { enabled });
+    },
     async calendarQuery(value: EventQuery): Promise<CalendarEvent[]> {
       query(value);
       const result = await call(invoke, "calendar_query", { query: value });

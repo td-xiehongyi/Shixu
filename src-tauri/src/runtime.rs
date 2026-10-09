@@ -3,7 +3,7 @@ use crate::{
     app_state::AppState,
     commands::{self, CallingContext},
 };
-use shixu_core::{calendar::EventService, contracts::error::AppError};
+use shixu_core::contracts::error::AppError;
 use std::sync::Arc;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 fn local_url(url: &tauri::Url) -> bool {
@@ -18,7 +18,7 @@ pub fn run() {
             let directory = root.join("calendar");
             // Product storage is only the existing Windows DPAPI/ACL adapter.
             let state = match shixu_native::protection::DpapiProtector::open_database(&directory) {
-                Ok(db) => AppState::new(EventService::new(Arc::new(db))),
+                Ok(db) => AppState::from_database(Arc::new(db)),
                 Err(_) => AppState::default(),
             };
             app.manage(state);

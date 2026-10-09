@@ -6,6 +6,15 @@ use crate::{
 use serde::Deserialize;
 use shixu_core::contracts::{AppResult, calendar::EventQuery, error::AppError};
 pub const COMMANDS: &[&str] = &[
+    "calendar_create_manual",
+    "calendar_details",
+    "notification_list",
+    "notification_parts",
+    "retry_part",
+    "settings_read",
+    "save_source_config",
+    "set_model_consent",
+    "set_autostart",
     "calendar_query",
     "calendar_edit",
     "calendar_undo",
@@ -31,7 +40,19 @@ pub fn authorize(context: &CallingContext<'_>, command: &str) -> AppResult<()> {
     let permitted = match context.label {
         "main" => matches!(
             command,
-            "calendar_query" | "calendar_edit" | "calendar_undo" | "show_vault_window"
+            "calendar_query"
+                | "calendar_edit"
+                | "calendar_undo"
+                | "show_vault_window"
+                | "calendar_create_manual"
+                | "calendar_details"
+                | "notification_list"
+                | "notification_parts"
+                | "retry_part"
+                | "settings_read"
+                | "save_source_config"
+                | "set_model_consent"
+                | "set_autostart"
         ),
         "vault" => command.starts_with("vault_"),
         _ => false,
@@ -83,6 +104,46 @@ struct EmptyArgs {}
 fn serialized<T: serde::Serialize>(value: T) -> AppResult<serde_json::Value> {
     serde_json::to_value(value).map_err(|_| AppError::Unsupported)
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IdArgs {
+    id: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManualArgs {
+    patch: WirePatch,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListArgs {
+    source_id: Option<shixu_core::contracts::notification::SourceId>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PartsArgs {
+    message_key: shixu_core::contracts::notification::MessageKey,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetryArgs {
+    part_id: shixu_core::contracts::notification::PartId,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceArgs {
+    config: shixu_core::contracts::notification::SourceConfig,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConsentArgs {
+    consent: wire::WireConsent,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AutostartArgs {
+    enabled: bool,
+}
 /// Full portable dispatch is also used by the Windows adapter. Errors are fixed codes.
 pub fn dispatch(
     context: &CallingContext<'_>,
@@ -99,6 +160,123 @@ pub fn dispatch(
     }
 
     match command {
+        "calendar_create_manual" => {
+            let a: ManualArgs = decode(payload)?;
+            serialized(wire::event(
+                state.calendar()?.create_manual(a.patch.into_core()?)?,
+            )?)
+        }
+        "calendar_details" => {
+            let a: IdArgs = decode(payload)?;
+            validate_id(&a.id)?;
+            let service = state.calendar()?;
+            let history = service
+                .history(&a.id)?
+                .into_iter()
+                .rev()
+                .take(100)
+                .map(|h| {
+                    Ok(wire::WireChange {
+                        change_id: h.change_id,
+                        before: h.before.map(wire::event).transpose()?,
+                        after: wire::event(h.after)?,
+                        undone: h.undone,
+                    })
+                })
+                .collect::<AppResult<Vec<_>>>()?;
+            let sources = service
+                .sources(&a.id)?
+                .into_iter()
+                .take(100)
+                .map(|s| wire::WireSource {
+                    message_key: s.message_key,
+                    message_revision: s.message_revision.into(),
+                    group_id: wire::excerpt(&s.group_id, 128),
+                    outcome: s.outcome,
+                    evidence: wire::blocks(s.candidate.evidence),
+                })
+                .collect();
+            serialized(wire::WireDetails {
+                origin: service.origin(&a.id)?,
+                history,
+                sources,
+            })
+        }
+        "notification_list" => {
+            let a: ListArgs = decode(payload)?;
+            serialized(
+                state
+                    .messages()?
+                    .list(a.source_id, 100)?
+                    .into_iter()
+                    .map(|m| {
+                        let applied = state
+                            .calendar()?
+                            .message_applied(m.message_key, m.revision)?;
+                        wire::message(m, applied)
+                    })
+                    .collect::<AppResult<Vec<_>>>()?,
+            )
+        }
+        "notification_parts" => {
+            let a: PartsArgs = decode(payload)?;
+            let parts = state
+                .messages()?
+                .current_parts(a.message_key)?
+                .into_iter()
+                .take(5)
+                .map(|mut p| {
+                    p.blocks = wire::blocks(p.blocks);
+                    p
+                })
+                .collect::<Vec<_>>();
+            serialized(parts)
+        }
+        "retry_part" => {
+            let a: RetryArgs = decode(payload)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| AppError::Unsupported)?
+                .as_millis();
+            let now = i64::try_from(now).map_err(|_| AppError::InvalidInput)?;
+            shixu_core::notifications::parts::TaskQueue::new(state.database()?)
+                .retry_part(a.part_id, now)?;
+            Ok(serde_json::Value::Null)
+        }
+        "settings_read" => {
+            let _: EmptyArgs = decode(payload)?;
+            let settings = state.settings()?;
+            serialized(wire::WireSettings {
+                sources: settings
+                    .sources()?
+                    .into_iter()
+                    .map(|s| wire::WireSourceSetting {
+                        config: s.config,
+                        epoch: s.epoch.into(),
+                    })
+                    .collect(),
+                model: state.consent.snapshot()?.into(),
+                autostart: settings.autostart()?,
+                transport_supported: false,
+            })
+        }
+        "save_source_config" => {
+            let a: SourceArgs = decode(payload)?;
+            state.settings()?.save_source(a.config)?;
+            Ok(serde_json::Value::Null)
+        }
+        "set_model_consent" => {
+            let a: ConsentArgs = decode(payload)?;
+            state.settings()?;
+            let consent = a.consent.into_core()?;
+            state.consent.replace(consent.revision, consent)?;
+            Ok(serde_json::Value::Null)
+        }
+        "set_autostart" => {
+            let a: AutostartArgs = decode(payload)?;
+            state.settings()?.set_autostart(a.enabled)?;
+            Ok(serde_json::Value::Null)
+        }
         "calendar_query" => {
             let a: QueryArgs = decode(payload)?;
             if a.query.statuses.len() > 3 {

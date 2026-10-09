@@ -107,6 +107,24 @@ impl TaskQueue {
    Ok(())
   })
     }
+    /// Explicit retry of the same durable current task, within its original retry budget.
+    /// Never creates calendar items, resets attempts, revives revoked sources or duplicates workers.
+    pub fn retry_part(&self, part_id: PartId, now: i64) -> AppResult<()> {
+        self.db.transaction(|tx|{
+            let row:Option<(String,i64,String,u32,u32,Vec<u8>)>=tx.query_row("SELECT t.message_key,t.revision,t.state,t.retries,t.retry_limit,m.payload FROM attachment_tasks t JOIN messages m ON m.message_key=t.message_key AND m.revision=t.revision WHERE t.part_id=?1 AND m.revoked=0 AND m.payload IS NOT NULL",[part_id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional().map_err(storage_error)?;
+            let (key,revision,state,retries,limit,payload)=row.ok_or(AppError::Unsupported)?;
+            let m:MessageEnvelope=self.db.unprotect(&payload)?;
+            if let Some((_,config))=super::settings::current(&self.db,tx,m.source_id)? && (!config.enabled||!config.allowed_group_ids.contains(&m.group_id)){return Err(AppError::Conflict);}
+            if state=="running" {return Err(AppError::Conflict);}
+            if state=="queued" {return Ok(());}
+            if retries>=limit.min(3){return Err(AppError::Unsupported);}
+            let results:Option<Vec<u8>>=tx.query_row("SELECT payload FROM part_results WHERE message_key=?1 AND revision=?2",params![key,revision],|r|r.get(0)).optional().map_err(storage_error)?;
+            let results:Vec<PartResult>=self.db.unprotect(&results.ok_or(AppError::Conflict)?)?;
+            if !results.iter().any(|p|p.part_id==part_id&&p.status==PartStatus::DownloadFailed&&p.reason_code==Some(PartReason::DownloadUnavailable)){return Err(AppError::Unsupported);}
+            tx.execute("UPDATE attachment_tasks SET state='queued',retries=retries+1,due_at=?4,lease=NULL WHERE message_key=?1 AND revision=?2 AND part_id=?3",params![key,revision,part_id.to_string(),now]).map_err(storage_error)?;
+            Ok(())
+        })
+    }
     /// Startup recovery only after the native supervisor has proved every old child
     /// dead. Invalidates old leases; never call merely because a timer expired.
     pub fn recover_after_children_stopped(&self) -> AppResult<u64> {
