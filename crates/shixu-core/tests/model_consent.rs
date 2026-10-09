@@ -506,3 +506,118 @@ fn fallback_rejects_explicit_examples_and_unconfirmed_suffixes() {
         );
     }
 }
+#[test]
+fn fix1_complete_affirmative_statements_keep_dates_locations_and_unknowns() {
+    for (text, title, kind, location, precision) in [
+        (
+            "2026年10月12日9:00高数测验",
+            "高数测验",
+            "exam",
+            None,
+            shixu_core::contracts::calendar::Precision::Exact,
+        ),
+        (
+            "明天9:00研究生答辩",
+            "研究生答辩",
+            "activity",
+            None,
+            shixu_core::contracts::calendar::Precision::Exact,
+        ),
+        (
+            "10月12日高数测验",
+            "高数测验",
+            "exam",
+            None,
+            shixu_core::contracts::calendar::Precision::UnknownDate,
+        ),
+        (
+            "2026年10月12日9:00高数测验，地点：A301",
+            "高数测验",
+            "exam",
+            Some("A301"),
+            shixu_core::contracts::calendar::Precision::Exact,
+        ),
+        (
+            "2026年10月12日9:00高数测验举行，地点：协和楼A301",
+            "高数测验",
+            "exam",
+            Some("协和楼A301"),
+            shixu_core::contracts::calendar::Precision::Exact,
+        ),
+    ] {
+        let (m, s) = fixture(text);
+        let mut c = extra(&m, &s.timezone);
+        c.title = title.into();
+        c.kind = kind.into();
+        c.location = location.map(str::to_owned);
+        let store = ConsentStore::new(consent());
+        let fake = Capture::new(Ok(serde_json::to_string(&vec![c.clone()]).unwrap()));
+        let svc = ModelService {
+            consent: &store,
+            transport: &fake,
+        };
+        let result = svc
+            .dispatch(svc.prepare(&m, &[], &[], &s).unwrap())
+            .unwrap();
+        assert_eq!(result.batch.candidates.len(), 1, "{text}");
+        let actual = &result.batch.candidates[0];
+        assert_eq!(actual.time, c.time);
+        assert_eq!(actual.time.precision, precision);
+        assert_eq!(actual.title, title);
+        assert_eq!(actual.location, c.location);
+    }
+}
+#[test]
+fn fix1_closed_statement_tail_rejects_unknown_suffix_and_metadata_predicates() {
+    for (suffix, location) in [
+        ("答案已公布", None),
+        ("题库发布", None),
+        ("相关说明", None),
+        ("unknown_suffix", None),
+        ("，地点：A3012026年10月13日", Some("A3012026年10月13日")),
+        ("，地点：A301，另行说明", Some("A301")),
+        ("，地点：A301取消高数测验", Some("A301取消高数测验")),
+        ("，地点：A301举行其他安排", Some("A301举行其他安排")),
+    ] {
+        let (m, s) = fixture(&format!("2026年10月12日9:00高数测验{suffix}"));
+        let mut c = extra(&m, &s.timezone);
+        c.location = location.map(str::to_owned);
+        let store = ConsentStore::new(consent());
+        let fake = Capture::new(Ok(serde_json::to_string(&vec![c]).unwrap()));
+        let svc = ModelService {
+            consent: &store,
+            transport: &fake,
+        };
+        let result = svc
+            .dispatch(svc.prepare(&m, &[], &[], &s).unwrap())
+            .unwrap();
+        assert!(result.batch.candidates.is_empty(), "{suffix}");
+    }
+}
+#[test]
+fn fix1_completed_prefix_cannot_become_an_event_title() {
+    for prefix in ["已结束", "已完成", "已经完成"] {
+        let (m, s) = fixture(&format!("2026年10月12日9:00{prefix}高数测验"));
+        let mut c = extra(&m, &s.timezone);
+        c.title = format!("{prefix}高数测验");
+        let json = serde_json::to_string(&vec![c]).unwrap();
+        assert!(
+            validate_model_output(&json, &[body(&m)]).is_err(),
+            "{prefix}"
+        );
+        let store = ConsentStore::new(consent());
+        let fake = Capture::new(Ok(json));
+        let svc = ModelService {
+            consent: &store,
+            transport: &fake,
+        };
+        assert!(
+            svc.dispatch(svc.prepare(&m, &[], &[], &s).unwrap())
+                .unwrap()
+                .batch
+                .candidates
+                .is_empty(),
+            "{prefix}"
+        );
+    }
+}

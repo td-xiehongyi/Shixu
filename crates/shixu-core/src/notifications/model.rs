@@ -270,18 +270,153 @@ pub fn validate_model_output(
     }
     Ok(validated)
 }
-/// Conservative fallback: one literal 测验/答辩 statement per block. No model
-/// confidence, role metadata, inferred dates or arbitrary titles grant authority.
+/// The only supported predicates are literal 测验/答辩; occurrence identity
+/// is resolved separately from whether the source asserts a valid Create.
+fn single_predicate(text: &str) -> Option<(&'static str, &'static str, usize)> {
+    let mut matches = [("测验", "exam"), ("答辩", "activity")]
+        .into_iter()
+        .flat_map(|(token, kind)| {
+            text.match_indices(token)
+                .map(move |(start, _)| (token, kind, start))
+        });
+    let found = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(found)
+}
+fn label_char(c: char) -> bool {
+    c.is_alphanumeric()
+        || c.is_whitespace()
+        || ['-', '_', '·', '(', ')', '（', '）', ',', '，', '.'].contains(&c)
+}
+fn identity_prefix(text: &str) -> &str {
+    // One anchored marker before time, and optionally one after it. Never
+    // delete words from the middle or normalize a whole paragraph into a title.
+    [
+        "不会举行",
+        "不举行",
+        "未举行",
+        "不安排",
+        "未安排",
+        "不进行",
+        "未进行",
+        "已取消",
+        "不取消",
+        "未取消",
+        "取消",
+        "可能",
+        "也许",
+        "听说",
+        "据说",
+        "好像",
+        "似乎",
+        "估计",
+        "传闻",
+        "已经完成",
+        "已完成",
+        "已经结束",
+        "已结束",
+        "不",
+        "未",
+    ]
+    .iter()
+    .find_map(|prefix| text.strip_prefix(prefix))
+    .unwrap_or(text)
+    .trim_start()
+}
+fn current_subject_identity(text: &str) -> Option<String> {
+    let text = identity_prefix(text.trim());
+    let (token, _, token_start) = single_predicate(text)?;
+    let (start, end) = super::extract::title_range(text, token_start, token_start + token.len());
+    let title = identity_prefix(text[start..end].trim());
+    let token_start = title.find(token)?;
+    let (start, end) = super::extract::title_range(title, token_start, token_start + token.len());
+    let title = &title[start..end];
+    if title.len() > 256
+        || !title.chars().all(label_char)
+        || super::extract::rejection(title)
+        || title.contains(['不', '未'])
+    {
+        return None;
+    }
+    Some(subject(title))
+}
+/// A closed tail grammar: end, an optional exact affirmative occurrence verb,
+/// and optionally a single explicit location label. Unknown suffixes are data,
+/// not proof that an exam/defense takes place. No second predicate/date/action
+/// can be hidden in a location label.
+fn statement_tail(tail: &str) -> AppResult<Option<String>> {
+    let tail = tail
+        .trim()
+        .trim_end_matches(['。', '.', '!', '！'])
+        .trim_end();
+    let tail = ["举行", "进行"]
+        .iter()
+        .find_map(|verb| tail.strip_prefix(verb))
+        .unwrap_or(tail)
+        .trim_start();
+    let tail = tail.strip_prefix(['，', ',']).unwrap_or(tail).trim_start();
+    if tail.is_empty() {
+        return Ok(None);
+    }
+    let location = ["地点：", "地点:"]
+        .iter()
+        .find_map(|prefix| tail.strip_prefix(prefix))
+        .ok_or(AppError::InvalidInput)?
+        .trim();
+    if location.is_empty()
+        || location.len() > 128
+        || !location.chars().all(|c| {
+            c.is_alphanumeric()
+                || c.is_whitespace()
+                || ['-', '_', '·', '(', ')', '（', '）'].contains(&c)
+        })
+        || super::time::date_expression(location)
+        || super::extract::rejection(location)
+        || [
+            "不",
+            "未",
+            "取消",
+            "调整",
+            "改至",
+            "改到",
+            "延期",
+            "测验",
+            "答辩",
+            "举行",
+            "进行",
+            "安排",
+            "定于",
+            "将于",
+            "原定",
+            "已完成",
+            "已经完成",
+            "已结束",
+            "已经结束",
+        ]
+        .iter()
+        .any(|word| location.contains(word))
+    {
+        return Err(AppError::InvalidInput);
+    }
+    Ok(Some(location.into()))
+}
+/// Conservative fallback: one complete literal 测验/答辩 statement per block.
+/// No confidence, role metadata, inferred dates or arbitrary suffixes grant it.
 pub(crate) fn grounded_candidate(
     m: &MessageEnvelope,
     e: &EvidenceBlock,
     zone: &str,
 ) -> AppResult<Candidate> {
     let text = &e.text;
-    if text.is_empty()
-        || text.len() > 16384
-        || context_evidence_target(e)?.is_some()
-        || super::extract::rejection(text)
+    if text.is_empty() || text.len() > 16384 || context_evidence_target(e)?.is_some() {
+        return Err(AppError::InvalidInput);
+    }
+    let (token, kind, token_start) = single_predicate(text).ok_or(AppError::InvalidInput)?;
+    let token_end = token_start + token.len();
+    let assertion = &text[..token_end];
+    if super::extract::rejection(assertion)
         || [
             "不",
             "未",
@@ -290,57 +425,45 @@ pub(crate) fn grounded_candidate(
             "改到",
             "调整",
             "延期",
-            "测验成绩",
-            "测验资料",
-            "答辩材料",
-            "答辩结果",
-            "示例",
-            "举例",
-            "例如",
-            "似乎",
-            "大概",
-            "估计",
-            "传闻",
-            "已结束",
-            "已完成",
-            "已经完成",
             "和",
             "及",
             "同时",
             "并且",
+            "似乎",
+            "大概",
+            "估计",
+            "传闻",
+            "示例",
+            "举例",
+            "例如",
+            "已完成",
+            "已经完成",
+            "已结束",
+            "已经结束",
+            "考试",
+            "补考",
+            "会议",
+            "开会",
+            "班会",
+            "活动",
+            "讲座",
+            "截止",
         ]
         .iter()
-        .any(|s| text.contains(s))
-        || text
+        .any(|s| assertion.contains(s))
+        || assertion
             .chars()
             .any(|c| ['；', ';', '\n', '。', '?', '？'].contains(&c))
     {
         return Err(AppError::InvalidInput);
     }
-    let matches: Vec<_> = [("测验", "exam"), ("答辩", "activity")]
-        .into_iter()
-        .flat_map(|(token, kind)| {
-            text.match_indices(token)
-                .map(move |(start, _)| (token, kind, start))
-        })
-        .collect();
-    if matches.len() != 1
-        || [
-            "考试", "补考", "会议", "开会", "班会", "活动", "讲座", "截止",
-        ]
-        .iter()
-        .any(|s| text.contains(s))
-    {
-        return Err(AppError::InvalidInput);
-    }
-    let (token, kind, start) = matches[0];
-    let (start, end) = super::extract::title_range(text, start, start + token.len());
+    let location = statement_tail(&text[token_end..])?;
+    let (start, end) = super::extract::title_range(text, token_start, token_end);
     let title = &text[start..end];
-    if title.len() > 256 {
+    if title.len() > 256 || !title.chars().all(label_char) {
         return Err(AppError::InvalidInput);
     }
     let mut time = parse_time(text, m.sent_at, zone)?;
-    let evidence = e.clone();
     if !e.quality_flags.is_empty() {
         super::time::clear_time(&mut time);
     }
@@ -350,8 +473,8 @@ pub(crate) fn grounded_candidate(
         title: title.into(),
         kind: kind.into(),
         time,
-        location: super::extract::explicit_location(text),
-        evidence: vec![evidence],
+        location,
+        evidence: vec![e.clone()],
         target_message_key: None,
     })
 }
@@ -376,7 +499,17 @@ pub(crate) fn validate_corroboration(
             {
                 return Err(AppError::InvalidInput);
             }
-            Err(_) if e.text.contains(&c.title) => return Err(AppError::InvalidInput),
+            Err(_) => match current_subject_identity(&e.text) {
+                Some(identity) if identity == subject(&c.title) => {
+                    return Err(AppError::InvalidInput);
+                }
+                // A supported predicate with unresolvable subject cannot prove
+                // independence from this event. Keep the source unresolved.
+                None if ["测验", "答辩"].iter().any(|token| e.text.contains(token)) => {
+                    return Err(AppError::InvalidInput);
+                }
+                _ => {}
+            },
             _ => {}
         }
     }

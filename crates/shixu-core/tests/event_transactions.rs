@@ -2167,3 +2167,172 @@ fn n7_mixed_sources_keep_rule_priority_and_legacy_source_payloads_readable() {
         Some("2026-10-12")
     );
 }
+
+fn n7_fix1_body(m: &MessageEnvelope) -> EvidenceBlock {
+    EvidenceBlock {
+        part_id: shixu_core::notifications::extract::body_part_id(m),
+        page_or_sheet: None,
+        cell_range_or_bbox: Some(EvidenceLocation::TextSpan {
+            start: 0,
+            end: m.text.len() as u32,
+        }),
+        text: m.text.clone(),
+        method: Method::NativeText,
+        engine_version: "n6.body.utf8-bytes.1".into(),
+        quality_flags: vec![],
+    }
+}
+fn n7_fix1_pair(contrary: &str, negative_body: bool, should_block: bool) {
+    let f = Fixture::new();
+    let positive = "2026年10月12日9:00高数测验";
+    let mut m = f.msg(
+        if negative_body { contrary } else { positive },
+        1791504000000,
+        None,
+    );
+    let part = image_part(&m);
+    let id = part.part_id;
+    m.parts.push(part);
+    m.revision = 2;
+    let m = f.persist(m);
+    let block = parser_block(id, if negative_body { positive } else { contrary });
+    save_parser(&f, &m, block.clone());
+    let selected = if negative_body {
+        block.clone()
+    } else {
+        n7_fix1_body(&m)
+    };
+    // Construct the candidate without contrary evidence, then supply honest
+    // current part results. Calendar must independently inspect all durable text.
+    let mut neutral = m.clone();
+    if negative_body {
+        neutral.text = "见附件".into();
+    }
+    let mut direct = if negative_body {
+        n7_from_block(
+            &f,
+            &neutral,
+            std::slice::from_ref(&block),
+            selected.clone(),
+            "高数测验",
+        )
+    } else {
+        n7_model(&f, &m)
+    };
+    assert_eq!(direct.candidates.len(), 1);
+    direct.part_results = extract(&m, std::slice::from_ref(&block), &[], &f.config.timezone)
+        .unwrap()
+        .part_results;
+    let applied = f.service().apply_model(direct);
+    if should_block {
+        assert_eq!(
+            applied,
+            Err(AppError::InvalidInput),
+            "durable: {contrary}, negative_body={negative_body}"
+        );
+        assert!(f.events().is_empty());
+    } else {
+        assert_eq!(applied.unwrap().created, 1);
+    }
+    let dispatched = n7_from_block(&f, &m, std::slice::from_ref(&block), selected, "高数测验");
+    assert_eq!(
+        dispatched.candidates.len(),
+        usize::from(!should_block),
+        "dispatch: {contrary}, negative_body={negative_body}"
+    );
+}
+#[test]
+fn n7_fix1_normalized_contrary_current_identity_blocks_both_evidence_orders() {
+    for subject in [
+        "高数测验",
+        "高数 测验",
+        "高数-测验",
+        "高数·测验",
+        "高数，测验",
+    ] {
+        for prefix in [
+            "不举行",
+            "未安排",
+            "可能",
+            "听说",
+            "已完成",
+            "已经完成",
+            "已结束",
+        ] {
+            for contrary in [
+                format!("{prefix}2026年10月12日9:00{subject}"),
+                format!("2026年10月12日9:00{prefix}{subject}"),
+            ] {
+                for negative_body in [false, true] {
+                    n7_fix1_pair(&contrary, negative_body, true);
+                }
+            }
+        }
+    }
+}
+#[test]
+fn n7_fix1_unrelated_subjects_are_not_fuzzy_matched() {
+    for subject in ["英语测验", "英语高数测验"] {
+        for negative_body in [false, true] {
+            n7_fix1_pair(
+                &format!("不举行2026年10月12日9:00{subject}"),
+                negative_body,
+                false,
+            );
+        }
+    }
+}
+#[test]
+fn n7_fix1_unresolved_contrary_identity_fails_closed() {
+    for negative_body in [false, true] {
+        n7_fix1_pair("2026年10月12日9:00我听说高数 测验", negative_body, true);
+    }
+}
+#[test]
+fn n7_fix1_non_event_suffixes_cannot_reach_calendar() {
+    for (title, suffix) in [
+        ("高数测验", "答案已公布"),
+        ("高数测验", "题库发布"),
+        ("高数测验", "相关说明"),
+        ("研究生答辩", "评分表已上传"),
+    ] {
+        let f = Fixture::new();
+        let m = f.msg(
+            &format!("2026年10月12日9:00{title}{suffix}"),
+            1791504000000,
+            None,
+        );
+        let mut clean = m.clone();
+        clean.text = format!("2026年10月12日9:00{title}");
+        let mut direct = n7_from_block(&f, &clean, &[], n7_fix1_body(&clean), title);
+        assert_eq!(direct.candidates.len(), 1);
+        direct.candidates[0].evidence = vec![n7_fix1_body(&m)];
+        direct.candidates[0].time =
+            shixu_core::notifications::time::parse_time(&m.text, m.sent_at, &f.config.timezone)
+                .unwrap();
+        direct.part_results = f.batch(&m, &[]).part_results;
+        assert_eq!(
+            f.service().apply_model(direct),
+            Err(AppError::InvalidInput),
+            "{title}{suffix}"
+        );
+        let dispatched = n7_from_block(&f, &m, &[], n7_fix1_body(&m), title);
+        assert!(dispatched.candidates.is_empty());
+        f.service().apply_model(dispatched).unwrap();
+        assert!(f.events().is_empty());
+    }
+}
+#[test]
+fn n7_fix1_plain_literal_affirmative_control() {
+    for (text, title) in [
+        ("2026年10月12日9:00高数测验", "高数测验"),
+        ("明天9:00研究生答辩", "研究生答辩"),
+    ] {
+        let f = Fixture::new();
+        let m = f.msg(text, 1791504000000, None);
+        let batch = n7_from_block(&f, &m, &[], n7_fix1_body(&m), title);
+        assert_eq!(batch.candidates.len(), 1);
+        assert_eq!(f.service().apply_model(batch).unwrap().created, 1);
+        assert_eq!(f.events()[0].time_precision, Precision::Exact);
+    }
+}
