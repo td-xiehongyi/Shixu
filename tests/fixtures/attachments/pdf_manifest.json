@@ -1,0 +1,1329 @@
+{
+  "synthetic_only": true,
+  "schema": 1,
+  "fixtures": [
+    {
+      "file": "native.pdf",
+      "sha256": "72017da32568974481de395722e83712fdddc44f69e2b2f7837ec1c91783445d",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "scan.pdf",
+      "sha256": "99f9d7435612c4cadd988ce68b0f6d56270ac338990688675e0933552a128c18",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "mixed.pdf",
+      "sha256": "df590b23cb3ed9e55b764d554e05d8c29c93a80ec3bfbbdb5c9f97ca274021a2",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 1
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ],
+          "page": 2
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ],
+          "page": 2
+        }
+      ],
+      "pages": 2
+    },
+    {
+      "file": "chinese_scan.pdf",
+      "sha256": "586747835e0fc00dba958da1a3e5eba1e6841b4a20ec76a20177b9bc0e18526e",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "虚构通知 2026年11月20日",
+          "bbox": [
+            47,
+            57,
+            473,
+            99
+          ],
+          "page": 1
+        },
+        {
+          "text": "教室 42",
+          "bbox": [
+            47,
+            148,
+            173,
+            189
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "multiline.pdf",
+      "sha256": "8b044a03aa35cecf237ec220a5af3b8ec654a03b9f6cfdaee04307d5a44e41b7",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop",
+          "bbox": [
+            47,
+            37,
+            274,
+            88
+          ],
+          "page": 1
+        },
+        {
+          "text": "2026-11-20",
+          "bbox": [
+            47,
+            117,
+            330,
+            168
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            197,
+            246,
+            248
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "table.pdf",
+      "sha256": "2edb13b6c2006bc5c79606015b284dbe1de82dd3091eaff969eb32b8e7af8623",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop",
+          "bbox": [
+            47,
+            59,
+            223,
+            103
+          ],
+          "page": 1
+        },
+        {
+          "text": "2026-11-20",
+          "bbox": [
+            547,
+            63,
+            738,
+            95
+          ],
+          "page": 1
+        },
+        {
+          "text": "Lecture",
+          "bbox": [
+            47,
+            183,
+            179,
+            215
+          ],
+          "page": 1
+        },
+        {
+          "text": "2026-11-21",
+          "bbox": [
+            547,
+            183,
+            738,
+            215
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "columns.pdf",
+      "sha256": "1b97e91aab78e56298b99ea38ed9ec93985b94eb28515e249b82b68795357299",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop",
+          "bbox": [
+            47,
+            59,
+            223,
+            103
+          ],
+          "page": 1
+        },
+        {
+          "text": "Lecture",
+          "bbox": [
+            597,
+            63,
+            729,
+            95
+          ],
+          "page": 1
+        },
+        {
+          "text": "2026-11-20",
+          "bbox": [
+            47,
+            183,
+            238,
+            215
+          ],
+          "page": 1
+        },
+        {
+          "text": "2026-11-21",
+          "bbox": [
+            597,
+            183,
+            788,
+            215
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "jpeg_scan.pdf",
+      "sha256": "99f9d7435612c4cadd988ce68b0f6d56270ac338990688675e0933552a128c18",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "blur_scan.pdf",
+      "sha256": "ffeaa7c9fb1e3c4b3678264def65bf7105de3f351c8999ddabe93748fdcc2b20",
+      "expected": "degraded",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "crop_scan.pdf",
+      "sha256": "c566638a11faad05ef6d596dcb97d86e1f6bab028f1dcf367a2b5d4f5fcc526d",
+      "expected": "degraded",
+      "regions": [
+        {
+          "text": "2026-11-20",
+          "bbox": [
+            0,
+            40,
+            700,
+            120
+          ],
+          "page": 1
+        },
+        {
+          "text": "42",
+          "bbox": [
+            0,
+            135,
+            200,
+            200
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "blank.pdf",
+      "sha256": "7d7a1eede8e24d98eb2548f49aaecea8b2da7b870c7acf7a6d9d80d0569277f9",
+      "expected": "recognition_failed",
+      "regions": [],
+      "pages": 1
+    },
+    {
+      "file": "twenty.pdf",
+      "sha256": "9db4ab6505e2ff0fb546c79d1152485b38171e14f7c042b53a832e9c5346b719",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 1
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 2
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 2
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 3
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 3
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 4
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 4
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 5
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 5
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 6
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 6
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 7
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 7
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 8
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 8
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 9
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 9
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 10
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 10
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 11
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 11
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 12
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 12
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 13
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 13
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 14
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 14
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 15
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 15
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 16
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 16
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 17
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 17
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 18
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 18
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 19
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 19
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 20
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 20
+        }
+      ],
+      "pages": 20
+    },
+    {
+      "file": "twenty_one.pdf",
+      "sha256": "3a31e9b3e1c490e360a25d1fd7da3ed250a7249cc4ea6c53575bf5ac69b838a4",
+      "expected": "limit_exceeded",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 1
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 2
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 2
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 3
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 3
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 4
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 4
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 5
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 5
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 6
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 6
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 7
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 7
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 8
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 8
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 9
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 9
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 10
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 10
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 11
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 11
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 12
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 12
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 13
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 13
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 14
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 14
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 15
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 15
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 16
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 16
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 17
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 17
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 18
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 18
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 19
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 19
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 20
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 20
+        },
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 21
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 21
+        }
+      ],
+      "pages": 21
+    },
+    {
+      "file": "huge_page.pdf",
+      "sha256": "37b4360b0101ab86280a3afd533fdd95569c7d9d3f4736fb1b0c07724f615852",
+      "expected": "limit_exceeded",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "actions.pdf",
+      "sha256": "99979dbcf674edee97bd2056411857270a8aabe1698d0f205dee87e3d11400f1",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "embedded.pdf",
+      "sha256": "bf8daa6d3c4767c5f32462263d46898d51aea532860110715df8dd24bf4edf31",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "xfa.pdf",
+      "sha256": "3d6856ef68fa6ec309b290c1227969002f2807c83c0a96319128e7094a6ec2e7",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            47,
+            582,
+            98
+          ],
+          "page": 1
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            137,
+            246,
+            188
+          ],
+          "page": 1
+        }
+      ],
+      "pages": 1
+    },
+    {
+      "file": "malformed.pdf",
+      "sha256": "2a8b3c951942b01ed9912038d02a0ab715252a700af9cfe2093e39d49cb9448f",
+      "expected": "recognition_failed",
+      "regions": []
+    },
+    {
+      "file": "truncated.pdf",
+      "sha256": "4079ead1056e5dd1f4187f02d54d127611046c3310753e5eccb41c0acbfec9ba",
+      "expected": "recognition_failed",
+      "regions": []
+    },
+    {
+      "file": "encrypted.pdf",
+      "sha256": "ff00c0e9ff146725151c502a86dda996df021add09d412ef7a60268abfdca6c7",
+      "expected": "auth_required",
+      "regions": []
+    }
+  ]
+}

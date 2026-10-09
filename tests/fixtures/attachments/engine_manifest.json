@@ -1,0 +1,42 @@
+{
+  "scope": "Linux x86_64 developer synthetic fixture tests only",
+  "tesseract": "5.5.0 Debian 5.5.0-1+b1",
+  "leptonica": "1.84.1",
+  "pdfium": "145.0.7616.0",
+  "pypdfium2": "5.3.0",
+  "pdfium_flags": {
+    "pdf_enable_v8": false,
+    "pdf_enable_xfa": false
+  },
+  "models_source": "https://github.com/tesseract-ocr/tessdata_fast/tree/87416418657359cb625c412a48b6e1d6d41c29bd",
+  "files": [
+    {
+      "path": "/usr/bin/tesseract",
+      "sha256": "74b76a5b994adcc18be362bf64ed5118082b2401d5d9a35242e92fc4c62e2b4b"
+    },
+    {
+      "path": "/lib/x86_64-linux-gnu/libtesseract.so.5",
+      "sha256": "66b27d857aa90bb7a31059c65bb624e918e96a7c276699bd5ac5dca4cf1ba322"
+    },
+    {
+      "path": "/lib/x86_64-linux-gnu/libleptonica.so.6",
+      "sha256": "3d56e8982393abbae4e5ba8717e73b347cf78fd4f24070c9970ff08ec0e01822"
+    },
+    {
+      "path": "/workspace/.toolchains/tessdata/chi_sim.traineddata",
+      "sha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+    },
+    {
+      "path": "/workspace/.toolchains/tessdata/eng.traineddata",
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+    },
+    {
+      "path": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/pypdfium2_raw/libpdfium.so",
+      "sha256": "504df0960b4fab9e7c3bce8e4cf944d072a5aba76a5a199609d7addc49656568"
+    }
+  ],
+  "generator_versions": {
+    "pillow": "12.3.0",
+    "pypdf": "6.10.0"
+  }
+}

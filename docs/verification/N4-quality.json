@@ -1,0 +1,77 @@
+{
+  "image": {
+    "raw_case_results": [
+      "QUALITY notice.png: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY notice.jpg: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY chinese.png: status=PartialParse complete_regions=1/2 located_blocks=6/10",
+      "QUALITY chinese.jpg: status=PartialParse complete_regions=1/2 located_blocks=6/10",
+      "QUALITY multiline.png: status=Success complete_regions=3/3 located_blocks=3/3",
+      "QUALITY table.png: status=Success complete_regions=4/4 located_blocks=4/4",
+      "QUALITY columns.png: status=Success complete_regions=4/4 located_blocks=4/4",
+      "QUALITY small.png: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY large.png: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY grayscale.png: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY alpha.png: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY blurred.png: status=PartialParse complete_regions=2/2 located_blocks=2/2",
+      "QUALITY cropped.png: status=PartialParse complete_regions=2/2 located_blocks=2/2",
+      "QUALITY blank.png: status=RecognitionFailed complete_regions=0/0 located_blocks=0/0",
+      "QUALITY wide.png: status=LimitExceeded complete_regions=0/0 located_blocks=0/0",
+      "QUALITY pixels.png: status=LimitExceeded complete_regions=0/0 located_blocks=0/0",
+      "QUALITY malformed.png: status=RecognitionFailed complete_regions=0/0 located_blocks=0/0",
+      "QUALITY truncated.jpg: status=RecognitionFailed complete_regions=0/0 located_blocks=0/0",
+      "QUALITY bad_crc.png: status=RecognitionFailed complete_regions=0/0 located_blocks=0/0",
+      "QUALITY unsupported.gif: status=Unsupported complete_regions=0/0 located_blocks=0/0"
+    ],
+    "total": "IMAGE TOTAL fixtures=20 complete_regions=29/31 located_blocks=39/47"
+  },
+  "pdf": {
+    "raw_case_results": [
+      "QUALITY native.pdf: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY scan.pdf: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY mixed.pdf: status=Success complete_regions=4/4 located_blocks=4/4",
+      "QUALITY chinese_scan.pdf: status=PartialParse complete_regions=1/2 located_blocks=6/10",
+      "QUALITY multiline.pdf: status=Success complete_regions=3/3 located_blocks=3/3",
+      "QUALITY table.pdf: status=Success complete_regions=4/4 located_blocks=4/4",
+      "QUALITY columns.pdf: status=Success complete_regions=4/4 located_blocks=4/4",
+      "QUALITY jpeg_scan.pdf: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY blur_scan.pdf: status=PartialParse complete_regions=2/2 located_blocks=2/2",
+      "QUALITY crop_scan.pdf: status=PartialParse complete_regions=2/2 located_blocks=2/2",
+      "QUALITY blank.pdf: status=RecognitionFailed complete_regions=0/0 located_blocks=0/0",
+      "QUALITY twenty.pdf: status=Success complete_regions=40/40 located_blocks=40/40",
+      "QUALITY twenty_one.pdf: status=LimitExceeded complete_regions=0/42 located_blocks=0/0",
+      "QUALITY huge_page.pdf: status=LimitExceeded complete_regions=0/2 located_blocks=0/0",
+      "QUALITY actions.pdf: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY embedded.pdf: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY xfa.pdf: status=Success complete_regions=2/2 located_blocks=2/2",
+      "QUALITY malformed.pdf: status=RecognitionFailed complete_regions=0/0 located_blocks=0/0",
+      "QUALITY truncated.pdf: status=RecognitionFailed complete_regions=0/0 located_blocks=0/0",
+      "QUALITY encrypted.pdf: AuthRequired"
+    ],
+    "total": "PDF TOTAL fixtures=20 complete_regions=72/73 located_blocks=77/81"
+  },
+  "resource_measurements": [
+    {
+      "test": "twenty_real_image_fixtures",
+      "exit": 0,
+      "seconds": 6.0808,
+      "maxrss_kib": 88244,
+      "user_seconds": 5.576304,
+      "system_seconds": 0.438013
+    },
+    {
+      "test": "twenty_real_pdf_fixtures",
+      "exit": 0,
+      "seconds": 3.7996,
+      "maxrss_kib": 75568,
+      "user_seconds": 3.45567,
+      "system_seconds": 0.31148899999999996
+    }
+  ],
+  "actions_probe": {
+    "canary_stat_checks": 4,
+    "canary_open_exec_calls": 0,
+    "connect_send_calls": 0,
+    "scope": "synthetic action/embedded/XFA fixtures; not OS isolation; dynamic libraries/fonts are expected non-input reads"
+  },
+  "scope": "Controlled synthetic algorithm observations only, not product/Windows/event-quality acceptance"
+}

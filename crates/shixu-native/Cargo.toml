@@ -16,10 +16,13 @@ flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs"]
 crc32fast = "=1.5.2"
 zip = { version = "=9.0.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
+image = { version = "=0.25.9", default-features = false, features = ["png", "jpeg"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 [dev-dependencies]
+libloading = "=0.8.9"
 serde_json.workspace = true
 uuid.workspace = true
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }

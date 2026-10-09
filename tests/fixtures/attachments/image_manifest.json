@@ -1,0 +1,418 @@
+{
+  "synthetic_only": true,
+  "schema": 1,
+  "fixtures": [
+    {
+      "file": "notice.png",
+      "sha256": "1115a58a69ba2b69c45d658de31dd299c373daf466df870e931d4857af349fa9",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ]
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ]
+        }
+      ]
+    },
+    {
+      "file": "notice.jpg",
+      "sha256": "31463ebf68d2ef304d2d7209e0913e41fb9550ae6c3ab6a1ae8f2234cefe7678",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ]
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ]
+        }
+      ]
+    },
+    {
+      "file": "chinese.png",
+      "sha256": "b4220a8e134d71a77cc757ee787f7fb5ddbc50d6e4abc8ad552a3520a7cf0c06",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "虚构通知 2026年11月20日",
+          "bbox": [
+            47,
+            57,
+            473,
+            99
+          ]
+        },
+        {
+          "text": "教室 42",
+          "bbox": [
+            47,
+            148,
+            173,
+            189
+          ]
+        }
+      ]
+    },
+    {
+      "file": "chinese.jpg",
+      "sha256": "9592579fccccb27cc7c1fdc821a174b4097e03464888c6e2310a81fe1f59883a",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "虚构通知 2026年11月20日",
+          "bbox": [
+            47,
+            57,
+            473,
+            99
+          ]
+        },
+        {
+          "text": "教室 42",
+          "bbox": [
+            47,
+            148,
+            173,
+            189
+          ]
+        }
+      ]
+    },
+    {
+      "file": "multiline.png",
+      "sha256": "67d46aa4b892024dbdcd82c21a657fdaa52da64782180c423709501b421ac9c3",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop",
+          "bbox": [
+            47,
+            49,
+            223,
+            93
+          ]
+        },
+        {
+          "text": "2026-11-20",
+          "bbox": [
+            47,
+            133,
+            238,
+            165
+          ]
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            213,
+            200,
+            245
+          ]
+        }
+      ]
+    },
+    {
+      "file": "table.png",
+      "sha256": "2b9bcac0ba1454c586ad9c4743e772e53a086eb087731ab6dfcf8edac727c7c2",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop",
+          "bbox": [
+            47,
+            59,
+            223,
+            103
+          ]
+        },
+        {
+          "text": "2026-11-20",
+          "bbox": [
+            547,
+            63,
+            738,
+            95
+          ]
+        },
+        {
+          "text": "Lecture",
+          "bbox": [
+            47,
+            183,
+            179,
+            215
+          ]
+        },
+        {
+          "text": "2026-11-21",
+          "bbox": [
+            547,
+            183,
+            738,
+            215
+          ]
+        }
+      ]
+    },
+    {
+      "file": "columns.png",
+      "sha256": "9bfa3e8b06978adfdfa2ea9ab08c288c223a15d9a473daf7a37898e5657c7e31",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop",
+          "bbox": [
+            47,
+            59,
+            223,
+            103
+          ]
+        },
+        {
+          "text": "Lecture",
+          "bbox": [
+            597,
+            63,
+            729,
+            95
+          ]
+        },
+        {
+          "text": "2026-11-20",
+          "bbox": [
+            47,
+            183,
+            238,
+            215
+          ]
+        },
+        {
+          "text": "2026-11-21",
+          "bbox": [
+            597,
+            183,
+            788,
+            215
+          ]
+        }
+      ]
+    },
+    {
+      "file": "small.png",
+      "sha256": "6d0155da262393f4ed5c720eb2eefab4477182052343fc0965c2bbe310f7aca6",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ]
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ]
+        }
+      ]
+    },
+    {
+      "file": "large.png",
+      "sha256": "512b1e266a15433522520e5b214aea82c983eebcdf2b5199f2a033f28340239a",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ]
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ]
+        }
+      ]
+    },
+    {
+      "file": "grayscale.png",
+      "sha256": "76e016e72d624ef262ab36af9700fc7e866497c60b5f9beb6e477df2d9487f82",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ]
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ]
+        }
+      ]
+    },
+    {
+      "file": "alpha.png",
+      "sha256": "223df8bd6ee0de2661a7c816ed8e5552684751a2712f6bc10da872f61703aa56",
+      "expected": "readable",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ]
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ]
+        }
+      ]
+    },
+    {
+      "file": "blurred.png",
+      "sha256": "11f7038a3ed7d609f1413267c5d6fdacf8f85bde014d101574dea39f0a5db2c9",
+      "expected": "degraded",
+      "regions": [
+        {
+          "text": "Workshop 2026-11-20",
+          "bbox": [
+            47,
+            59,
+            416,
+            103
+          ]
+        },
+        {
+          "text": "Room 42",
+          "bbox": [
+            47,
+            153,
+            200,
+            185
+          ]
+        }
+      ]
+    },
+    {
+      "file": "cropped.png",
+      "sha256": "f6019818ab405a8f5724295dde54fe9c970a8e1ea33f79fb5c3f4a05449dffc0",
+      "expected": "degraded",
+      "regions": [
+        {
+          "text": "2026-11-20",
+          "bbox": [
+            0,
+            40,
+            700,
+            120
+          ]
+        },
+        {
+          "text": "42",
+          "bbox": [
+            0,
+            135,
+            200,
+            200
+          ]
+        }
+      ]
+    },
+    {
+      "file": "blank.png",
+      "sha256": "0d203d2b4d7a4420e409c76b04fe7b23ed5edc9d2d826b62a41a523d89ff8fa0",
+      "expected": "recognition_failed",
+      "regions": []
+    },
+    {
+      "file": "wide.png",
+      "sha256": "3c2aa707eb9b3ce893258e6ed9106fd74d40c8c11fe8171a1336d92bdca6c4b4",
+      "expected": "limit_exceeded",
+      "regions": []
+    },
+    {
+      "file": "pixels.png",
+      "sha256": "ff167662e848f4a5ef56f99ef5f16a202736f2076d6140168cd8b06485fc7ff0",
+      "expected": "limit_exceeded",
+      "regions": []
+    },
+    {
+      "file": "malformed.png",
+      "sha256": "50ed0368b883402241db50860e19ca9b5d7ab9e933c9c089c03303d09228a82c",
+      "expected": "recognition_failed",
+      "regions": []
+    },
+    {
+      "file": "truncated.jpg",
+      "sha256": "d360f77f558193c3b51c04bd2171ee9627c0514b36e210ce622eecfa0f26d1e6",
+      "expected": "recognition_failed",
+      "regions": []
+    },
+    {
+      "file": "bad_crc.png",
+      "sha256": "9a62b6136ce65485e6388ba51f27ee91312037fa2a6ac7c666b636c55a99a4e9",
+      "expected": "recognition_failed",
+      "regions": []
+    },
+    {
+      "file": "unsupported.gif",
+      "sha256": "2cf9e4d5656dd52d3682c7af1ed46a11034df88dde8385d879fe625bfbe9a9cc",
+      "expected": "unsupported",
+      "regions": []
+    }
+  ]
+}

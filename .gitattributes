@@ -1,0 +1,5 @@
+# Synthetic parser fixtures are byte-exact inputs, including malformed files.
+/tests/fixtures/attachments/*.png binary
+/tests/fixtures/attachments/*.jpg binary
+/tests/fixtures/attachments/*.gif binary
+/tests/fixtures/attachments/*.pdf binary

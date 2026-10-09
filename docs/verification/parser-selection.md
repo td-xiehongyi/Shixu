@@ -69,3 +69,7 @@ SQLite migration **3** adds attachment task state, retry count, due time and opa
 `cargo test -p shixu-native --test parser_isolation -- --ignored` currently **fails (exit 101)** with an explicit BLOCKED message. It is a visible unresolved gate, not an ignored test counted as a pass. No real Windows probe has been run here.
 
 One Linux synthetic ZIP case (valid small container, traversal, 1 MiB repeated-data bomb) was measured by Python `resource.getrusage` around the already-built test executable: exit 0, 0.0613 seconds, peak RSS 9344 KiB. This measures that one test harness only, not worst-case resources, an engine, or a Windows Job Object. Ordinary `/usr/bin/time` was unavailable; the measurement used the standard Python resource API. Local raw evidence: `.superpowers/sdd/shixu-v0.1/N3-resource-synthetic.log`.
+
+## N4 bounded follow-up
+
+The [N4 image/PDF record](image-pdf.md) supersedes the source-only engine-presence statements for a controlled synthetic experiment: verified installed Tesseract 5.5.0 and PDFium 145.0.7616.0 support native fixture tests through Rust test adapters. Reusable Rust algorithms now decode bounded PNG/JPEG and assemble per-page native/OCR evidence. Production native adapters, Windows resource/isolation validation and full quality acceptance remain BLOCKED; host/path interfaces and the parser binary stay `Unsupported`. No Python application runtime or unsandboxed product fallback was added.
