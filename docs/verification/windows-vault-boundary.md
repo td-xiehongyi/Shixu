@@ -4,6 +4,12 @@ Stage B 新增私有 Windows launcher/store 和固定的原生测试，公开 `K
 
 只用脚本自己创建的全新临时目录、固定虚构密码和仓库审核的资源；不传真实库、凭据、程序、路径、能力或环境覆盖。标准用户执行，不改防火墙/loopback 豁免，不登录 QQ，不自动安装组件，不启用生产引擎。
 
+2026-10-10 本机排错补充：launcher 从 `SHGetKnownFolderPath` 获取当前用户 `LOCALAPPDATA` 与系统 `SystemRoot`，校验严格本地固定磁盘路径，构造仅这两个条目的环境块；不继承 PATH、NODE_OPTIONS、TEMP、令牌或其他用户变量。空环境在本机 AppContainer 创建时报 Win32 203；只有 LOCALAPPDATA 时固定 Node 的 WebCrypto 随机数失败；补入系统 API 获取的 SystemRoot 后虚构 KDBX 创建/保存/重载成功。这个结果仅针对本机固定运行资源，不是所有系统的通用兼容性承诺。[AppContainer 环境重定向](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)、[系统目录 API](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath)。
+
+固定 Node 启动增加 `--preserve-symlinks` 与 `--preserve-symlinks-main`，避免模块加载时重新探查没有授权的祖先目录。资源仍须通过精确哈希、无 reparse 与持有句柄防替换校验；没有增加根目录 ACL、网络能力或原生模块权限。[Node 标志语义](https://nodejs.org/api/cli.html#--preserve-symlinks)。
+
+OS 句柄探针由父端在子进程恢复前通过 `DuplicateHandle` 查询实际子进程表，只有 `ERROR_INVALID_HANDLE` 可表示目标编号不存在；其他错误仍失败。有效父端 sentinel 副本是正对照，发生编号碰撞时继续比较文件身份。这样保留继承拒绝验证，同时避免子端的严格句柄检查因查询不存在句柄而终止探针。[严格句柄检查](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-process_mitigation_strict_handle_check_policy)、[DuplicateHandle](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle)。可信父退出测试宿主单独接收已准入合成目录的 TEMP/TMP，以创建自己的夹具；这两个变量不会传给 AppContainer 密码进程。
+
 ## 缺失组件先准备，随后执行
 
 以下命令是用户在实际 Windows x64 机器上执行的检查流程；云端没有执行它们。
@@ -42,6 +48,6 @@ Launcher 使用 regular 零能力 AppContainer、验证 low token、suspended-st
 
 第二真实身份、物理断电、真实磁盘满仍单列 BLOCKED；普通权限/Job/网络失败不会增大上限、加能力/广泛ACL、改防火墙或偷偷回退。regular AppContainer 仍可访问共用系统和自身 profile 表面，不承诺 LPAC/全 registry 禁止。文件 share guard 和 cooperating lease 不构成同用户恶意 rename CAS；ReplaceFile 路径调用存在释放 guard 后的竞态，不承诺 Windows directory fsync 或物理断电安全。SACL/DACL 检查失败即拒绝；仅 inbox helper-created 继承的精确低-MIC ACL 可以无 protected 标志，private active/checkpoint 均必须 protected。
 
-本 runner 尚无实际 Windows结果；独立源码审核、实际 OS运行和剩余验收缺口解决前不能开启生产。原生复制命令已在 Stage A 经 epoch/session guard 接到 SystemClipboard，但真实 Windows/历史与云排除仍未验收。只有 master/current/new/confirmation 和存储PASSWORD禁换行，ACCOUNT/CHANNEL保留原先字符，不恢复旧的账号禁令。
+实际 Windows 的运行结果与剩余失败见 [本机阶段报告](windows-local-2026-10-10.md)；独立源码审核、实际 OS运行和剩余验收缺口解决前不能开启生产。原生复制命令已在 Stage A 经 epoch/session guard 接到 SystemClipboard，但真实 Windows/历史与云排除仍未验收。只有 master/current/new/confirmation 和存储PASSWORD禁换行，ACCOUNT/CHANNEL保留原先字符，不恢复旧的账号禁令。
 
 2026-10-10 Stage C source wiring: retained-main WTS/session and power subclass hooks, same-controller atomic lifecycle barrier with bounded deferred cleanup, actual clipboard EmptyClipboard/Tauri resolver final checks, native-only targeted vault_locked UI redaction, deterministic ICO and exact198-file resource map are implemented. Actual Windows execution remains unaccepted and production Unsupported. The executable minimum MSVC workflow and manual unavailable-vault observation are documented in [windows-vault-lifecycle.md](windows-vault-lifecycle.md); all12 gates stay BLOCKED and Q1 OPEN.

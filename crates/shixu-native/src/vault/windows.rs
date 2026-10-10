@@ -26,9 +26,10 @@ use windows_sys::Win32::{
     Security::{Authorization::*, Isolation::*, *},
     Storage::FileSystem::*,
     System::{
-        IO::CancelSynchronousIo, JobObjects::*, Pipes::*, SystemServices::*, Threading::*,
-        WindowsProgramming::DRIVE_FIXED,
+        Com::CoTaskMemFree, IO::CancelSynchronousIo, JobObjects::*, Pipes::*, SystemServices::*,
+        Threading::*, WindowsProgramming::DRIVE_FIXED,
     },
+    UI::Shell::{FOLDERID_LocalAppData, FOLDERID_Windows, SHGetKnownFolderPath},
 };
 const MEMORY: usize = 512 * 1024 * 1024;
 fn wide(value: &std::ffi::OsStr) -> AppResult<Vec<u16>> {
@@ -68,6 +69,45 @@ impl Drop for Local {
             LocalFree(self.0);
         }
     }
+}
+struct TaskMem(*mut c_void);
+impl Drop for TaskMem {
+    fn drop(&mut self) {
+        // SHGetKnownFolderPath uses the COM task allocator, not LocalAlloc.
+        unsafe { CoTaskMemFree(self.0) };
+    }
+}
+fn native_fixed_folder(id: &windows_sys::core::GUID) -> AppResult<String> {
+    let mut folder = null_mut();
+    // Resolve current-user metadata through Windows, never an inherited variable.
+    let result = unsafe { SHGetKnownFolderPath(id, 0, null_mut(), &mut folder) };
+    let _allocation = TaskMem(folder.cast());
+    if result < 0 || folder.is_null() {
+        return Err(AppError::Unsupported);
+    }
+    let length = (0..32768)
+        .find(|index| unsafe { *folder.add(*index) == 0 })
+        .ok_or(AppError::Unsupported)?;
+    let folder = unsafe { String::from_utf16(std::slice::from_raw_parts(folder, length)) }
+        .map_err(|_| AppError::Unsupported)?;
+    let path = path_wide(Path::new(&folder))?;
+    let drive: Vec<_> = path[..3].iter().copied().chain(Some(0)).collect();
+    if unsafe { GetDriveTypeW(drive.as_ptr()) } != DRIVE_FIXED {
+        return Err(AppError::Unsupported);
+    }
+    Ok(folder)
+}
+fn launcher_environment() -> AppResult<Vec<u16>> {
+    let local = native_fixed_folder(&FOLDERID_LocalAppData)?;
+    let windows = native_fixed_folder(&FOLDERID_Windows)?;
+    // AppContainer redirection needs LOCALAPPDATA; Windows crypto needs SystemRoot.
+    // Explicit sorted block: no ambient PATH, NODE_OPTIONS, TEMP or credentials.
+    let mut environment = wide(std::ffi::OsStr::new(&format!("LOCALAPPDATA={local}")))?;
+    environment.extend(wide(std::ffi::OsStr::new(&format!(
+        "SystemRoot={windows}"
+    )))?);
+    environment.push(0);
+    Ok(environment)
 }
 fn token_info(token: &OwnedHandle, class: TOKEN_INFORMATION_CLASS) -> AppResult<Vec<usize>> {
     let mut length = 0;
@@ -367,6 +407,10 @@ pub(super) fn launch(
         "--no-addons".into(),
         "--no-warnings".into(),
         "--max-old-space-size=128".into(),
+        // Native admission rejects reparse points and pins the reviewed tree.
+        // Avoid Node re-resolving its modules through ungranted ancestor metadata.
+        "--preserve-symlinks".into(),
+        "--preserve-symlinks-main".into(),
         format!("--allow-fs-read={}", resources.join("helper").display()),
         format!("--allow-fs-read={}", inbox.display()),
         format!("--allow-fs-write={}", inbox.display()),
@@ -391,8 +435,7 @@ fn launch_fixed(
         .collect::<AppResult<Vec<_>>>()?
         .join(" ");
     let mut command = wide(std::ffi::OsStr::new(&command))?;
-    // Empty environment block: no inherited secrets, PATH, NODE_OPTIONS or TEMP.
-    let environment = [0u16, 0];
+    let environment = launcher_environment()?;
     let (child_input, parent_input) = pipes()?;
     let (parent_output, child_output) = pipes()?;
     for end in [&parent_input, &parent_output] {
@@ -1267,6 +1310,106 @@ mod tests {
         assert!(path_wide(Path::new("C:/untrusted/runtime/node.exe")).is_err());
     }
     #[test]
+    fn launcher_environment_contains_only_native_windows_metadata() {
+        let environment = launcher_environment().unwrap();
+        assert_eq!(&environment[environment.len() - 2..], &[0, 0]);
+        let entries: Vec<_> = environment[..environment.len() - 1]
+            .split(|value| *value == 0)
+            .filter(|entry| !entry.is_empty())
+            .collect();
+        assert_eq!(entries.len(), 2);
+        for (entry, key, id) in [
+            (entries[0], "LOCALAPPDATA=", &FOLDERID_LocalAppData),
+            (entries[1], "SystemRoot=", &FOLDERID_Windows),
+        ] {
+            let entry = String::from_utf16(entry).unwrap();
+            let path = entry.strip_prefix(key).expect("only allowed key");
+            assert!(windows_policy::local_path(path).is_ok());
+            assert_eq!(path, native_fixed_folder(id).unwrap());
+        }
+    }
+    #[test]
+    #[ignore = "Requires prepared actual Windows x64 resources; creates suspended synthetic helper only"]
+    fn synthetic_suspended_launcher_starts_without_ambient_environment() {
+        let (store, base) = fixture();
+        let result = launch(&store.resources, &store.inbox, store.profile.clone());
+        let mut child =
+            result.expect("fixed Node launcher must create contained suspended process");
+        assert_eq!(
+            unsafe { WaitForSingleObject(raw(&child.process.process), 0) },
+            WAIT_TIMEOUT
+        );
+        // launch already validates the actual AppContainer token and Job limits.
+        // Never resume this regression child or supply a password frame.
+        child.process.kill().unwrap();
+        child.process.wait().unwrap();
+        drop(child);
+        drop(store);
+        assert_eq!(base.parent(), Some(std::env::temp_dir().as_path()));
+        assert!(
+            base.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("shixu synthetic ")
+        );
+        std::fs::remove_dir_all(base).unwrap();
+    }
+    #[test]
+    #[ignore = "Requires prepared actual Windows x64 resources; boots fixed helper without password frames"]
+    fn synthetic_helper_boots_and_closes_without_secret_frames() {
+        let (store, base) = fixture();
+        let mut child = launch(&store.resources, &store.inbox, store.profile.clone()).unwrap();
+        drop(child.input);
+        Suspended::resume_thread(&child.thread).unwrap();
+        let status = unsafe { WaitForSingleObject(raw(&child.process.process), 5000) };
+        if status != WAIT_OBJECT_0 {
+            child.process.kill().unwrap();
+            child.process.wait().unwrap();
+        }
+        let mut code = 0;
+        assert_ne!(
+            unsafe { GetExitCodeProcess(raw(&child.process.process), &mut code) },
+            0
+        );
+        let mut output = Vec::new();
+        child.output.take(1024).read_to_end(&mut output).unwrap();
+        drop(child.process);
+        drop(store);
+        assert_eq!(base.parent(), Some(std::env::temp_dir().as_path()));
+        assert!(
+            base.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("shixu synthetic ")
+        );
+        std::fs::remove_dir_all(base).unwrap();
+        assert_eq!(status, WAIT_OBJECT_0, "fixed helper did not stop on EOF");
+        assert_eq!(code, 0, "fixed helper failed during initialization");
+        assert!(output.is_empty(), "helper emitted output without a request");
+    }
+    #[test]
+    #[ignore = "Requires prepared actual Windows x64 resources; sends only an unauthenticated list request"]
+    fn synthetic_helper_rejects_unopened_request_over_private_pipe() {
+        let (store, base) = fixture();
+        let mut pipe = PrivatePipe::spawn_windows(&store, VaultCancellation::default()).unwrap();
+        let response = pipe.send(zeroize::Zeroizing::new(
+            br#"{"v":1,"id":1,"op":"list"}"#.to_vec(),
+        ));
+        drop(pipe);
+        drop(store);
+        assert_eq!(base.parent(), Some(std::env::temp_dir().as_path()));
+        assert!(
+            base.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("shixu synthetic ")
+        );
+        std::fs::remove_dir_all(base).unwrap();
+        let response = response.expect("fixed unauthenticated request must receive a reply");
+        let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
+        assert!(response["type"] == "error" && response["value"] == "LOCKED");
+    }
+    #[test]
     fn production_constructor_remains_blocked() {
         assert!(matches!(
             KdbxWebEngine::prepared(
@@ -1280,12 +1423,21 @@ mod tests {
     #[ignore = "Actual Windows only; invoked solely by fixed synthetic parent"]
     fn synthetic_os_diagnostic_child() {
         // The only diagnostic entry point is this test-only fixed action sequence.
+        for name in ["PATH", "NODE_OPTIONS", "SHIXU_SYNTHETIC_HOST_MARKER"] {
+            assert!(
+                std::env::var_os(name).is_none(),
+                "ambient environment inherited"
+            );
+        }
         let inbox = std::env::current_dir().expect("fixed inbox");
+        let stage = |value: &str| std::fs::write(inbox.join("probe-stage"), value).unwrap();
+        stage("metadata");
         let base = inbox.parent().expect("fixed fixture parent");
         let metadata: serde_json::Value = serde_json::from_slice(
             &std::fs::read(inbox.join("probe.json")).expect("fixed probe metadata"),
         )
         .expect("fixed metadata parse");
+        stage("private-files");
         for path in [
             base.join("active").join("vault.kdbx"),
             base.join("active").join("vault.checkpoint-probe.kdbx"),
@@ -1301,6 +1453,7 @@ mod tests {
                 "OS private delete must be denied"
             );
         }
+        stage("checkpoints");
         for entry in std::fs::read_dir(base.join("active"))
             .into_iter()
             .flatten()
@@ -1311,6 +1464,7 @@ mod tests {
                 "OS checkpoint read must be denied"
             );
         }
+        stage("resources");
         assert!(
             std::fs::OpenOptions::new()
                 .write(true)
@@ -1329,19 +1483,7 @@ mod tests {
                 .is_err(),
             "OS resource DACL denies write without sharing guard"
         );
-        // Verify semantic file identity if the inherited handle number collides.
-        let handle = metadata["sentinel_handle"]
-            .as_u64()
-            .expect("handle metadata") as usize as HANDLE;
-        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
-        if unsafe { GetFileInformationByHandle(handle, &mut info) } != 0 {
-            assert!(
-                u64::from(info.dwVolumeSerialNumber) != metadata["volume"].as_u64().unwrap()
-                    || u64::from(info.nFileIndexHigh) != metadata["high"].as_u64().unwrap()
-                    || u64::from(info.nFileIndexLow) != metadata["low"].as_u64().unwrap(),
-                "sentinel file handle inherited"
-            );
-        }
+        stage("network");
         let tcp: std::net::SocketAddr = format!("127.0.0.1:{}", metadata["tcp"].as_u64().unwrap())
             .parse()
             .unwrap();
@@ -1356,6 +1498,7 @@ mod tests {
                 format!("127.0.0.1:{}", metadata["udp"].as_u64().unwrap()),
             );
         }
+        stage("second-process");
         let mut second = std::process::Command::new(std::env::current_exe().unwrap())
             .arg("--list")
             .spawn();
@@ -1365,6 +1508,7 @@ mod tests {
         }
         assert!(second.is_err(), "one-process Job must deny second process");
         // Real committed allocation request; Job cap must reject it, not Node flags.
+        stage("memory");
         use windows_sys::Win32::System::Memory::{
             MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
         };
@@ -1483,7 +1627,7 @@ mod tests {
             },
             0
         );
-        let metadata = serde_json::to_vec(&serde_json::json!({"tcp":tcp.local_addr().unwrap().port(),"udp":udp.local_addr().unwrap().port(),"sentinel_handle":sentinel.file.as_raw_handle() as usize,"volume":sentinel.identity.volume,"high":sentinel.identity.high,"low":sentinel.identity.low})).unwrap();
+        let metadata = serde_json::to_vec(&serde_json::json!({"tcp":tcp.local_addr().unwrap().port(),"udp":udp.local_addr().unwrap().port()})).unwrap();
         create_file(
             &store.inbox.join("probe.json"),
             &descriptor(&store.owner, &store.profile_sid, Access::Inbox, false).unwrap(),
@@ -1499,6 +1643,73 @@ mod tests {
         ];
         let child = launch_fixed(&program, &args, &store.inbox, store.profile.clone())
             .expect("BLOCKED: diagnostic launch");
+        // AppContainer strict handle checks raise STATUS_INVALID_HANDLE for an
+        // absent sentinel. Inspect the suspended child's table from the parent,
+        // where DuplicateHandle reports an absent entry without probing it in child.
+        let duplicate = |source_process: HANDLE| {
+            let mut copy = null_mut();
+            if unsafe {
+                DuplicateHandle(
+                    source_process,
+                    sentinel.file.as_raw_handle(),
+                    GetCurrentProcess(),
+                    &mut copy,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            } == 0
+            {
+                assert_eq!(
+                    unsafe { GetLastError() },
+                    ERROR_INVALID_HANDLE,
+                    "handle table query failed for another reason"
+                );
+                None
+            } else {
+                Some(owned(copy).unwrap())
+            }
+        };
+        let control = duplicate(unsafe { GetCurrentProcess() }).expect("sentinel positive control");
+        let mut identity: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
+        assert_ne!(
+            unsafe { GetFileInformationByHandle(raw(&control), &mut identity) },
+            0
+        );
+        assert_eq!(
+            (
+                identity.dwVolumeSerialNumber,
+                identity.nFileIndexHigh,
+                identity.nFileIndexLow
+            ),
+            (
+                sentinel.identity.volume as u32,
+                sentinel.identity.high as u32,
+                sentinel.identity.low as u32
+            )
+        );
+        if let Some(handle) = duplicate(raw(&child.process.process)) {
+            // An unrelated object may reuse the parent's numeric handle value.
+            if unsafe { GetFileType(raw(&handle)) } == FILE_TYPE_DISK {
+                let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
+                assert_ne!(
+                    unsafe { GetFileInformationByHandle(raw(&handle), &mut info) },
+                    0
+                );
+                assert!(
+                    (
+                        info.dwVolumeSerialNumber,
+                        info.nFileIndexHigh,
+                        info.nFileIndexLow
+                    ) != (
+                        identity.dwVolumeSerialNumber,
+                        identity.nFileIndexHigh,
+                        identity.nFileIndexLow
+                    ),
+                    "sentinel file handle inherited"
+                );
+            }
+        }
         Suspended::resume_thread(&child.thread).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while unsafe { WaitForSingleObject(raw(&child.process.process), 10) } == WAIT_TIMEOUT
@@ -1509,7 +1720,16 @@ mod tests {
             unsafe { GetExitCodeProcess(raw(&child.process.process), &mut code) },
             0
         );
-        assert_eq!(code, 0, "fixed OS diagnostic failed");
+        if code != 0 {
+            let stage =
+                std::fs::read_to_string(store.inbox.join("probe-stage")).unwrap_or_default();
+            let stage = match stage.as_str() {
+                "metadata" | "private-files" | "checkpoints" | "resources" | "sentinel-handle"
+                | "network" | "second-process" | "memory" => stage.as_str(),
+                _ => "startup",
+            };
+            panic!("fixed OS diagnostic failed: stage={stage} exit={code:#x}");
+        }
         assert_eq!(
             std::fs::read(store.inbox.join("probe-done")).unwrap(),
             b"fixed-native-os-8"
@@ -1528,6 +1748,27 @@ mod tests {
         // Never emit raw diagnostic stdout; only check fixed successful test count.
         assert!(String::from_utf8_lossy(&output).contains("1 passed; 0 failed"));
         assert_eq!(std::fs::read(marker).unwrap(), b"synthetic-calendar-marker");
+    }
+    #[test]
+    #[ignore = "Requires prepared actual Windows x64 resources; synthetic OS checks independent of vault crypto"]
+    fn synthetic_os_boundary_without_crypto() {
+        let (mut store, base) = fixture();
+        create_file(
+            &store.root.join("vault.kdbx"),
+            &descriptor(&store.owner, &store.profile_sid, Access::Private, false).unwrap(),
+            b"fixed synthetic encrypted-file stand-in",
+        )
+        .unwrap();
+        diagnostic(&mut store, &base);
+        drop(store);
+        assert_eq!(base.parent(), Some(std::env::temp_dir().as_path()));
+        assert!(
+            base.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("shixu synthetic ")
+        );
+        std::fs::remove_dir_all(base).unwrap();
     }
     fn resource_failures(base: &Path, store: &Store) {
         fn copy(source: &Path, target: &Path) {
@@ -1683,7 +1924,17 @@ mod tests {
                 .starts_with("shixu synthetic "),
             "fixed parent fixture required"
         );
+        let stage =
+            |value: &str| std::fs::write(observer_root.join("parent-death-stage"), value).unwrap();
+        stage(
+            if std::env::temp_dir().as_path() == observer_root.parent().unwrap() {
+                "fixture-temp-expected"
+            } else {
+                "fixture-temp-unexpected"
+            },
+        );
         let (store, base) = fixture();
+        stage("launcher");
         let child = launch(&store.resources, &store.inbox, store.profile.clone()).unwrap();
         Suspended::resume_thread(&child.thread).unwrap();
         let profile =
@@ -1716,12 +1967,35 @@ mod tests {
         // last Job handle. The external original test parent observes the child.
         std::process::exit(0);
     }
+    #[test]
+    #[ignore = "Requires prepared actual Windows x64 resources; observes actual supervisor exit"]
+    fn synthetic_actual_parent_exit_without_crypto() {
+        let (store, base) = fixture();
+        actual_parent_exit(&base);
+        drop(store);
+        assert_eq!(base.parent(), Some(std::env::temp_dir().as_path()));
+        assert!(
+            base.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("shixu synthetic ")
+        );
+        std::fs::remove_dir_all(base).unwrap();
+    }
     fn actual_parent_exit(base: &Path) {
         use std::os::windows::process::CommandExt;
         let executable = std::env::current_exe().unwrap();
         let _program_guard = open_handle(&executable, false, false, FILE_SHARE_READ).unwrap();
+        let temp_root = base.parent().unwrap();
+        assert_eq!(temp_root, std::env::temp_dir().as_path());
+        path_wide(temp_root).unwrap();
         let mut supervisor = std::process::Command::new(executable)
             .env_clear()
+            // This trusted test supervisor must create its own synthetic fixture.
+            // With an empty block Windows falls back to an unwritable system dir.
+            // The contained Node still gets only launcher_environment(), not these.
+            .env("TEMP", temp_root)
+            .env("TMP", temp_root)
             .current_dir(base)
             .args([
                 "vault::windows::tests::synthetic_parent_death_supervisor",
@@ -1745,8 +2019,16 @@ mod tests {
         }
         if !metadata_path.exists() {
             let _ = supervisor.kill();
-            let _ = supervisor.wait();
-            panic!("BLOCKED: actual parent-exit supervisor fixture failed");
+            let status = supervisor.wait().unwrap();
+            let stage =
+                std::fs::read_to_string(base.join("parent-death-stage")).unwrap_or_default();
+            let stage = match stage.as_str() {
+                "fixture-temp-expected" | "fixture-temp-unexpected" | "launcher" => stage.as_str(),
+                _ => "startup",
+            };
+            panic!(
+                "BLOCKED: actual parent-exit supervisor fixture failed: stage={stage} exit={status}"
+            );
         }
         let metadata: serde_json::Value =
             serde_json::from_slice(&std::fs::read(metadata_path).unwrap()).unwrap();
