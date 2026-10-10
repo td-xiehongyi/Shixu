@@ -6,7 +6,7 @@ use shixu_core::{
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use zeroize::Zeroizing;
@@ -76,6 +76,7 @@ impl ProtectedCache {
         #[cfg(unix)]
         {
             use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+            use std::path::Component;
             if !root.is_absolute()
                 || root.parent().is_none()
                 || root

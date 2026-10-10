@@ -465,7 +465,10 @@ pub(crate) fn check_directory(path: &Path) -> AppResult<()> {
 fn directory(path: &Path) -> AppResult<()> {
     check_directory(path.parent().ok_or(AppError::InvalidInput)?)?;
     if !path.exists() {
+        #[cfg(unix)]
         let mut builder = std::fs::DirBuilder::new();
+        #[cfg(not(unix))]
+        let builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
