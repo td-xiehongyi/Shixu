@@ -7,6 +7,7 @@ use shixu_core::{
     runtime::workers::ReceivePort,
 };
 use std::{
+    io::{self, Read, Write},
     net::{Shutdown, TcpStream},
     time::{Duration, Instant},
 };
@@ -18,9 +19,43 @@ use zeroize::Zeroizing;
 const FRAME_LIMIT: usize = 1024 * 1024;
 const CONNECT_LIMIT: Duration = Duration::from_secs(1);
 const POLL_LIMIT: Duration = Duration::from_millis(100);
+const IO_CHUNK_LIMIT: usize = 8192;
+/// Deadlines must be enforced inside tungstenite's frame-reading loop: endless
+/// nonfinal zero-payload continuations never reach the message-size limit.
+struct DeadlineTcpStream {
+    stream: TcpStream,
+    deadline: Instant,
+}
+impl DeadlineTcpStream {
+    fn check_deadline(&self) -> io::Result<()> {
+        if Instant::now() >= self.deadline {
+            Err(io::ErrorKind::WouldBlock.into())
+        } else {
+            Ok(())
+        }
+    }
+}
+impl Read for DeadlineTcpStream {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.check_deadline()?;
+        let limit = buffer.len().min(IO_CHUNK_LIMIT);
+        self.stream.read(&mut buffer[..limit])
+    }
+}
+impl Write for DeadlineTcpStream {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.check_deadline()?;
+        self.stream
+            .write(&buffer[..buffer.len().min(IO_CHUNK_LIMIT)])
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.check_deadline()?;
+        self.stream.flush()
+    }
+}
 #[derive(Default)]
 pub struct OneBotTextTransport {
-    socket: Option<WebSocket<TcpStream>>,
+    socket: Option<WebSocket<DeadlineTcpStream>>,
     config: Option<SourceConfig>,
     pending: Option<Delivery>,
 }
@@ -37,6 +72,7 @@ fn wire_error(error: Error) -> AppError {
 impl OneBotTextTransport {
     fn read_event(&mut self, deadline: Instant) -> AppResult<Option<serde_json::Value>> {
         let socket = self.socket.as_mut().ok_or(AppError::Disconnected)?;
+        socket.get_mut().deadline = deadline;
         loop {
             if Instant::now() >= deadline {
                 return Ok(None);
@@ -180,6 +216,7 @@ impl ReceiveTransport for OneBotTextTransport {
             .max_frame_size(Some(FRAME_LIMIT))
             .max_write_buffer_size(FRAME_LIMIT);
         let deadline = Instant::now() + CONNECT_LIMIT;
+        let stream = DeadlineTcpStream { stream, deadline };
         let mut handshake = tungstenite::client::client_with_config(request, stream, Some(limits));
         let socket = loop {
             match handshake {
@@ -210,9 +247,10 @@ impl ReceiveTransport for OneBotTextTransport {
     }
     fn disconnect(&mut self) -> AppResult<()> {
         if let Some(mut socket) = self.socket.take() {
+            socket.get_mut().deadline = Instant::now() + POLL_LIMIT;
             let _ = socket.close(None);
             let _ = socket.flush();
-            let _ = socket.get_mut().shutdown(Shutdown::Both);
+            let _ = socket.get_mut().stream.shutdown(Shutdown::Both);
         }
         self.config = None;
         self.pending = None;

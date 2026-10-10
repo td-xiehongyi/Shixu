@@ -395,3 +395,142 @@ fn trace_enabled_logger_never_receives_bearer_or_message_body() {
         "library logging exposed a bearer or private body"
     );
 }
+
+// Mature library encodes the valid nonfinal empty frames. The raw stream merely
+// sends batches faster than a frame parser can consume them, keeping TCP readable.
+fn fragment_flood_server(
+    identity_first: bool,
+) -> (
+    LoopbackEndpoint,
+    Arc<std::sync::atomic::AtomicBool>,
+    std::thread::JoinHandle<()>,
+) {
+    use std::{
+        io::Write,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+    use tungstenite::protocol::frame::{
+        Frame,
+        coding::{Data, OpCode},
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = LoopbackEndpoint::parse(&listener.local_addr().unwrap().to_string()).unwrap();
+    let running = Arc::new(AtomicBool::new(true));
+    let signal = running.clone();
+    let thread = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut ws = tungstenite::accept(stream).unwrap();
+        if identity_first {
+            ws.send(Message::Text(serde_json::json!({"self_id":42,"post_type":"meta_event","meta_event_type":"heartbeat"}).to_string().into())).unwrap();
+        }
+        let mut first = Vec::new();
+        Frame::message(Vec::new(), OpCode::Data(Data::Text), false)
+            .format(&mut first)
+            .unwrap();
+        let mut frame = Vec::new();
+        Frame::message(Vec::new(), OpCode::Data(Data::Continue), false)
+            .format(&mut frame)
+            .unwrap();
+        let batch = frame.repeat(32768);
+        let stream = ws.get_mut();
+        if stream.write_all(&first).is_err() {
+            return;
+        }
+        while signal.load(Ordering::SeqCst) {
+            if stream.write_all(&batch).is_err() {
+                break;
+            }
+        }
+    });
+    (endpoint, running, thread)
+}
+
+#[test]
+fn continuous_empty_fragments_cannot_extend_first_event_deadline() {
+    use std::sync::atomic::Ordering;
+    let (endpoint, running, server) = fragment_flood_server(false);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let client = std::thread::spawn(move || {
+        let at = Instant::now();
+        let error =
+            connected_onebot_receiver(endpoint, config(), token(), MessageStore::new(db()), || 0)
+                .err();
+        tx.send((error, at.elapsed())).unwrap();
+    });
+    let outcome = rx.recv_timeout(Duration::from_millis(1500));
+    running.store(false, Ordering::SeqCst);
+    server.join().unwrap();
+    client.join().unwrap();
+    let (error, elapsed) =
+        outcome.expect("first-event deadline must interrupt continuously readable fragments");
+    assert_eq!(error, Some(AppError::Disconnected));
+    assert!(elapsed < Duration::from_millis(1500));
+}
+
+#[test]
+fn continuous_empty_fragments_cannot_extend_poll_deadline() {
+    use std::sync::atomic::Ordering;
+    let (endpoint, running, server) = fragment_flood_server(true);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let client = std::thread::spawn(move || {
+        let mut receiver =
+            connected_onebot_receiver(endpoint, config(), token(), MessageStore::new(db()), || 0)
+                .unwrap();
+        let at = Instant::now();
+        let outcome = receiver.poll().map(|d| d.is_none());
+        tx.send((outcome, at.elapsed())).unwrap();
+        receiver.disconnect().unwrap();
+    });
+    let outcome = rx.recv_timeout(Duration::from_millis(500));
+    running.store(false, Ordering::SeqCst);
+    server.join().unwrap();
+    client.join().unwrap();
+    let (poll, elapsed) =
+        outcome.expect("poll deadline must interrupt continuously readable fragments");
+    assert_eq!(poll, Ok(true));
+    assert!(elapsed < Duration::from_millis(300));
+}
+
+#[test]
+fn continuous_empty_fragments_cannot_block_worker_stop() {
+    use std::sync::atomic::Ordering;
+    let (endpoint, running, server) = fragment_flood_server(true);
+    let db = db();
+    let c = config();
+    let receiver = connected_onebot_receiver(
+        endpoint,
+        c.clone(),
+        token(),
+        MessageStore::new(db.clone()),
+        || 0,
+    )
+    .unwrap();
+    let supervisor = Arc::new(Supervisor::new(
+        db,
+        Arc::new(ConsentStore::new(ModelConsent::default())),
+    ));
+    supervisor.start(vec![c]).unwrap();
+    let workers = supervisor
+        .spawn_workers(WorkerPorts {
+            receiver: Some(receiver),
+            ..Default::default()
+        })
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stop = std::thread::spawn(move || {
+        let at = Instant::now();
+        tx.send((workers.stop(), at.elapsed())).unwrap();
+    });
+    let outcome = rx.recv_timeout(Duration::from_millis(500));
+    running.store(false, Ordering::SeqCst);
+    server.join().unwrap();
+    stop.join().unwrap();
+    let (result, elapsed) =
+        outcome.expect("worker stop must complete while the fragment flood is still running");
+    assert_eq!(result, Ok(()));
+    assert!(elapsed < Duration::from_millis(500));
+}
