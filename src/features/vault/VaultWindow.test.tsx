@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { VaultWindow, type VaultPort } from "./VaultWindow";
@@ -676,6 +676,44 @@ it("detached_entry_controls_clear_existing_account_and_channel", async () => {
   await act(async () =>
     root.render(<EntryForm initial={rows[0]} onSave={async () => {}} />),
   );
+  const controls = [
+    ...host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      "input, textarea",
+    ),
+  ];
+  await act(async () => root.render(<div>closed</div>));
+  expect(controls.map((input) => input.value)).toEqual(["", "", ""]);
+});
+
+it("strictmode_replay_restores_defaults_preserves_exact_edit_and_clears_detached_controls", async () => {
+  const channel = ' 渠道\r单独\r\n换行/"\u0000 🗝️ ';
+  const account = ' 用户/"\u0000 🗝️ ';
+  const password = ' 新密码/"\u0000 🗝️ ';
+  let saved: { channel: string; account: string; password: string } | undefined;
+  await act(async () =>
+    root.render(
+      <StrictMode>
+        <EntryForm
+          initial={{ ...rows[0], channel, account }}
+          onSave={async (value) => {
+            saved = {
+              ...value,
+              password: new TextDecoder().decode(value.password),
+            };
+          }}
+        />
+      </StrictMode>,
+    ),
+  );
+  const channelInput =
+    host.querySelector<HTMLTextAreaElement>('[name="channel"]')!;
+  const accountInput =
+    host.querySelector<HTMLInputElement>('[name="account"]')!;
+  expect(channelInput.value).toBe(channel.replace(/\r\n?/g, "\n"));
+  expect(accountInput.value).toBe(account);
+  await fill("密码", password);
+  await click("保存条目");
+  expect(saved).toEqual({ channel, account, password });
   const controls = [
     ...host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
       "input, textarea",

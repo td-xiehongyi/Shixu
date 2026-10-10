@@ -73,3 +73,5 @@ QQ需要自己选择/配置许可合适的适配器、专用测试账号和获�
 
 
 2026-10-10 UI接线：原生独立有界actor持有VaultService和内部session，命令不返回session；lock先撤销代际并取消启动/在途helper，再清理。原生后台每100ms观察五分钟闲置，隐藏窗口亦执行；只有成功的vault命令或独立窗口显式activity刷新，日历/QQ和后台tick不能刷新。paste/drop/beforeinput在单行浏览器规范化之前拒绝主密码/确认/账号/密码的完整换行载荷；渠道使用textarea保留原换行。存储字段不额外拒绝NUL；IPC渠道/账号各4096 UTF-8字节，秘密64KiB且结构载荷预算64KiB（数字数组按保守成本计算），故有效载荷可能受更紧的总预算限制。任何原生操作错误保守锁定UI并清空条目/显示；本地提交前输入校验不调用引擎。JS不可变字符串、Tauri/库/allocator/swap副本无法保证抹除；拥有的字节数组与原生SecretBytes仅尽力清零。无剪贴板自动清空；复制和十份备份/恢复仍Unsupported。
+
+Windows启用前仍需完成实际IPC发布边界：现有原始session/epoch保护止于portable dispatch返回，后续Tauri resolver发布之前的锁库间隙尚未覆盖。必须在实际resolver提交时验证原始session/epoch并测试该间隙的锁库，再取得真实WebView/生命周期证据；当前Windows构造器Unsupported，不存在可达的真实秘密成功回复，不能凭Linux或UI迟到回复测试声称此门槛通过。

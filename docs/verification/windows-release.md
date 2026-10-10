@@ -69,6 +69,8 @@ wrapper 只调用指定二进制的校验命令，不构建、登录、发送、
 
 G1：用户已选择固定KdbxWeb2.1.1/hash-wasm4.12.0/Node26.11.1独立进程，资源预先校验，无自动安装或系统Node回退。Linux实际helper、VaultService有界actor、权限命令与独立UI已有虚构三字段/CRUD/换密/错密/篡改/外部冲突证据，稳定启动取消代际和后台idle保护均已接线。Windows构造器仍Unsupported，必须完成Job/token/resource/network/ACL/reparse/原子替换/GUI/资源性能等本机验证；不能将Linux验证视作Windows隔离。KeePassXC仅可作为未来可选独立GUI互操作检查，非运行组件要求。主密码/账号/密码禁止CR/LF/NEL/LS/PS，不trim，渠道保留换行；合法UTF8 protected字段可含NUL，剪贴板有单独NUL限制。十份备份恢复、真实剪贴板和OS会话/电源钩子仍阻断。Q1 OPEN及全部12发布门槛BLOCKED不变。
 
+Windows密码回复发布门槛仍未关闭：当前原始session/epoch校验只覆盖portable dispatcher及DTO转换返回；`runtime.rs`在dispatch返回后才执行`invoke.resolver.resolve(value)`，两者之间仍可能发生原生锁库。Windows构造器始终Unsupported，当前没有可达的真实秘密成功回复；启用前必须将原始session/epoch校验绑定到实际resolver提交，增加dispatch完成与发布之间锁库的受控回归，并取得真实WebView/生命周期证据。UI丢弃迟到回复不能替代此原生发布保证。
+
 G2：用户独立选择和配置合法许可的第三方 QQ 适配器、专用测试账号、授权专用测试群、群白名单及时区，并在自己的机器本地登录。当前 QQ wire/真实下载未实现；不存在可执行的 vault/QQ 验证专用脚本。完成实现后，测试至少 100 条已知合成群消息、8 小时后台，在线接收到持久化 P95 ≤5 秒、规则入历 P95 ≤10 秒；保留真实普通群送达、原件下载（图片/PDF/DOCX/XLSX）、断网/登录失效/重连/遗漏区间证据。心跳或已启动不等于普通群已验收，重连不自动证明缺失已补齐。此脚本不会替用户登录或发送测试消息。
 
 其他门槛：实际 Windows WebView IPC 权限隔离、托盘/退出、会话锁定/休眠/恢复、自启注册、第二进程聚焦；同/不同用户 DPAPI、ACL/reparse、保护缓存和只读输入交接；15 秒显示、复制后保留至用户覆盖/手动清除且计时/锁库/退出不自动清空、剪贴板历史/云同步排除和vault-only复制权限、5 分钟闲置锁库且后台不刷新；真实 parser Job Object 512 MiB/子进程限制/kill-on-close、无网络/无密码库、30 秒单图/120 秒单文件超时。whole_flow 要有自动事项来源证据、改期取消、人工覆盖、撤销、重启防重放及确认恢复观察，不能只有“打开成功”。这些 native 门槛目前均 OPEN。

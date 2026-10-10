@@ -21,6 +21,9 @@ export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
   useEffect(() => {
     alive.current = true;
     const element = form.current;
+    // StrictMode replays cleanup/setup on the same DOM; restore its defaults
+    // before capturing the browser-normalized baseline for exact channel edits.
+    element?.reset();
     mountedChannel.current =
       (element?.elements.namedItem("channel") as HTMLTextAreaElement | null)
         ?.value ?? null;
