@@ -10,3 +10,5 @@ mod windows_policy;
 
 #[cfg(windows)]
 mod windows;
+
+pub mod notifications;

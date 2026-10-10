@@ -11,7 +11,10 @@
 | 未实现/未接通，返回 Unsupported | Windows真实 VaultEngine隔离验收/本机秘密清理保证、十份KDBX备份与恢复、剪贴板真实Windows验收，QQ下载/登录重连，真实隔离parser进程/原生引擎/Windows保护缓存与输入交接；可选模型provider也未选定/未接通 |
 | QQ配置与纯文字生产接线已实现，仅合成验证 | 设置只写保护令牌、literal loopback地址、显式连接/断开与runtime receiver；同一保存/连接入口合成socket到Calendar已验证；单活动来源，保存/重启不自动连接，实际Windows/G2仍BLOCKED |
 | Windows cfg 已写但编译/运行未验收 | Tauri窗口/能力/命令注册、QQ配置/receiver实际Windows运行、运行时DPAPI目录/SQLite/备份协调、托盘和关闭/退出、owner文件实例排他 |
-| 实际钩子尚未实现 | Windows会话锁定/电源事件、自启注册、第二进程通知首进程并聚焦；owner文件锁不等于已有跨进程聚焦 |
+| 会话/电源钩子源码已实现，native cfg 类型检查通过 | retained-main WTS/电源 subclass、同一vault owner的原子代际屏障/有界dispatcher、原生锁库事件UI清理、工程ICO及198文件资源映射；真实Windows/完整桌面构建仍未验收 |
+| 实际钩子尚未实现 | 自启注册、第二进程通知首进程并聚焦；owner文件锁不等于已有跨进程聚焦 |
+
+最小 MSVC 构建、固定合成 probe 与手动不可用密码库的会话/电源观察步骤见 [Windows最小工作流](verification/windows-vault-lifecycle.md)。生产密码库保持Unsupported、Q1 OPEN、全部12门槛BLOCKED。
 
 部分算法有真实受控本地fixture引擎试验，但生产 host 仍 Unsupported，也没有通过Windows资源隔离。默认bundle关闭，尚无安装包。浏览器仅演示页面；本地数据库和功能必须通过真实Windows IPC/runtime运行才算产品集成。当前生产密码操作不可用，不要输入真实密码以“试一试”。
 

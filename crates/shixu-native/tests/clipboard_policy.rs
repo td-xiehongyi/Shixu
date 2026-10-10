@@ -298,3 +298,61 @@ fn windows_synthetic_unicode_and_exclusion_formats_are_published() {
     }
     // Deliberately no clearing: manually overwrite/clear using another application.
 }
+
+#[test]
+fn lifecycle_revoked_during_preparation_preserves_previous_clipboard() {
+    use std::cell::Cell;
+    struct Revoking<'a> {
+        inner: Synthetic,
+        admitted: &'a Cell<bool>,
+        revoke_on_open: bool,
+    }
+    impl Backend for Revoking<'_> {
+        type Buffer = usize;
+        fn prepare(&mut self, f: Format, bytes: &[u8]) -> AppResult<usize> {
+            let result = self.inner.prepare(f, bytes);
+            if f == Format::UnicodeText && !self.revoke_on_open {
+                self.admitted.set(false);
+            }
+            result
+        }
+        fn open(&mut self) -> AppResult<()> {
+            if self.revoke_on_open {
+                self.admitted.set(false);
+            }
+            self.inner.open()
+        }
+        fn empty(&mut self) -> AppResult<()> {
+            self.inner.empty()
+        }
+        fn publish(&mut self, b: &mut usize) -> AppResult<()> {
+            self.inner.publish(b)
+        }
+        fn close(&mut self) -> AppResult<()> {
+            self.inner.close()
+        }
+    }
+    for revoke_on_open in [false, true] {
+        let admitted = Cell::new(true);
+        let mut backend = Revoking {
+            inner: Synthetic {
+                old_present: true,
+                ..Default::default()
+            },
+            admitted: &admitted,
+            revoke_on_open,
+        };
+        assert_eq!(
+            publication::write_checked(&mut backend, secret(b"synthetic"), &|| if admitted.get() {
+                Ok(())
+            } else {
+                Err(AppError::Locked)
+            }),
+            Err(AppError::Locked)
+        );
+        assert!(backend.inner.old_present);
+        assert!(backend.inner.published.is_empty());
+        assert!(!backend.inner.calls.contains(&"empty"));
+        assert_eq!(backend.inner.calls.last(), Some(&"close"));
+    }
+}

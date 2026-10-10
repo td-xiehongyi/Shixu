@@ -1,5 +1,6 @@
 //! Native-only single service owner. Epoch revocation and cancellation never wait
 //! for the worker's blocking engine operation. No session capability crosses IPC.
+pub use crate::vault_signal::{NativeVaultEvent, VaultEventSignal};
 use shixu_core::{
     contracts::{
         AppResult,
@@ -22,6 +23,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
+type LifecycleHandler = Arc<dyn Fn(NativeVaultEvent) + Send + Sync>;
 const DEADLINE: Duration = Duration::from_secs(35);
 const IDLE: Duration = Duration::from_secs(300);
 #[derive(serde::Deserialize)]
@@ -49,12 +51,14 @@ pub enum Reply {
     Copy(SecretBytes),
 }
 struct Request {
+    generation: u64,
     epoch: u64,
     op: Operation,
     cancel: VaultCancellation,
     reply: SyncSender<(AppResult<Reply>, Option<SessionId>)>,
 }
 struct Authority {
+    generation: u64,
     epoch: u64,
     unlocked: bool,
     session: Option<SessionId>,
@@ -62,6 +66,13 @@ struct Authority {
     cancel: VaultCancellation,
 }
 impl Authority {
+    fn synchronize(&mut self, signal: &VaultEventSignal) {
+        let generation = signal.generation();
+        if self.generation != generation {
+            self.revoke();
+            self.generation = generation;
+        }
+    }
     fn revoke(&mut self) {
         self.epoch += 1;
         self.unlocked = false;
@@ -79,18 +90,27 @@ impl Authority {
 /// No serialization or publication occurs until publish holds the authority gate.
 pub struct PendingDelivery<'a> {
     controller: &'a VaultController,
+    generation: u64,
     epoch: u64,
     session: Option<SessionId>,
     reply: Reply,
 }
 impl PendingDelivery<'_> {
     pub fn publish<T>(self, publish: impl FnOnce(Reply) -> AppResult<T>) -> AppResult<T> {
+        self.publish_checked(|reply, _check| publish(reply))
+    }
+    pub fn publish_checked<T>(
+        self,
+        publish: impl FnOnce(Reply, &dyn Fn() -> AppResult<()>) -> AppResult<T>,
+    ) -> AppResult<T> {
         let mut a = self
             .controller
             .authority
             .lock()
             .map_err(|_| AppError::Locked)?;
         a.expire();
+        let check = || self.controller.signal.check(self.generation);
+        check()?;
         if a.epoch != self.epoch || a.session != self.session {
             return Err(AppError::Locked);
         }
@@ -101,14 +121,15 @@ impl PendingDelivery<'_> {
                         .clipboard
                         .lock()
                         .map_err(|_| AppError::Unsupported)?
-                        .write(secret)?;
+                        .write_checked(secret, &check)?;
                     Reply::Unit
                 }
                 reply => reply,
             };
-            publish(reply)
+            check()?;
+            publish(reply, &check)
         })();
-        if result.is_err() {
+        if result.is_err() && self.controller.signal.generation() == self.generation {
             a.revoke();
         }
         result
@@ -120,6 +141,8 @@ pub struct VaultController {
     stop: Arc<AtomicBool>,
     threads: Mutex<Vec<JoinHandle<()>>>,
     clipboard: Mutex<Box<dyn ClipboardPort + Send>>,
+    signal: Arc<VaultEventSignal>,
+    lifecycle_handler: Arc<Mutex<Option<LifecycleHandler>>>,
 }
 impl VaultController {
     /// Missing or unsupported resources produce a locked unavailable controller;
@@ -151,8 +174,11 @@ impl VaultController {
         arm: Arc<Mutex<VaultCancellation>>,
         clipboard: impl ClipboardPort + Send + 'static,
     ) -> Arc<Self> {
+        let (wake, wake_rx) = mpsc::sync_channel(1);
+        let signal = Arc::new(VaultEventSignal::new(wake));
         let (queue, rx) = mpsc::sync_channel::<Request>(1);
         let authority = Arc::new(Mutex::new(Authority {
+            generation: 0,
             epoch: 0,
             unlocked: false,
             session: None,
@@ -162,6 +188,7 @@ impl VaultController {
         let stop = Arc::new(AtomicBool::new(false));
         let gate = authority.clone();
         let stopping = stop.clone();
+        let worker_signal = signal.clone();
         let worker = thread::spawn(move || {
             let origin = Instant::now();
             let now = || origin.elapsed().as_millis().min(i64::MAX as u128) as i64;
@@ -172,6 +199,7 @@ impl VaultController {
             while !stopping.load(Ordering::Acquire) {
                 let current = match gate.lock() {
                     Ok(mut a) => {
+                        a.synchronize(&worker_signal);
                         a.expire();
                         a.epoch
                     }
@@ -189,7 +217,8 @@ impl VaultController {
                     Err(mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(_) => break,
                 };
-                let admitted = gate.lock().is_ok_and(|a| a.epoch == request.epoch);
+                let admitted = worker_signal.check(request.generation).is_ok()
+                    && gate.lock().is_ok_and(|a| a.epoch == request.epoch);
                 if !admitted {
                     let _ = request.reply.send((Err(AppError::Locked), None));
                     continue;
@@ -279,8 +308,11 @@ impl VaultController {
                     Ok(a) => a,
                     Err(_) => break,
                 };
+                a.synchronize(&worker_signal);
                 a.expire();
-                let result = if a.epoch != request.epoch {
+                let result = if a.epoch != request.epoch
+                    || worker_signal.check(request.generation).is_err()
+                {
                     Err(AppError::Locked)
                 } else {
                     result
@@ -318,13 +350,90 @@ impl VaultController {
                 thread::sleep(Duration::from_millis(100));
             }
         });
+        let lifecycle_handler = Arc::new(Mutex::new(None::<LifecycleHandler>));
+        let handler = lifecycle_handler.clone();
+        let dispatch_signal = signal.clone();
+        let gate = authority.clone();
+        let stopping = stop.clone();
+        let dispatcher = thread::spawn(move || {
+            struct Consumer(Arc<VaultEventSignal>);
+            impl Drop for Consumer {
+                fn drop(&mut self) {
+                    self.0.fail();
+                }
+            }
+            let _consumer = Consumer(dispatch_signal.clone());
+            let mut power_suspended = false;
+            while !stopping.load(Ordering::Acquire) {
+                match wake_rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(_) => break,
+                }
+                let pending = dispatch_signal.take_pending();
+                if pending == 0 {
+                    continue;
+                }
+                // UI redaction does not wait for cancellation/engine ownership.
+                let callback = handler.lock().ok().and_then(|h| h.clone());
+                if let Some(callback) = &callback {
+                    callback(NativeVaultEvent::Revoked);
+                }
+                if pending & 8 != 0
+                    && let Some(callback) = &callback
+                {
+                    callback(NativeVaultEvent::SessionLocked);
+                }
+                if pending & 16 != 0
+                    && let Some(callback) = &callback
+                {
+                    callback(NativeVaultEvent::SessionUnlocked);
+                }
+                if pending & 32 != 0
+                    && let Some(callback) = &callback
+                {
+                    callback(NativeVaultEvent::WindowClosed);
+                }
+                if let Ok(mut a) = gate.lock() {
+                    a.synchronize(&dispatch_signal);
+                } else {
+                    break;
+                }
+                if pending & 2 != 0 && !power_suspended {
+                    if let Some(callback) = &callback {
+                        callback(NativeVaultEvent::Suspend);
+                    }
+                    power_suspended = true;
+                }
+                if pending & 6 != 0 && !dispatch_signal.suspended() && power_suspended {
+                    if let Some(callback) = &callback {
+                        callback(NativeVaultEvent::Resume);
+                    }
+                    power_suspended = false;
+                }
+            }
+        });
         Arc::new(Self {
             queue,
+            signal,
+            lifecycle_handler,
             clipboard: Mutex::new(Box::new(clipboard)),
             authority,
             stop,
-            threads: Mutex::new(vec![worker, ticker]),
+            threads: Mutex::new(vec![worker, ticker, dispatcher]),
         })
+    }
+    pub fn set_lifecycle_handler(
+        &self,
+        handler: Arc<dyn Fn(NativeVaultEvent) + Send + Sync>,
+    ) -> AppResult<()> {
+        *self
+            .lifecycle_handler
+            .lock()
+            .map_err(|_| AppError::Locked)? = Some(handler);
+        Ok(())
+    }
+    pub fn signal(&self) -> Arc<VaultEventSignal> {
+        self.signal.clone()
     }
     pub fn execute(&self, op: Operation) -> AppResult<Reply> {
         self.deliver(op, Ok)
@@ -336,10 +445,20 @@ impl VaultController {
     ) -> AppResult<T> {
         self.prepare(op)?.publish(deliver)
     }
+    pub fn deliver_checked<T>(
+        &self,
+        op: Operation,
+        deliver: impl FnOnce(Reply, &dyn Fn() -> AppResult<()>) -> AppResult<T>,
+    ) -> AppResult<T> {
+        self.prepare(op)?.publish_checked(deliver)
+    }
     pub fn prepare(&self, op: Operation) -> AppResult<PendingDelivery<'_>> {
         let (reply, rx) = mpsc::sync_channel(1);
         let mut a = self.authority.lock().map_err(|_| AppError::Locked)?;
+        a.synchronize(&self.signal);
         a.expire();
+        let generation = self.signal.generation();
+        self.signal.check(generation)?;
         let startup = matches!(op, Operation::Create(_) | Operation::Unlock(_));
         let locking = matches!(op, Operation::Lock(_));
         if startup || locking {
@@ -352,6 +471,7 @@ impl VaultController {
         let epoch = a.epoch;
         self.queue
             .try_send(Request {
+                generation,
                 epoch,
                 op,
                 cancel: a.cancel.clone(),
@@ -371,6 +491,7 @@ impl VaultController {
         let (result, session) = response?;
         Ok(PendingDelivery {
             controller: self,
+            generation,
             epoch,
             session,
             reply: result?,
@@ -378,6 +499,23 @@ impl VaultController {
     }
     pub fn lock(&self, reason: LockReason) -> AppResult<()> {
         self.execute(Operation::Lock(reason)).map(|_| ())
+    }
+    /// Orderly shutdown is outside the OS notification callback. It releases
+    /// handler ownership and waits for actual service/engine cleanup.
+    pub fn shutdown(&self) {
+        self.signal.fail();
+        self.stop.store(true, Ordering::Release);
+        if let Ok(mut handler) = self.lifecycle_handler.lock() {
+            *handler = None;
+        }
+        if let Ok(mut a) = self.authority.lock() {
+            a.revoke();
+        }
+        if let Ok(mut threads) = self.threads.lock() {
+            for thread in threads.drain(..) {
+                let _ = thread.join();
+            }
+        }
     }
     pub fn tick(&self) -> AppResult<()> {
         self.authority
@@ -389,15 +527,7 @@ impl VaultController {
 }
 impl Drop for VaultController {
     fn drop(&mut self) {
-        if let Ok(mut a) = self.authority.lock() {
-            a.revoke();
-        }
-        self.stop.store(true, Ordering::Release);
-        if let Ok(threads) = self.threads.get_mut() {
-            for thread in threads.drain(..) {
-                let _ = thread.join();
-            }
-        }
+        self.shutdown();
     }
 }
 impl crate::lifecycle::VaultLifecycle for VaultController {
@@ -633,6 +763,87 @@ mod tests {
             })
             .unwrap();
         assert_eq!(submitted, 1);
+    }
+
+    #[test]
+    fn lifecycle_barrier_returns_during_blocked_reveal_and_requires_fresh_unlock() {
+        let (started, ready) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let c = controller(Controlled {
+            fail_startup: false,
+            startup: None,
+            reveal: Some((started, wait)),
+        });
+        c.execute(Operation::Unlock(master())).unwrap();
+        let old = c.clone();
+        let old = thread::spawn(move || old.execute(Operation::Reveal(SELECTED.into())));
+        ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        let began = Instant::now();
+        c.signal().notify(NativeVaultEvent::SessionLocked);
+        assert!(began.elapsed() < Duration::from_millis(100));
+        let blocked = c.signal().check(c.signal().generation());
+        release.send(()).unwrap();
+        let old_result = old.join().unwrap();
+        assert_eq!(blocked, Err(AppError::Locked));
+        assert!(matches!(
+            c.execute(Operation::Unlock(master())),
+            Err(AppError::Locked)
+        ));
+        assert!(matches!(old_result, Err(AppError::Locked)));
+        c.signal().notify(NativeVaultEvent::SessionUnlocked);
+        assert!(matches!(c.execute(Operation::List), Err(AppError::Locked)));
+        c.execute(Operation::Unlock(master())).unwrap();
+        assert!(c.execute(Operation::List).is_ok());
+    }
+    #[test]
+    fn lifecycle_after_serialization_prevents_actual_submission() {
+        let c = controller(Controlled {
+            fail_startup: false,
+            startup: None,
+            reveal: None,
+        });
+        c.execute(Operation::Unlock(master())).unwrap();
+        let pending = c.prepare(Operation::Reveal(SELECTED.into())).unwrap();
+        let mut submitted = false;
+        assert_eq!(
+            pending.publish_checked(|reply, check| {
+                let Reply::Secret(secret) = reply else {
+                    panic!("secret expected")
+                };
+                let _serialized = serde_json::to_vec(secret.expose()).unwrap();
+                c.signal().notify(NativeVaultEvent::SessionLocked);
+                check()?;
+                submitted = true;
+                Ok(())
+            }),
+            Err(AppError::Locked)
+        );
+        assert!(!submitted);
+    }
+    #[test]
+    fn lifecycle_invalidates_blocked_startup_and_disabled_consumer_stays_closed() {
+        let (started, ready) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let c = controller(Controlled {
+            fail_startup: false,
+            startup: Some((started, wait)),
+            reveal: None,
+        });
+        let old = c.clone();
+        let old = thread::spawn(move || old.execute(Operation::Unlock(master())));
+        ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        c.signal().notify(NativeVaultEvent::Suspend);
+        c.signal().notify(NativeVaultEvent::Resume);
+        release.send(()).unwrap();
+        assert!(matches!(old.join().unwrap(), Err(AppError::Locked)));
+        assert!(matches!(c.execute(Operation::List), Err(AppError::Locked)));
+        c.execute(Operation::Unlock(master())).unwrap();
+        c.signal().fail();
+        c.signal().notify(NativeVaultEvent::SessionUnlocked);
+        assert!(matches!(
+            c.execute(Operation::Unlock(master())),
+            Err(AppError::Locked)
+        ));
     }
 
     const SELECTED: &str = "11111111-1111-4111-8111-111111111111";

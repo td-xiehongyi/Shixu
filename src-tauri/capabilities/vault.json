@@ -12,6 +12,8 @@
     "allow-vault-activity",
     "allow-vault-apply",
     "allow-vault-reveal",
-    "allow-vault-lock"
+    "allow-vault-lock",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

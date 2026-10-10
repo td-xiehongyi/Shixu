@@ -27,4 +27,5 @@ tauri = { version = "=2.12.2", default-features = false, features = ["wry", "com
 tauri-build = "=2.7.1"
 
 [dev-dependencies]
+tauri-utils = { version = "=2.10.1", features = ["resources"] }
 tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }

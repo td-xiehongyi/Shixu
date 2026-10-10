@@ -9,3 +9,5 @@ pub mod lifecycle;
 pub mod release;
 
 pub mod vault;
+
+mod vault_signal;

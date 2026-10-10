@@ -176,8 +176,14 @@ impl Backend for Windows {
     }
 }
 pub(super) fn write(value: SecretBytes) -> AppResult<()> {
+    write_checked(value, &|| Ok(()))
+}
+pub(super) fn write_checked(
+    value: SecretBytes,
+    check: &dyn Fn() -> AppResult<()>,
+) -> AppResult<()> {
     let mut backend = Windows::new()?;
-    let result = publication::write(&mut backend, value);
+    let result = publication::write_checked(&mut backend, value, check);
     // Return cleanup errors even after successful publication. Do not roll back.
     let finished = backend.finish();
     result.and(finished)

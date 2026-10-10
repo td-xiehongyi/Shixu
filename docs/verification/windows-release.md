@@ -103,3 +103,5 @@ N5：冻结 DOCX25/XLSX25 全部保留（包括安全拒绝/复杂格式/unsuppo
 | XLSX入历 |4/3/9|57.14%/30.77%|
 
 含糊日期猜测0；全格式质量仍 OPEN。这些低召回/精度问题、真实引擎和 Windows 集成需要实际实现或明确设计修订，用户安装组件本身无法修复。云端通过、portable 独立审阅通过、构建身份报告生成，均不意味着首版可使用真实密码或已完成发布验收。
+
+2026-10-10 Stage C source wiring: retained-main WTS/session and power subclass hooks, same-controller atomic lifecycle barrier with bounded deferred cleanup, actual clipboard EmptyClipboard/Tauri resolver final checks, native-only targeted vault_locked UI redaction, deterministic ICO and exact198-file resource map are implemented. Actual Windows execution remains unaccepted and production Unsupported. The executable minimum MSVC workflow and manual unavailable-vault observation are documented in [windows-vault-lifecycle.md](windows-vault-lifecycle.md); all12 gates stay BLOCKED and Q1 OPEN.

@@ -4,6 +4,7 @@
 
 - [使用与Windows准备说明](docs/user-guide-v0.1.md)
 - [Windows发布门槛、证据格式及阻断项](docs/verification/windows-release.md)
+- [Windows最小MSVC构建、合成vault probe与会话/电源观察](docs/verification/windows-vault-lifecycle.md)
 
 在仓库根（Rust 1.99.0、pnpm 11.19.0、已有依赖/测试组件）运行：
 

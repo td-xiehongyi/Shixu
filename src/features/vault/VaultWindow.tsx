@@ -1,3 +1,5 @@
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LockSimple } from "@phosphor-icons/react/dist/csr/LockSimple";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
@@ -14,7 +16,23 @@ import { guardForm, newline, newlineMessage } from "./inputGuard";
 export type VaultPort = ReturnType<typeof createVaultBridge>;
 const nativePort = createVaultBridge(desktopInvoke);
 /** Injection is for controlled UI tests. App always uses nativePort; no demo unlock. */
-export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
+export type LockedSubscription = (callback: () => void) => Promise<() => void>;
+const subscribeNativeLocked: LockedSubscription = async (callback) => {
+  if (!isTauri()) return () => {};
+  const remove = await listen("vault_locked", () => callback(), {
+    target: { kind: "WebviewWindow", label: "vault" },
+  });
+  return () => {
+    void Promise.resolve(remove()).catch(() => {});
+  };
+};
+export function VaultWindow({
+  port = nativePort,
+  subscribeLocked = subscribeNativeLocked,
+}: {
+  port?: VaultPort;
+  subscribeLocked?: LockedSubscription;
+}) {
   const [state, setState] = useState<"locked" | "unlocking" | "unlocked">(
     "locked",
   );
@@ -143,6 +161,27 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
       void port.vaultLock().catch(() => {});
     };
   }, [port, clearLocal]);
+  useEffect(() => {
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+    void subscribeLocked(() => {
+      if (active && mounted.current) clearLocal();
+    })
+      .then((remove) => {
+        if (active) unsubscribe = remove;
+        else remove();
+      })
+      .catch(() => {
+        if (active && mounted.current) {
+          clearLocal();
+          void port.vaultLock().catch(() => {});
+        }
+      });
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [subscribeLocked, clearLocal, port]);
   async function authenticate(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;

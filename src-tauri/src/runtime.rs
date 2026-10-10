@@ -1,5 +1,6 @@
 //! Windows-only native adapter. Actual WebView IPC acceptance still requires Windows D7.
 use crate::lifecycle::{DesktopLifecycle, Lifecycle, LifecycleEvent};
+use crate::vault::NativeVaultEvent;
 use crate::{
     app_state::AppState,
     commands::{self, CallingContext},
@@ -12,7 +13,9 @@ use shixu_core::{
         workers::{BackgroundWorkers, WorkerPorts},
     },
 };
+use shixu_native::vault::notifications::windows as vault_notifications;
 use std::sync::{Arc, Mutex};
+use tauri::Emitter;
 struct NativeWorkers(Mutex<Option<BackgroundWorkers>>);
 struct InstanceOwner {
     _file: std::fs::File,
@@ -46,6 +49,19 @@ impl DesktopLifecycle for NativeDesktop {
         Ok(())
     }
 }
+fn close_notifications(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main")
+        && let Ok(hwnd) = window.hwnd()
+    {
+        // SAFETY: exit callback runs on owning UI thread, before main destruction.
+        if unsafe { vault_notifications::uninstall(hwnd.0) }.is_err()
+            && let Some(state) = app.try_state::<AppState>()
+        {
+            state.vault().signal().fail();
+            eprintln!("SHIXU_VAULT_LIFECYCLE cleanup=failed availability=blocked");
+        }
+    }
+}
 fn stop_workers(app: &tauri::AppHandle) {
     if let Some(workers) = app.try_state::<NativeWorkers>()
         && let Ok(mut workers) = workers.0.lock()
@@ -75,11 +91,27 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
                 let _ = NativeDesktop(app.clone()).focus_main();
             }
             "exit" => {
-                stop_workers(app);
-                if let Some(lifecycle) = app.try_state::<Lifecycle>() {
-                    let _ = lifecycle.handle_lifecycle(LifecycleEvent::Exit, 0);
-                } else {
-                    app.exit(0);
+                let handle = app.clone();
+                if app
+                    .run_on_main_thread(move || {
+                        close_notifications(&handle);
+                        if let Some(state) = handle.try_state::<AppState>() {
+                            state.vault().shutdown();
+                        }
+                        stop_workers(&handle);
+                        if let Some(lifecycle) = handle.try_state::<Lifecycle>() {
+                            let _ = lifecycle.handle_lifecycle(LifecycleEvent::Exit, 0);
+                        } else {
+                            handle.exit(0);
+                        }
+                    })
+                    .is_err()
+                {
+                    if let Some(state) = app.try_state::<AppState>() {
+                        state.vault().signal().fail();
+                    }
+                    eprintln!("SHIXU_VAULT_LIFECYCLE cleanup_schedule=failed availability=blocked");
+                    app.exit(1);
                 }
             }
             _ => {}
@@ -147,14 +179,79 @@ pub fn run() {
                     desktop: Arc::new(NativeDesktop(app.handle().clone())),
                 });
             }
+            let vault = state.vault();
+            let signal = vault.signal();
+            signal.require_registration();
+            let handle = app.handle().clone();
+            let supervisor = state.runtime().ok();
+            let redaction_signal = signal.clone();
+            vault.set_lifecycle_handler(Arc::new(move |event| {
+                eprintln!("SHIXU_VAULT_LIFECYCLE deferred={event:?} production=Unsupported");
+                match event {
+                    NativeVaultEvent::Revoked => {
+                        if let Some(window) = handle.get_webview_window("vault") {
+                            // Fixed empty native event; never a session/secret payload.
+                            if window.emit_to(tauri::EventTarget::webview_window("vault"), "vault_locked", ()).is_err() {
+                                redaction_signal.fail();
+                                eprintln!("SHIXU_VAULT_LIFECYCLE redaction_submit=failed availability=blocked");
+                            }
+                        }
+                    }
+                    NativeVaultEvent::Suspend => {
+                        if let Some(s) = &supervisor {
+                            let _ = s.suspend(0);
+                        }
+                    }
+                    NativeVaultEvent::Resume => {
+                        if let Some(s) = &supervisor {
+                            let _ = s.resume();
+                        }
+                    }
+                    _ => {}
+                }
+            }))?;
             app.manage(state);
             install_tray(app)?;
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("拾序")
                 .inner_size(1487.0, 1058.0)
                 .min_inner_size(760.0, 600.0)
                 .on_navigation(local_url)
                 .build()?;
+            let install_window = main.clone();
+            let failed_signal = signal.clone();
+            // Tauri queues on the owning UI thread; raw HWND is fetched there.
+            if main
+                .run_on_main_thread(move || {
+                    let result = install_window
+                        .hwnd()
+                        .map_err(|_| AppError::Unsupported)
+                        .and_then(|hwnd| {
+                            let notify_signal = signal.clone();
+                            let fail_signal = signal.clone();
+                            // SAFETY: retained actual top-level window, owning UI thread.
+                            unsafe {
+                                vault_notifications::install(
+                                    hwnd.0,
+                                    Arc::new(move |e| notify_signal.notify(e)),
+                                    Arc::new(move || fail_signal.fail()),
+                                )
+                            }
+                        });
+                    if result.is_ok() {
+                        signal.registration_ready();
+                        eprintln!(
+                            "SHIXU_VAULT_LIFECYCLE registration=ready production=Unsupported"
+                        );
+                    } else {
+                        signal.fail();
+                        eprintln!("SHIXU_VAULT_LIFECYCLE registration=failed availability=blocked");
+                    }
+                })
+                .is_err()
+            {
+                failed_signal.fail();
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -162,11 +259,22 @@ pub fn run() {
                 && let tauri::WindowEvent::CloseRequested { api, .. } = event
             {
                 api.prevent_close();
-                if let Some(lifecycle) = window.app_handle().try_state::<Lifecycle>() {
-                    let _ = lifecycle.handle_lifecycle(LifecycleEvent::WindowClose, 0);
-                } else {
-                    let _ = window.hide();
+                if let Some(state) = window.app_handle().try_state::<AppState>() {
+                    state
+                        .vault()
+                        .signal()
+                        .notify(NativeVaultEvent::WindowClosed);
                 }
+                let _ = window.hide();
+            }
+            if window.label() == "vault"
+                && matches!(event, tauri::WindowEvent::CloseRequested { .. })
+                && let Some(state) = window.app_handle().try_state::<AppState>()
+            {
+                state
+                    .vault()
+                    .signal()
+                    .notify(NativeVaultEvent::WindowClosed);
             }
         })
         .invoke_handler(|invoke| {
@@ -189,12 +297,12 @@ pub fn run() {
                     // Boundary size check is structural, avoiding extra plaintext serialization.
                     crate::commands::validate_command_size(command, payload)?;
                     let state = view.state::<AppState>();
-                    commands::dispatch_published(
+                    commands::dispatch_guarded(
                         &context,
                         command,
                         payload.clone(),
                         &state,
-                        |value| {
+                        |value, check| {
                             if command == "show_vault_window" {
                                 if let Some(window) = view.app_handle().get_webview_window("vault")
                                 {
@@ -217,6 +325,7 @@ pub fn run() {
                             // this remains inside the original vault publication guard.
                             let body = tauri::ipc::IpcResponse::body(value)
                                 .map_err(|_| AppError::Unsupported)?;
+                            check()?; // after actual IpcResponse serialization, before resolver consumption
                             resolver
                                 .take()
                                 .ok_or(AppError::Disconnected)?
@@ -237,6 +346,10 @@ pub fn run() {
         .expect("desktop runtime failed")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                close_notifications(app);
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.vault().shutdown();
+                }
                 stop_workers(app);
             }
         });

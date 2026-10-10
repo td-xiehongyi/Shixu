@@ -1,6 +1,6 @@
 # Windows 合成 vault 边界执行
 
-Stage B 新增私有 Windows launcher/store 和固定的原生测试，公开 `KdbxWebEngine::prepared` **仍返回 Unsupported**。Linux crypto 测试、GNU Windows cfg/type/lint 和源码中存在测试，都不证明 AppContainer/Job/ACL/MIC 或 MSVC 实际运行通过。Q1 OPEN、全部12发布门槛 BLOCKED；会话/电源通知、图标、桌面资源打包属于后续独立阶段。
+Stage B 新增私有 Windows launcher/store 和固定的原生测试，公开 `KdbxWebEngine::prepared` **仍返回 Unsupported**。Linux crypto 测试、GNU Windows cfg/type/lint 和源码中存在测试，都不证明 AppContainer/Job/ACL/MIC 或 MSVC 实际运行通过。Q1 OPEN、全部12发布门槛 BLOCKED；Stage C 已实现 retained-main WTS/电源钩子、原生代际屏障、工程 ICO 和精确资源映射；真实 Windows通知/链接/桌面运行仍未验收。完整最小工作流见 [windows-vault-lifecycle.md](windows-vault-lifecycle.md)。
 
 只用脚本自己创建的全新临时目录、固定虚构密码和仓库审核的资源；不传真实库、凭据、程序、路径、能力或环境覆盖。标准用户执行，不改防火墙/loopback 豁免，不登录 QQ，不自动安装组件，不启用生产引擎。
 
@@ -43,3 +43,5 @@ Launcher 使用 regular 零能力 AppContainer、验证 low token、suspended-st
 第二真实身份、物理断电、真实磁盘满仍单列 BLOCKED；普通权限/Job/网络失败不会增大上限、加能力/广泛ACL、改防火墙或偷偷回退。regular AppContainer 仍可访问共用系统和自身 profile 表面，不承诺 LPAC/全 registry 禁止。文件 share guard 和 cooperating lease 不构成同用户恶意 rename CAS；ReplaceFile 路径调用存在释放 guard 后的竞态，不承诺 Windows directory fsync 或物理断电安全。SACL/DACL 检查失败即拒绝；仅 inbox helper-created 继承的精确低-MIC ACL 可以无 protected 标志，private active/checkpoint 均必须 protected。
 
 本 runner 尚无实际 Windows结果；独立源码审核、实际 OS运行和剩余验收缺口解决前不能开启生产。原生复制命令已在 Stage A 经 epoch/session guard 接到 SystemClipboard，但真实 Windows/历史与云排除仍未验收。只有 master/current/new/confirmation 和存储PASSWORD禁换行，ACCOUNT/CHANNEL保留原先字符，不恢复旧的账号禁令。
+
+2026-10-10 Stage C source wiring: retained-main WTS/session and power subclass hooks, same-controller atomic lifecycle barrier with bounded deferred cleanup, actual clipboard EmptyClipboard/Tauri resolver final checks, native-only targeted vault_locked UI redaction, deterministic ICO and exact198-file resource map are implemented. Actual Windows execution remains unaccepted and production Unsupported. The executable minimum MSVC workflow and manual unavailable-vault observation are documented in [windows-vault-lifecycle.md](windows-vault-lifecycle.md); all12 gates stay BLOCKED and Q1 OPEN.

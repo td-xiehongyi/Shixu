@@ -5,6 +5,15 @@ use shixu_core::contracts::{AppResult, error::AppError, vault::SecretBytes};
 /// Windows history/cloud exclusions are written but require native acceptance.
 pub trait ClipboardPort {
     fn write(&mut self, value: SecretBytes) -> AppResult<()>;
+    /// Native predicate; never exposed to WebView callers.
+    fn write_checked(
+        &mut self,
+        value: SecretBytes,
+        check: &dyn Fn() -> AppResult<()>,
+    ) -> AppResult<()> {
+        check()?;
+        self.write(value)
+    }
 }
 /// Borrow the clipboard only for this write; retain no ownership/cleanup token.
 pub fn copy(port: &mut impl ClipboardPort, value: SecretBytes) -> AppResult<()> {
@@ -13,6 +22,21 @@ pub fn copy(port: &mut impl ClipboardPort, value: SecretBytes) -> AppResult<()> 
 /// No browser fallback. Windows source is written, not runtime accepted.
 pub struct SystemClipboard;
 impl ClipboardPort for SystemClipboard {
+    fn write_checked(
+        &mut self,
+        value: SecretBytes,
+        check: &dyn Fn() -> AppResult<()>,
+    ) -> AppResult<()> {
+        #[cfg(windows)]
+        {
+            win32::write_checked(value, check)
+        }
+        #[cfg(not(windows))]
+        {
+            check()?;
+            self.write(value)
+        }
+    }
     fn write(&mut self, value: SecretBytes) -> AppResult<()> {
         #[cfg(windows)]
         {
@@ -49,6 +73,13 @@ pub mod publication {
     /// All preparation precedes destructive emptying. Later failures can lose the
     /// previous content or leave exclusions/text published; never roll back.
     pub fn write<B: Backend>(backend: &mut B, value: SecretBytes) -> AppResult<()> {
+        write_checked(backend, value, &|| Ok(()))
+    }
+    pub fn write_checked<B: Backend>(
+        backend: &mut B,
+        value: SecretBytes,
+        check: &dyn Fn() -> AppResult<()>,
+    ) -> AppResult<()> {
         use zeroize::Zeroizing;
         let bytes = value.expose();
         if bytes.len() > MAX_BYTES {
@@ -73,7 +104,7 @@ pub mod publication {
         drop(encoded);
         drop(value);
         backend.open()?;
-        let result = backend.empty().and_then(|()| {
+        let result = check().and_then(|()| backend.empty()).and_then(|()| {
             for buffer in &mut buffers {
                 backend.publish(buffer)?;
             }

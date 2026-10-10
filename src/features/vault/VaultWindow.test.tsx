@@ -770,3 +770,73 @@ it("account_all_newlines_are_preserved_on_strictmode_password_only_edit_and_brid
   await act(async () => root.render(<div>closed</div>));
   expect(accountInput.value).toBe("");
 });
+it("native lock event clears revealed bytes and rows without interaction", async () => {
+  const callbacks: (() => void)[] = [];
+  const removed = vi.fn();
+  const bytes = new TextEncoder().encode("synthetic-visible-native");
+  await act(async () =>
+    root.render(
+      <StrictMode>
+        <VaultWindow
+          port={port({ vaultReveal: async () => bytes })}
+          subscribeLocked={async (callback) => {
+            callbacks.push(callback);
+            return removed;
+          }}
+        />
+      </StrictMode>,
+    ),
+  );
+  await unlock();
+  await click("显示密码");
+  expect(host.textContent).toContain("synthetic-visible-native");
+  await act(async () => callbacks.at(-1)!());
+  expect(host.textContent).toContain("密码库已锁定");
+  expect(host.textContent).not.toContain("虚构账号");
+  expect(host.textContent).not.toContain("synthetic-visible-native");
+  expect([...bytes]).toEqual([...bytes].map(() => 0));
+  expect(removed).toHaveBeenCalledTimes(1); // StrictMode's retired listener.
+  await unlock();
+  await act(async () => callbacks[0]()); // retired callback has no authority.
+  expect(host.textContent).toContain("虚构账号");
+  await click("更改主密码");
+  await fill("主密码", "owned synthetic current");
+  await fill("新主密码", "owned synthetic next");
+  const retained = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+  ];
+  await act(async () => callbacks.at(-1)!());
+  expect(host.textContent).toContain("密码库已锁定");
+  expect(retained.every((input) => input.value === "")).toBe(true);
+});
+it("late native listener registration is retired after unmount", async () => {
+  let complete!: (remove: () => void) => void;
+  let callback!: () => void;
+  const remove = vi.fn();
+  const p = port();
+  await act(async () =>
+    root.render(
+      <VaultWindow
+        port={p}
+        subscribeLocked={(onLock) => {
+          callback = onLock;
+          return new Promise((resolve) => {
+            complete = resolve;
+          });
+        }}
+      />,
+    ),
+  );
+  await fill("主密码", "owned synthetic input");
+  const retained = host.querySelector<HTMLInputElement>(
+    'input[name="master"]',
+  )!;
+  await act(async () => root.render(null));
+  expect(retained.value).toBe("");
+  await act(async () => {
+    complete(remove);
+  });
+  expect(remove).toHaveBeenCalledTimes(1);
+  await act(async () => callback());
+  expect(host.textContent).toBe("");
+});

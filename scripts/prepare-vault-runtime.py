@@ -12,10 +12,11 @@ PINS = {
  'win-x64': ('node-v26.11.1-win-x64.zip','97f36a8a9684ff0d3e35758b4610fef5b628a5880e96f2ccc11240e5daf9934e'),
 }
 def sha(file): return hashlib.sha256(file.read_bytes()).hexdigest()
-def prepare(platform, update):
+def prepare(platform, update, offline=False):
  name, digest = PINS[platform]
  CACHE.mkdir(parents=True, exist_ok=True)
  archive = CACHE / name
+ if not archive.exists() and offline: raise RuntimeError('BLOCKED: pinned runtime archive missing from explicit user-temp cache')
  if not archive.exists(): urllib.request.urlretrieve('https://nodejs.org/dist/v26.11.1/'+name,archive)
  if sha(archive) != digest: raise RuntimeError('runtime archive hash mismatch')
  target = ROOT / 'resources' / ('vault-'+platform)
@@ -55,14 +56,19 @@ def verify(platform):
   raise RuntimeError('prepared resources differ from reviewed manifest')
  print(platform, 'verified files:',len(files),'binary sha256:',files['runtime/node' if platform=='linux-x64' else 'runtime/node.exe'])
 if __name__=='__main__':
- parser=argparse.ArgumentParser();parser.add_argument('--platform',choices=['linux-x64','win-x64','both'],default='both');parser.add_argument('--update-reviewed-manifest',action='store_true');parser.add_argument('--verify-only',action='store_true');args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--platform',choices=['linux-x64','win-x64','both'],default='both');parser.add_argument('--update-reviewed-manifest',action='store_true');parser.add_argument('--verify-only',action='store_true');parser.add_argument('--offline',action='store_true');args=parser.parse_args()
  if args.verify_only and args.update_reviewed_manifest: parser.error('verify-only cannot update reviewed manifest')
  if not args.verify_only:
+  if args.offline:
+   for platform in (PINS if args.platform=='both' else [args.platform]):
+    name, digest = PINS[platform]
+    archive = CACHE / name
+    if not archive.is_file() or sha(archive) != digest: raise RuntimeError('BLOCKED: pinned runtime archive cache missing or mismatched; explicit preparation required first')
   npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
   node = shutil.which('node')
   if not npm or not node: raise RuntimeError('explicit preparation requires installed npm and Node build tools')
-  subprocess.run([npm,'ci','--ignore-scripts','--cache',str(CACHE/'npm-cache'),'--prefix',str(ROOT/'vault-helper')],check=True)
+  subprocess.run([npm,'ci','--ignore-scripts',*(['--offline'] if args.offline else []),'--cache',str(CACHE/'npm-cache'),'--prefix',str(ROOT/'vault-helper')],check=True)
   subprocess.run([node,str(ROOT/'vault-helper/build.cjs')],check=True)
  for platform in (PINS if args.platform=='both' else [args.platform]):
   if args.verify_only: verify(platform)
-  else: prepare(platform,args.update_reviewed_manifest)
+  else: prepare(platform,args.update_reviewed_manifest,args.offline)

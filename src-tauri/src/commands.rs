@@ -200,12 +200,25 @@ pub fn dispatch_published<T>(
     state: &AppState,
     publish: impl FnOnce(serde_json::Value) -> AppResult<T>,
 ) -> AppResult<T> {
+    dispatch_guarded(context, command, payload, state, |value, check| {
+        check()?;
+        publish(value)
+    })
+}
+/// Native final check capability must be invoked after transport serialization.
+pub fn dispatch_guarded<T>(
+    context: &CallingContext<'_>,
+    command: &str,
+    payload: serde_json::Value,
+    state: &AppState,
+    publish: impl FnOnce(serde_json::Value, &dyn Fn() -> AppResult<()>) -> AppResult<T>,
+) -> AppResult<T> {
     authorize(context, command)?;
     validate_command_size(command, &payload)?;
     if command.starts_with("vault_") {
         return dispatch_vault(command, payload, state, publish);
     }
-    publish(dispatch_other(command, payload, state)?)
+    publish(dispatch_other(command, payload, state)?, &|| Ok(()))
 }
 fn dispatch_other(
     command: &str,
@@ -528,7 +541,7 @@ fn dispatch_vault<T>(
     command: &str,
     payload: serde_json::Value,
     state: &AppState,
-    publish: impl FnOnce(serde_json::Value) -> AppResult<T>,
+    publish: impl FnOnce(serde_json::Value, &dyn Fn() -> AppResult<()>) -> AppResult<T>,
 ) -> AppResult<T> {
     use crate::vault::{Operation, Reply};
     use shixu_core::contracts::vault::{LockReason, SecretBytes, VaultMutation};
@@ -623,7 +636,7 @@ fn dispatch_vault<T>(
         }
         _ => return Err(AppError::AuthFailed),
     };
-    state.vault().deliver(op, |reply| {
+    state.vault().deliver_checked(op, |reply, check| {
         let value = match reply {
             Reply::Unit => Ok(serde_json::Value::Null),
             Reply::List(rows) => serialized(
@@ -635,7 +648,8 @@ fn dispatch_vault<T>(
             Reply::Secret(secret) => serialized(secret.expose()),
             Reply::Copy(_) => Err(AppError::Locked),
         }?;
-        publish(value)
+        check()?;
+        publish(value, check)
     })
 }
 fn vault_text(value: &str, no_newline: bool) -> AppResult<()> {
