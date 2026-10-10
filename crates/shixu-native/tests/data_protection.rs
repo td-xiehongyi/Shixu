@@ -38,9 +38,12 @@ fn current_windows_identity_roundtrip_and_private_directory() {
         let db = DpapiProtector::open_database(&dir).unwrap();
         drop(db);
         // Inspect actual DACL with Windows, including inheritance and each SQLite file.
-        let script = r#"$root=$env:SHIXU_N1_ACL_ROOT; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; foreach($p in @($root,(Join-Path $root 'messages.sqlite3'))){$acl=Get-Acl -LiteralPath $p; if(-not $acl.AreAccessRulesProtected -and $p -eq $root){exit 2}; foreach($ace in $acl.Access){if($ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid){exit 3}}}"#;
+        let script = r#"$ErrorActionPreference='Stop'; $root=$env:SHIXU_N1_ACL_ROOT; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; foreach($p in @($root,(Join-Path $root 'messages.sqlite3'))){$acl=Get-Acl -LiteralPath $p; if(-not $acl.AreAccessRulesProtected -and $p -eq $root){exit 2}; foreach($ace in $acl.Access){if($ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid){exit 3}}}"#;
         let status = std::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            // Windows PowerShell must resolve its own modules rather than an
+            // inherited PowerShell 7 module tree with incompatible assemblies.
+            .env_remove("PSModulePath")
             .env("SHIXU_N1_ACL_ROOT", &dir)
             .status()
             .unwrap();

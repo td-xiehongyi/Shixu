@@ -276,6 +276,7 @@ fn protected_record_and_calendar_backup_never_include_plain_token_or_restore_cre
             .enabled
     );
     port.disconnect().unwrap();
+    drop(port);
     drop(snap);
     drop(connection);
     drop(backup);

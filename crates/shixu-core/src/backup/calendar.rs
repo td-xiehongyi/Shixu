@@ -522,10 +522,17 @@ fn write_new(path: &Path, bytes: &[u8]) -> AppResult<()> {
     f.sync_all().map_err(io_error)
 }
 fn sync_file(path: &Path) -> AppResult<()> {
-    std::fs::File::open(path)
-        .map_err(io_error)?
-        .sync_all()
-        .map_err(io_error)
+    // FlushFileBuffers requires GENERIC_WRITE on Windows, even after the
+    // SQLite writer has closed. Reopen the existing snapshot without truncation.
+    #[cfg(windows)]
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(io_error)?;
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path).map_err(io_error)?;
+    file.sync_all().map_err(io_error)
 }
 fn sync_dir(path: &Path) -> AppResult<()> {
     #[cfg(unix)]
