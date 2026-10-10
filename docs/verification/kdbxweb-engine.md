@@ -40,13 +40,22 @@ Argon2id version19. Created costs:64MiB,3 iterations,1 lane. Accepted costs:8KiB
 64MiB,1–4 iterations,1 lane,32-byte salt/output; exact UInt32/UInt64/Bytes metadata
 kinds, unknown/duplicate keys/K/A/older version/other KDF rejected before KDF.
 Compressed input returns Unsupported before any gzip expansion. Files<=8MiB,
-header<=64KiB,field<=64KiB,entries<=1000,Node old-space<=128MiB. These are engineering
+header<=64KiB,field<=64KiB,entries<=1000,Node old-space<=128MiB. In addition, the exact serialized full
+list response (envelope, widest legal request ID, UUIDs, revisions, timestamps
+and JSON escaping included) must fit1MiB. Open and every save check this aggregate
+budget; oversized input returns Unsupported before any encrypted pending write.
+Individual field/count/file limits alone do not guarantee admission. These are engineering
 limits, not Windows performance/security validation or a total native-memory cap.
 Only valid UTF-8 text is accepted by the real backend. Master/account/password
 reject CR/LF/NEL/LS/PS; no trim or replacement. Title/UserName/Password map to
 standard protected fields; UUIDs use standard RFC UUID generation. Channel
 newlines including CR are preserved through protected-value encoding. XML parser
-rejects DTD/entity declarations and every parser error, with no recovery.
+rejects DTD/entity declarations and every parser error, with no recovery. Before
+returning the DOM to upstream object loading, it rejects every Binary element
+(including namespaced variants) and every Compressed attribute. This covers both
+Meta/Binaries and Entry/Binary/Value gzip paths before binary decoding/expansion.
+The pinned upstream wraps the fixed XML admission marker; the helper maps only
+that exact controlled marker back to Unsupported.
 
 Helper saves encrypted `vault.pending.kdbx`, reloads and compares UUID/revision/
 all three fields/timestamps, then sends its ciphertext SHA256. Native verifies

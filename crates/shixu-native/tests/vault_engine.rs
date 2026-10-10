@@ -273,3 +273,56 @@ fn missing_altered_resources_and_symlink_paths_fail_closed() {
     ));
     std::fs::remove_dir_all(work).unwrap();
 }
+
+#[test]
+fn aggregate_list_budget_rejects_escaped_create_and_update_without_write() {
+    let (mut engine, work) = setup();
+    engine.create(secret("synthetic-budget")).unwrap();
+    let channel = "\u{1}".repeat(65536);
+    let account = "\"".repeat(65536);
+    let first = engine
+        .apply(VaultMutation::Create {
+            channel: channel.clone(),
+            account: account.clone(),
+            password: secret("synthetic"),
+        })
+        .unwrap();
+    let second = engine
+        .apply(VaultMutation::Create {
+            channel: "small".into(),
+            account: "small".into(),
+            password: secret("synthetic"),
+        })
+        .unwrap();
+    let accepted = vec![first, second.clone()];
+    assert_eq!(engine.list().unwrap(), accepted);
+    let before = std::fs::read(work.join("vault.kdbx")).unwrap();
+    assert!(matches!(
+        engine.apply(VaultMutation::Update {
+            id: second.entry_id,
+            expected_revision: second.revision,
+            channel: channel.clone(),
+            account: account.clone(),
+            password: secret("next")
+        }),
+        Err(AppError::Unsupported)
+    ));
+    assert_eq!(std::fs::read(work.join("vault.kdbx")).unwrap(), before);
+    assert!(!work.join("vault.pending.kdbx").exists());
+    engine.open(secret("synthetic-budget")).unwrap();
+    assert_eq!(engine.list().unwrap(), accepted);
+    assert!(matches!(
+        engine.apply(VaultMutation::Create {
+            channel,
+            account,
+            password: secret("synthetic")
+        }),
+        Err(AppError::Unsupported)
+    ));
+    assert_eq!(std::fs::read(work.join("vault.kdbx")).unwrap(), before);
+    assert!(!work.join("vault.pending.kdbx").exists());
+    engine.open(secret("synthetic-budget")).unwrap();
+    assert_eq!(engine.list().unwrap(), accepted);
+    engine.close().unwrap();
+    std::fs::remove_dir_all(work).unwrap();
+}

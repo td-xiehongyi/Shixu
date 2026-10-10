@@ -12,7 +12,15 @@ function readActive() {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_FILE) fail('AUTH_FAILED');
   return fs.readFileSync('vault.kdbx');
 }
-async function load(bytes, cred) { return kdbx.Kdbx.load(preflight(bytes),cred); }
+async function load(bytes, cred) {
+  try { return await kdbx.Kdbx.load(preflight(bytes),cred); }
+  catch (error) {
+    // Pinned upstream wraps the controlled XML admission marker as FileCorrupt.
+    // Remap only this exact fixed marker, never arbitrary parser/user text.
+    if (error.code === 'FileCorrupt' && error.message === 'Error FileCorrupt: bad xml: UNSUPPORTED') fail('UNSUPPORTED');
+    throw error;
+  }
+}
 function id(entry) {
   const h=Buffer.from(entry.uuid.id,'base64').toString('hex');
   return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
@@ -28,7 +36,14 @@ function entries() {
   if(result.length>1000) fail('UNSUPPORTED');
   return result;
 }
+function assertListBudget() {
+  // Reserve the widest legal future request ID, not merely the current one.
+  // Use the exact reply envelope/JSON escaping so every accepted vault can list.
+  const response={v:1,id:Number.MAX_SAFE_INTEGER,type:'list',value:entries().map(summary)};
+  if(Buffer.byteLength(JSON.stringify(response))>MAX_FRAME) fail('UNSUPPORTED');
+}
 async function stage() {
+  assertListBudget(); // Reject before encryption or any pending/checkpoint write.
   const saved=Buffer.from(await db.save());
   try {
     if(saved.length>MAX_FILE) fail('UNSUPPORTED');
@@ -68,6 +83,7 @@ async function operation(r) {
       const bytes=readActive();try {db=await load(bytes,cred);}finally{bytes.fill(0);}
       if(db.groups.length!==1 || db.getDefaultGroup().groups.length || db.binaries.getAll().length) fail('UNSUPPORTED');
       entries().forEach(e=>{summary(e);validateText(field(e,'Title'));validateText(field(e,'UserName'),true);validateText(field(e,'Password'),true);});
+      assertListBudget();
     }
     return r.op==='open'?{type:'unit'}:{type:'unit',staged_digest:stagedDigest};
   }

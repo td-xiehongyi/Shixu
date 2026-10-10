@@ -7,7 +7,13 @@ export const kdbx = require('./kdbx-lib/index.js');
 globalThis.DOMParser = class {
   parseFromString(xml, type) {
     if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw Error('UNSUPPORTED');
-    return new DOMParser({onError() { throw Error('AUTH_FAILED'); }}).parseFromString(xml, type);
+    const document = new DOMParser({onError() { throw Error('AUTH_FAILED'); }}).parseFromString(xml, type);
+    // Reject every XML binary path before KdbxWeb maps objects or decodes binary
+    // values. Outer KDBX compression=0 does not exclude compressed Meta/Entry data.
+    for (const element of document.getElementsByTagName('*')) {
+      if (element.localName === 'Binary' || element.hasAttribute('Compressed')) throw Error('UNSUPPORTED');
+    }
+    return document;
   }
 };
 globalThis.XMLSerializer = XMLSerializer;
