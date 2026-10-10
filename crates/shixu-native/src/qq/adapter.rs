@@ -1,4 +1,4 @@
-//! Receive adapter for a normalized transport. No wire-protocol implementation.
+//! Receive adapter for normalized transports, including OneBot text wire events.
 use super::transport::*;
 use shixu_core::{
     contracts::{AppResult, UtcMillis, error::AppError, notification::*, vault::SecretBytes},
@@ -210,6 +210,9 @@ impl<T: ReceiveTransport> QQAdapter for NativeQQAdapter<T> {
         let d = match self.transport.next() {
             Ok(Some(d)) => d,
             Ok(None) => return Ok(None),
+            Err(AppError::Unsupported) if self.transport.consumed_unsupported_delivery() => {
+                return Err(AppError::Unsupported);
+            }
             Err(e) => {
                 self.failure(e);
                 return Err(e);

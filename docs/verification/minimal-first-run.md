@@ -17,12 +17,12 @@
 | 门槛 | 代码状态/云端剩余工作 | 用户机器或决定 | 最小链关系 |
 | --- | --- | --- | --- |
 | g1_vault | 未实现引擎/固定私有协议、G1探针、V2/V3原子加密提交/备份、dispatcher | 引擎实际版本/哈希；Windows合成UUID/Unicode/换行/错误密码/冲突/换密旧备份往返 | 密码链前置，安装本身不足 |
-| g2_qq | 未实现组件wire、配置/本机令牌保护、receiver连接和G2探针 | 明确组件/客户端/协议；本机独立登录；获准普通测试群；100条8小时及附件 | 文字接收链前置，归一化adapter不足 |
+| g2_qq | 通用OneBot11纯文字wire与生产receiver工厂已实现并经本机合成socket测试；Windows UI配置/本机令牌保护接线、重连/附件及G2探针仍缺失 | 明确组件/客户端/协议；本机独立登录；获准普通测试群；100条8小时及附件 | 真实群验收仍前置；本机合成socket不等于G2 |
 | windows_shell | 部分tray/window/锁排除/生命周期代码；通知钩子、跨进程聚焦、登录自启、包仍缺 | 真实Windows/WebView/IPC授权、托盘退出/电源/登录/安装运行 | 两条链所需，未实测 |
 | windows_storage | 部分DPAPI/ACL/数据库代码；保护缓存/交接与生产恢复缺口 | 两个真实Windows身份；ACL/reparse/占用/磁盘满/崩溃恢复 | 两条链所需，未实测 |
 | clipboard | write-only Windows源码written_untested；vault命令未连接，字节兼容受限 | 真实粘贴/持久性/覆盖/手清、历史/云排除/权限/闲置 | 密码链所需，BLOCKED |
 | parser_isolation | 真实隔离进程/Job Object限制、无网络/库访问/输入保护交接缺失 | Windows真实512MiB/超时/关闭杀进程/子进程限制 | 超出纯文字链，完整发布仍BLOCKED |
-| whole_flow | vault/QQ适配器未连通，无生产端到端证明 | 合成密码库、来源入历/改期/撤销/重启/恢复真实往返 | 最小链要收集子集证据；不等于全门槛PASS |
+| whole_flow | vault及Windows QQ UI配置未连通；生产receiver工厂已证合成socket→worker→来源→日历，真实桌面端到端未证 | 合成密码库、来源入历/改期/撤销/重启/恢复真实往返 | 最小链要收集子集证据；不等于全门槛PASS |
 | quality_text | portable冻结语料已有157例132gold；TP123 FP3 FN9，P97.619% R93.182%，含糊猜测0 | 为实际source/artifact/build重新绑定全语料证据 | 文字指标已达阈值；不是QQ实际接收证据 |
 | quality_image | portable解析/OCR接缝已有；真实引擎/定位/质量OPEN | 后续Windows引擎与完整冻结图像集 | 超出最小链，完整发布BLOCKED |
 | quality_pdf | portable解析/OCR接缝已有；真实PDF/OCR/质量OPEN | 后续Windows引擎与完整冻结PDF集 | 超出最小链，完整发布BLOCKED |
@@ -38,7 +38,7 @@
 - 自己的Windows10/11 x64测试机、Git、MSVC“Desktop development with C++”工作负载和Windows SDK、Rust **1.99.0 MSVC**、Node **24.19.0**、pnpm **11.19.0**。核对仓库固定工具链；Windows组合尚未验收。记录实际Windows构建号、身份、各工具`--version`及MSVC/SDK版本。官方环境要求见 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#windows)。
 - 记录真实WebView2 Runtime版本；缺失时在用户明确授权后独立按 [微软分发说明](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution) 准备。当前bundle.active=false；不能把Tauri build当已有安装包。
 - 只有用户授权后才独立从 [KeePassXC官方Windows页](https://keepassxc.org/download/#windows) 准备组件。确定实际支持的固定release，不在这里指定引擎版本。对将用于G1的GUI/CLI/helper分别记录`--version`、来源/release/tag/许可、可执行文件SHA256并核对官方摘要/签名；安装后不要立即用真实密码库。用户无需提交任何主密码、KDBX、密钥或真实秘密。`Get-FileHash -Algorithm SHA256 -LiteralPath <实际组件文件>`可记录文件身份，摘要不等于协议验收。
-- 自己决定QQ组件及QQ客户端的精确版本/协议。仅从选定项目的官方仓库/release/文档确认兼容版本、接收能力及许可，核对release/tag/commit、官方校验/签名（有提供时）与本地SHA256，保留文档URL和查验日期；项目未选定，所以此文不猜官方URL、固定版本或安装命令。准备一个获准普通合成测试群与本机登录；令牌只在本地保护配置，禁止发到对话或放进argv/env/日志。没有真实receive-only transport前不宣称已接收。
+- 自己决定QQ组件及QQ客户端的精确版本/协议。仅从选定项目的官方仓库/release/文档确认兼容版本、接收能力及许可，核对release/tag/commit、官方校验/签名（有提供时）与本地SHA256，保留文档URL和查验日期；项目未选定，所以此文不猜官方URL、固定版本或安装命令。准备一个获准普通合成测试群与本机登录；令牌只在本地保护配置，禁止发到对话或放进argv/env/日志。通用OneBot11纯文字receive-only transport已写并通过本机合成socket验证；Windows UI安全令牌配置接线、真实组件/群及G2尚未验证，不能宣称实际QQ已接收。
 - 为Windows存储验收准备第二个独立Windows身份；为剪贴板验收准备可覆盖的合成测试剪贴板和历史/云测试设置。记录组件/系统设置与命令直接退出码；测试日志不包含秘密。
 
 安装KeePassXC只提供应用/组件，不实现Shixu私有协议或create/open/read/write/atomic commit/backup/native dispatch。2026-10-10查阅上游 [develop Utils.cpp](https://raw.githubusercontent.com/keepassxreboot/keepassxc/develop/src/cli/Utils.cpp) 的getPassword使用readLine；由此推断stock交互CLI的多行秘密通道有待验证，不能视为结构化字节安全SDK。develop是可变分支，既不是用户安装版本探针，也不是Windows G1已FAIL的证据。必须为实际选定固定版本设计并实测协议；不编造CLI输出formatter或把“装好再试”当完成V2。

@@ -1,5 +1,5 @@
 //! Transport-independent normalized receive contract, NOT a NapCat wire schema.
-//! A real implementation is blocked on G2 capability/protocol verification.
+//! OneBot text wire transport is in `onebot`; real QQ acceptance still needs G2.
 //! Tokens are consumed, never serialized/logged. No send or management methods.
 use shixu_core::contracts::{AppResult, notification::*, vault::SecretBytes};
 use std::net::SocketAddr;
@@ -47,5 +47,10 @@ pub trait ReceiveTransport: Send {
     ) -> AppResult<Vec<SourceCapability>>;
     fn disconnect(&mut self) -> AppResult<()>;
     fn next(&mut self) -> AppResult<Option<Delivery>>;
+    /// True only when an unsupported delivery has been fully consumed and the
+    /// connection remains usable. Default transports fail closed.
+    fn consumed_unsupported_delivery(&self) -> bool {
+        false
+    }
     fn backfill(&mut self, group: &str, cursor: &str) -> AppResult<BackfillBatch>;
 }
