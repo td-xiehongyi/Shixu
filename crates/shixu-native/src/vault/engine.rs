@@ -201,6 +201,7 @@ pub struct KdbxWebEngine {
     resources: PathBuf,
     work: PathBuf,
     pipe: Option<PrivatePipe>,
+    cancellation: VaultCancellation,
     expected: Option<String>,
     next_id: u64,
 }
@@ -227,6 +228,7 @@ impl KdbxWebEngine {
             resources,
             work,
             pipe: None,
+            cancellation: VaultCancellation::default(),
             expected: None,
             next_id: 0,
         })
@@ -234,10 +236,16 @@ impl KdbxWebEngine {
     /// Obtain before dispatching blocking operations; another native owner can
     /// immediately terminate the helper when locking/revoking a session.
     pub fn cancellation(&self) -> Option<VaultCancellation> {
-        self.pipe.as_ref().map(PrivatePipe::cancellation)
+        Some(self.cancellation.clone())
+    }
+    /// Arm only with a fresh handle admitted by the authoritative native epoch.
+    /// Startup never resets a cancelled handle.
+    pub fn arm(&mut self, cancellation: VaultCancellation) {
+        self.cancellation = cancellation;
     }
     fn start(&mut self) -> AppResult<()> {
         self.close()?;
+        self.cancellation.check()?;
         verify_resources(&self.resources)?;
         for name in ["vault.pending.kdbx", "vault.checkpoint.kdbx"] {
             let path = self.work.join(name);
@@ -249,7 +257,11 @@ impl KdbxWebEngine {
                 fs::remove_file(path).map_err(|_| AppError::AuthFailed)?;
             }
         }
-        self.pipe = Some(PrivatePipe::spawn(&self.resources, &self.work)?);
+        self.pipe = Some(PrivatePipe::spawn(
+            &self.resources,
+            &self.work,
+            self.cancellation.clone(),
+        )?);
         self.next_id = 0;
         Ok(())
     }

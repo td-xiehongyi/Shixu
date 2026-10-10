@@ -11,6 +11,7 @@ use shixu_core::{
 use std::sync::Arc;
 /// One database and live consent authority shared with the background runtime.
 pub struct AppState {
+    vault: Arc<crate::vault::VaultController>,
     qq: Option<Arc<shixu_native::qq::connection::ConnectionController>>,
     qq_receiver: std::sync::Mutex<Option<Box<dyn shixu_core::runtime::workers::ReceivePort>>>,
     backup: Option<Arc<shixu_core::backup::CalendarBackup>>,
@@ -22,6 +23,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            vault: crate::vault::VaultController::unavailable(),
             qq: None,
             qq_receiver: std::sync::Mutex::new(None),
             backup: None,
@@ -46,6 +48,7 @@ impl AppState {
             .expect("fresh consent binding");
         let (qq, receiver) = shixu_native::qq::connection::ConnectionController::new(db.clone());
         Self {
+            vault: crate::vault::VaultController::unavailable(),
             qq: Some(qq),
             qq_receiver: std::sync::Mutex::new(Some(receiver)),
             backup: None,
@@ -57,6 +60,13 @@ impl AppState {
             db: Some(db),
             consent,
         }
+    }
+    pub fn with_vault(mut self, resources: std::path::PathBuf, work: std::path::PathBuf) -> Self {
+        self.vault = crate::vault::VaultController::prepared(resources, work);
+        self
+    }
+    pub fn vault(&self) -> Arc<crate::vault::VaultController> {
+        self.vault.clone()
     }
     pub fn with_backups(mut self, root: &std::path::Path) -> AppResult<Self> {
         self.backup = Some(Arc::new(shixu_core::backup::CalendarBackup::new(

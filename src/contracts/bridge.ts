@@ -167,8 +167,8 @@ export function decodeSummary(value: unknown): VaultSummary {
     "updated_at",
   ]);
   id(d.entry_id);
-  text(d.channel);
-  text(d.account);
+  vaultText(d.channel, 65536);
+  vaultText(d.account, 65536, true);
   canonicalRevision(d.revision);
   millis(d.created_at);
   millis(d.updated_at);
@@ -216,11 +216,55 @@ function patch(value: unknown): EventPatch {
   }
   return d as unknown as EventPatch;
 }
-function bytes(value: unknown): Uint8Array {
-  if (!(value instanceof Uint8Array) || !value.length || value.length > 65536)
+function vaultText(value: unknown, max = 4096, noNewline = false): string {
+  if (
+    typeof value !== "string" ||
+    new TextEncoder().encode(value).length > max ||
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(
+      value,
+    ) ||
+    (noNewline && /[\r\n\u0085\u2028\u2029]/u.test(value))
+  )
     return invalid();
   return value;
 }
+function bytes(value: unknown): Uint8Array {
+  if (!(value instanceof Uint8Array) || !value.length || value.length > 65536)
+    return invalid();
+  try {
+    vaultText(
+      new TextDecoder("utf-8", { fatal: true }).decode(value),
+      65536,
+      true,
+    );
+  } catch {
+    return invalid();
+  }
+  return value;
+}
+function structuralBounds(
+  value: unknown,
+  budget = { remaining: 65536 },
+  depth = 0,
+): void {
+  if (depth > 32) invalid();
+  let cost = 24;
+  if (typeof value === "string")
+    cost = new TextEncoder().encode(value).length * 6 + 2;
+  else if (Array.isArray(value)) {
+    cost = value.length + 2;
+    for (const item of value) structuralBounds(item, budget, depth + 1);
+  } else if (value && typeof value === "object") {
+    cost = 2;
+    for (const [key, item] of Object.entries(value)) {
+      budget.remaining -= key.length * 6 + 4;
+      structuralBounds(item, budget, depth + 1);
+    }
+  }
+  budget.remaining -= cost;
+  if (budget.remaining < 0) invalid();
+}
+
 function mutation(value: VaultMutation): Record<string, unknown> {
   const keys =
     value?.operation === "delete"
@@ -242,8 +286,8 @@ function mutation(value: VaultMutation): Record<string, unknown> {
     canonicalRevision(d.expected_revision);
   }
   if (d.operation !== "delete") {
-    text(d.channel);
-    text(d.account);
+    vaultText(d.channel);
+    vaultText(d.account, 4096, true);
     return { ...d, password: Array.from(bytes(d.password)) };
   }
   return d;
@@ -255,11 +299,13 @@ async function call(
 ): Promise<unknown> {
   try {
     if (
+      !command.startsWith("vault_") &&
       command !== "backup_import" &&
       command !== "qq_connection_save" &&
       new TextEncoder().encode(JSON.stringify(payload)).length > 65536
     )
       invalid();
+    if (command.startsWith("vault_")) structuralBounds(payload);
     return await invoke(command, payload);
   } catch (error) {
     if (error instanceof BridgeError) throw error;
@@ -851,6 +897,9 @@ export function createVaultBridge(invoke: Invoke) {
       await secretCall(invoke, "vault_unlock", {
         master: Array.from(bytes(master)),
       });
+    },
+    async vaultActivity(): Promise<void> {
+      await call(invoke, "vault_activity");
     },
     async vaultList(): Promise<VaultSummary[]> {
       const r = await call(invoke, "vault_list");

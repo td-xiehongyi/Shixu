@@ -326,3 +326,33 @@ fn aggregate_list_budget_rejects_escaped_create_and_update_without_write() {
     engine.close().unwrap();
     std::fs::remove_dir_all(work).unwrap();
 }
+
+#[test]
+fn cancellation_registered_before_spawn_prevents_creation() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let work = repo.join(".superpowers/sdd/shixu-v0.1").join(format!(
+        "task-kdbxweb-ui-before-spawn-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&work).unwrap();
+    let mut engine =
+        KdbxWebEngine::prepared(repo.join("resources/vault-linux-x64"), work.clone()).unwrap();
+    let cancel = engine
+        .cancellation()
+        .expect("stable cancellation before spawn");
+    cancel.cancel();
+    assert!(matches!(
+        engine.create(secret("synthetic-master")),
+        Err(AppError::Locked)
+    ));
+    assert!(!work.join("vault.kdbx").exists());
+    engine.arm(shixu_native::vault::VaultCancellation::default());
+    engine.create(secret("synthetic-master")).unwrap();
+    cancel.cancel(); // the old generation cannot kill the new helper/session
+    assert!(engine.list().unwrap().is_empty());
+    engine.close().unwrap();
+    std::fs::remove_dir_all(work).unwrap();
+}

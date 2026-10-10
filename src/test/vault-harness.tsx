@@ -14,6 +14,7 @@ let rows: VaultSummary[] = [1, 2].map((n) => ({
 }));
 const port: VaultPort = {
   vaultCreate: async () => {},
+  vaultActivity: async () => {},
   vaultUnlock: async () => {},
   vaultChangeMaster: async () => {},
   vaultLock: async () => {},

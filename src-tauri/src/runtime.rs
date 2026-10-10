@@ -1,5 +1,5 @@
 //! Windows-only native adapter. Actual WebView IPC acceptance still requires Windows D7.
-use crate::lifecycle::{DesktopLifecycle, Lifecycle, LifecycleEvent, UnavailableVault};
+use crate::lifecycle::{DesktopLifecycle, Lifecycle, LifecycleEvent};
 use crate::{
     app_state::AppState,
     commands::{self, CallingContext},
@@ -120,6 +120,13 @@ pub fn run() {
                     .with_backups(&directory.join("backups"))?,
                 Err(_) => AppState::default(),
             };
+            let vault_root = root.join("vault");
+            let _ = std::fs::create_dir_all(&vault_root);
+            let state = if let Ok(resources) = app.path().resource_dir() {
+                state.with_vault(resources.join("vault-win-x64"), vault_root)
+            } else {
+                state
+            };
             if let Ok(supervisor) = state.runtime() {
                 if std::env::args().any(|arg| arg == "--login-start") {
                     supervisor.login_start()?;
@@ -135,7 +142,7 @@ pub fn run() {
                 app.manage(NativeWorkers(Mutex::new(Some(workers))));
                 app.manage(Lifecycle {
                     supervisor,
-                    vault: Arc::new(UnavailableVault),
+                    vault: state.vault(),
                     desktop: Arc::new(NativeDesktop(app.handle().clone())),
                 });
             }

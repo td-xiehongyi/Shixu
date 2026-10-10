@@ -10,6 +10,7 @@ import type { VaultSummary, VaultMutation } from "../../contracts/domain";
 import { EntryForm } from "./EntryForm";
 import { vaultError } from "./errors";
 import "./vault.css";
+import { guardForm, newline, newlineMessage } from "./inputGuard";
 export type VaultPort = ReturnType<typeof createVaultBridge>;
 const nativePort = createVaultBridge(desktopInvoke);
 /** Injection is for controlled UI tests. App always uses nativePort; no demo unlock. */
@@ -32,9 +33,14 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
   const masterForm = useRef<HTMLFormElement>(null);
   // Ref detachment happens before passive unmount effects. Reset the actual
   // previous node before releasing it, including locked/change-form replacement.
+  const masterGuard = useRef<(() => void) | null>(null);
   const attachMasterForm = useCallback((node: HTMLFormElement | null) => {
+    masterGuard.current?.();
     masterForm.current?.reset();
     masterForm.current = node;
+    masterGuard.current = node
+      ? guardForm(node, ["master", "next", "confirm"], setMessage)
+      : null;
   }, []);
   const ownedMaster = useRef<Uint8Array[]>([]);
   const secret = useRef<Uint8Array | null>(null);
@@ -71,6 +77,34 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
     if (idleTimer.current) clearTimeout(idleTimer.current);
     idleTimer.current = setTimeout(() => lockRef.current(), 300000);
   }, []);
+  const lastActivity = useRef(-Infinity);
+  const activityPending = useRef(false);
+  const interact = useCallback(() => {
+    if (
+      !unlocked.current ||
+      activityPending.current ||
+      Date.now() - lastActivity.current < 1000
+    )
+      return;
+    lastActivity.current = Date.now();
+    activityPending.current = true;
+    const original = epoch.current;
+    void port
+      .vaultActivity()
+      .then(() => {
+        if (mounted.current && epoch.current === original) touch();
+      })
+      .catch((error) => {
+        if (mounted.current && epoch.current === original) {
+          clearLocal();
+          void port.vaultLock().catch(() => {});
+          setMessage(vaultError(error));
+        }
+      })
+      .finally(() => {
+        activityPending.current = false;
+      });
+  }, [port, touch, clearLocal]);
   const lock = useCallback(() => {
     clearLocal();
     const original = epoch.current;
@@ -117,6 +151,15 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
       (element.elements.namedItem(name) as HTMLInputElement).value;
     const master = get("master");
     const next = mode === "change" ? get("next") : master;
+    if (
+      [master, next, mode !== "unlock" ? get("confirm") : ""].some((value) =>
+        newline.test(value),
+      )
+    ) {
+      setMessage(newlineMessage);
+      element.reset();
+      return;
+    }
     if (mode !== "unlock" && next !== get("confirm")) {
       setMessage("两次主密码不一致。");
       element.reset();
@@ -155,6 +198,7 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
     } catch (error) {
       if (valid(original)) {
         clearLocal();
+        void port.vaultLock().catch(() => {});
         setMessage(vaultError(error));
       }
     } finally {
@@ -191,11 +235,8 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
     } catch (error) {
       if (valid(original)) {
         setMessage(vaultError(error));
-        if (
-          !(error instanceof BridgeError) ||
-          !["CONFLICT", "INVALID_INPUT"].includes(error.code)
-        )
-          clearLocal();
+        clearLocal();
+        void port.vaultLock().catch(() => {});
       }
       throw error;
     } finally {
@@ -225,6 +266,7 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
       if (valid(original)) {
         setMessage(vaultError(error));
         clearLocal();
+        void port.vaultLock().catch(() => {});
       }
     }
   }
@@ -245,6 +287,7 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
         // Copy failures carry no trustworthy clipboard-only recovery proof.
         // Unknown transport errors are normalized to UNSUPPORTED by the bridge.
         clearLocal();
+        void port.vaultLock().catch(() => {});
       }
     }
   }
@@ -254,7 +297,7 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
       .includes(search.toLocaleLowerCase()),
   );
   return (
-    <main className="vault-shell" onPointerDown={touch} onKeyDown={touch}>
+    <main className="vault-shell" onPointerDown={interact} onKeyDown={interact}>
       <header className="vault-header">
         <div className="vault-brand">
           <LockSimple size={25} />
@@ -344,7 +387,8 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
               </p>
             )}
             <p className="vault-availability">
-              密码引擎尚未验证，暂不可解锁或保存。
+              KdbxWeb 已接入；Windows 隔离验证尚未完成，当前 Windows
+              版本不可解锁或保存。
             </p>
             {state === "unlocking" && (
               <button onClick={lock}>锁定密码库</button>

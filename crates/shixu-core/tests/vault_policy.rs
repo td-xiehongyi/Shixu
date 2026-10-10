@@ -599,3 +599,22 @@ fn requested_newlines_rejected_in_master_account_password_without_trimming() {
         );
     }
 }
+
+#[test]
+fn explicit_authorized_activity_refreshes_but_background_tick_does_not() {
+    let (mut service, session) = created();
+    service.activity(&session, 299_999).unwrap();
+    service.tick(300_000).unwrap();
+    assert_eq!(service.status(), VaultStatus::Unlocked);
+    service.tick(599_999).unwrap();
+    assert_eq!(service.status(), VaultStatus::Locked);
+}
+#[test]
+fn old_session_activity_cannot_refresh_reopened_session() {
+    let (mut service, old) = created();
+    service.lock(LockReason::Manual).unwrap();
+    let _new = service.unlock(master(), 1).unwrap();
+    assert_eq!(service.activity(&old, 299_999), Err(AppError::Locked));
+    service.tick(300_001).unwrap();
+    assert_eq!(service.status(), VaultStatus::Locked);
+}

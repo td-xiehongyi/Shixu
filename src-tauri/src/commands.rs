@@ -37,6 +37,7 @@ pub const COMMANDS: &[&str] = &[
     "vault_copy",
     "vault_unlock",
     "vault_list",
+    "vault_activity",
     "vault_apply",
     "vault_reveal",
     "vault_lock",
@@ -193,8 +194,7 @@ pub fn dispatch(
     validate_command_size(command, &payload)?;
     // Do not serialize secret-bearing vault payloads into temporary strings.
     if command.starts_with("vault_") {
-        validate_vault(command, payload)?;
-        return Err(AppError::Unsupported);
+        return dispatch_vault(command, payload, state);
     }
 
     match command {
@@ -505,43 +505,68 @@ enum VaultMutationWire {
     },
 }
 fn secret(value: &[u8]) -> AppResult<()> {
-    if value.is_empty() || value.len() > 65536 {
+    let text = std::str::from_utf8(value).map_err(|_| AppError::InvalidInput)?;
+    if value.is_empty()
+        || value.len() > 65536
+        || text.contains(['\r', '\n', '\u{85}', '\u{2028}', '\u{2029}'])
+    {
         Err(AppError::InvalidInput)
     } else {
         Ok(())
     }
 }
-fn validate_vault(command: &str, payload: serde_json::Value) -> AppResult<()> {
-    match command {
+fn dispatch_vault(
+    command: &str,
+    payload: serde_json::Value,
+    state: &AppState,
+) -> AppResult<serde_json::Value> {
+    use crate::vault::{Operation, Reply};
+    use shixu_core::contracts::vault::{LockReason, SecretBytes, VaultMutation};
+    let take =
+        |mut bytes: zeroize::Zeroizing<Vec<u8>>| SecretBytes::new(std::mem::take(&mut *bytes));
+    let op = match command {
         "vault_change_master" => {
             let a: ChangeMasterArgs = decode(payload)?;
             secret(&a.current)?;
-            secret(&a.next)
+            secret(&a.next)?;
+            Operation::Change(take(a.current), take(a.next))
         }
         "vault_copy" => {
             let a: CopyArgs = decode(payload)?;
+            validate_id(&a.id)?;
             let _ = a.field;
-            validate_id(&a.id)
+            return Err(AppError::Unsupported);
         }
         "vault_unlock" | "vault_create" => {
             let a: UnlockArgs = decode(payload)?;
-            secret(&a.master)
+            secret(&a.master)?;
+            if command == "vault_create" {
+                Operation::Create(take(a.master))
+            } else {
+                Operation::Unlock(take(a.master))
+            }
         }
         "vault_reveal" => {
             let a: RevealArgs = decode(payload)?;
-            validate_id(&a.id)
+            validate_id(&a.id)?;
+            Operation::Reveal(a.id)
         }
         "vault_apply" => {
             let a: MutationArgs = decode(payload)?;
-            match a.mutation {
+            let mutation = match a.mutation {
                 VaultMutationWire::Create {
                     channel,
                     account,
                     password,
                 } => {
-                    wire::text(&channel, 4096)?;
-                    wire::text(&account, 4096)?;
-                    secret(&password)
+                    vault_text(&channel, false)?;
+                    vault_text(&account, true)?;
+                    secret(&password)?;
+                    VaultMutation::Create {
+                        channel,
+                        account,
+                        password: take(password),
+                    }
                 }
                 VaultMutationWire::Update {
                     id,
@@ -551,26 +576,63 @@ fn validate_vault(command: &str, payload: serde_json::Value) -> AppResult<()> {
                     password,
                 } => {
                     validate_id(&id)?;
-                    let _: String = expected_revision.into();
-                    wire::text(&channel, 4096)?;
-                    wire::text(&account, 4096)?;
-                    secret(&password)
+                    vault_text(&channel, false)?;
+                    vault_text(&account, true)?;
+                    secret(&password)?;
+                    VaultMutation::Update {
+                        id: id.parse()?,
+                        expected_revision: wire::revision(&String::from(expected_revision))?,
+                        channel,
+                        account,
+                        password: take(password),
+                    }
                 }
                 VaultMutationWire::Delete {
                     id,
                     expected_revision,
                 } => {
                     validate_id(&id)?;
-                    let _: String = expected_revision.into();
-                    Ok(())
+                    VaultMutation::Delete {
+                        id: id.parse()?,
+                        expected_revision: wire::revision(&String::from(expected_revision))?,
+                    }
                 }
-            }
+            };
+            Operation::Apply(mutation)
         }
-        "vault_list" | "vault_lock" => {
+        "vault_activity" => {
             let _: EmptyArgs = decode(payload)?;
-            Ok(())
+            Operation::Activity
         }
-        _ => Err(AppError::AuthFailed),
+        "vault_list" => {
+            let _: EmptyArgs = decode(payload)?;
+            Operation::List
+        }
+        "vault_lock" => {
+            let _: EmptyArgs = decode(payload)?;
+            Operation::Lock(LockReason::Manual)
+        }
+        _ => return Err(AppError::AuthFailed),
+    };
+    state.vault().deliver(op, |reply| match reply {
+        Reply::Unit => Ok(serde_json::Value::Null),
+        Reply::List(rows) => serialized(
+            rows.into_iter()
+                .map(wire::summary)
+                .collect::<AppResult<Vec<_>>>()?,
+        ),
+        Reply::Summary(row) => serialized(wire::summary(row)?),
+        Reply::Secret(secret) => serialized(secret.expose()),
+    })
+}
+fn vault_text(value: &str, no_newline: bool) -> AppResult<()> {
+    if value.is_empty()
+        || value.len() > 4096
+        || no_newline && value.contains(['\r', '\n', '\u{85}', '\u{2028}', '\u{2029}'])
+    {
+        Err(AppError::InvalidInput)
+    } else {
+        Ok(())
     }
 }
 

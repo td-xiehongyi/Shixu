@@ -87,7 +87,8 @@
   opacity: 0.55;
   cursor: wait;
 }
-.vault-shell input {
+.vault-shell input,
+.vault-shell textarea {
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
@@ -99,7 +100,8 @@
   font: inherit;
   color: inherit;
 }
-.vault-shell input:focus {
+.vault-shell input:focus,
+.vault-shell textarea:focus {
   outline: 2px solid #92bfb1;
   outline-offset: 2px;
 }

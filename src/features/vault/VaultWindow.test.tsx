@@ -31,6 +31,7 @@ afterEach(async () => {
 });
 function port(extra: Partial<VaultPort> = {}): VaultPort {
   return {
+    vaultActivity: async () => {},
     vaultUnlock: async () => {},
     vaultCreate: async () => {},
     vaultChangeMaster: async () => {},
@@ -56,13 +57,15 @@ async function click(text: string) {
   await act(async () => button(text).click());
 }
 async function fill(label: string, value: string) {
-  const input = [...host.querySelectorAll("input")].find(
+  const input = [...host.querySelectorAll("input, textarea")].find(
     (e) => e.getAttribute("aria-label") === label,
   );
   expect(input, `field ${label}`).toBeTruthy();
   await act(async () => {
     Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
+      input instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype,
       "value",
     )!.set!.call(input, value);
     input!.dispatchEvent(new Event("input", { bubbles: true }));
@@ -474,3 +477,210 @@ it.each(["account", "password"] as const)(
     expect(requests).toEqual([[rows[0].entry_id, field]]);
   },
 );
+it("rejects_multiline_paste_before_single_line_normalization", async () => {
+  await render(port());
+  const input = host.querySelector<HTMLInputElement>('[name="master"]')!;
+  input.value = "previous";
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", {
+    value: { getData: () => "secret\r\nnext" },
+  });
+  await act(async () => input.dispatchEvent(event));
+  expect(event.defaultPrevented).toBe(true);
+  expect(input.value).toBe("");
+  expect(host.textContent).toContain("不允许换行");
+});
+it("native_conflict_clears_unlocked_rows_and_reveal", async () => {
+  await render(
+    port({
+      vaultApply: async () => {
+        throw new BridgeError("CONFLICT");
+      },
+    }),
+  );
+  await unlock();
+  await click("显示密码");
+  await click("新增条目");
+  await fill("渠道", "test");
+  await fill("账号", "test");
+  await fill("密码", "test");
+  await click("保存条目");
+  expect(host.textContent).not.toContain("虚构账号");
+  expect(host.textContent).toContain("密码库已锁定");
+});
+it("direct_bridge_rejects_newlines_without_invoking", async () => {
+  const invoke = vi.fn(async () => null);
+  const bridge = createVaultBridge(invoke);
+  for (const newline of ["\r", "\n", "\u0085", "\u2028", "\u2029"])
+    await expect(
+      bridge.vaultCreate(
+        Uint8Array.from(new TextEncoder().encode(`a${newline}b`)),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  expect(invoke).not.toHaveBeenCalled();
+});
+it("explicit_vault_activity_calls_native_authority_and_background_does_not", async () => {
+  const activity = vi.fn(async () => {});
+  await render(port({ vaultActivity: activity } as Partial<VaultPort>));
+  await unlock();
+  activity.mockClear();
+  await act(async () => {
+    vi.advanceTimersByTime(1000);
+  });
+  expect(activity).not.toHaveBeenCalled();
+  await act(async () =>
+    host
+      .querySelector("main")!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true })),
+  );
+  expect(activity).toHaveBeenCalledTimes(1);
+});
+it("list_decode_failure_revokes_native_session_after_authentication", async () => {
+  const lockNative = vi.fn(async () => {});
+  await render(
+    port({
+      vaultLock: lockNative,
+      vaultList: async () => {
+        throw new BridgeError("INVALID_INPUT");
+      },
+    }),
+  );
+  await unlock();
+  expect(host.textContent).toContain("密码库已锁定");
+  expect(lockNative).toHaveBeenCalledTimes(1);
+});
+it("decodes_backend_legal_large_fields_without_narrowing_storage_text", async () => {
+  const bridge = createVaultBridge(async () => [
+    { ...rows[0], channel: "a".repeat(65536), account: "b".repeat(65536) },
+  ]);
+  const result = await bridge.vaultList();
+  expect(result[0].channel.length).toBe(65536);
+});
+it("all_sensitive_fields_reject_original_paste_drop_and_beforeinput", async () => {
+  await render(port());
+  await click("新建密码库");
+  const rejectEvents = async (names: string[]) => {
+    for (const name of names)
+      for (const type of ["paste", "drop", "beforeinput"])
+        for (const newline of ["\r\n", "\u0085", "\u2028", "\u2029"]) {
+          const input = host.querySelector<HTMLInputElement>(
+            `[name="${name}"]`,
+          )!;
+          input.value = "previous";
+          const event = new Event(type, { bubbles: true, cancelable: true });
+          const getData = () => `synthetic${newline}payload`;
+          Object.defineProperty(
+            event,
+            type === "paste"
+              ? "clipboardData"
+              : type === "drop"
+                ? "dataTransfer"
+                : "data",
+            { value: type === "beforeinput" ? getData() : { getData } },
+          );
+          await act(async () => input.dispatchEvent(event));
+          expect(event.defaultPrevented).toBe(true);
+          expect(input.value).toBe("");
+          expect(host.textContent).not.toContain("synthetic");
+        }
+  };
+  await rejectEvents(["master", "confirm"]);
+  await click("返回解锁");
+  await unlock();
+  await click("更改主密码");
+  await rejectEvents(["master", "next", "confirm"]);
+  await act(async () => root.render(<EntryForm onSave={async () => {}} />));
+  await rejectEvents(["account", "password"]);
+});
+it("entry_form_preserves_channel_newlines_whitespace_unicode_and_nul", async () => {
+  let saved: { channel: string; account: string; password: string } | undefined;
+  const channel = " line\n渠道\0 ",
+    account = ' 用户/"\0 ',
+    password = ' 密钥/"\0 ';
+  await act(async () =>
+    root.render(
+      <EntryForm
+        initial={{ ...rows[0], channel, account }}
+        onSave={async (value) => {
+          saved = {
+            ...value,
+            password: new TextDecoder().decode(value.password),
+          };
+        }}
+      />,
+    ),
+  );
+  await fill("密码", password);
+  await click("保存条目");
+  expect(saved).toEqual({ channel, account, password });
+});
+it("bridge_secret_validation_is_structural_and_rejects_all_secret_newline_paths", async () => {
+  const invoke = vi.fn(async () => null),
+    bridge = createVaultBridge(invoke);
+  const encode = (s: string) => Uint8Array.from(new TextEncoder().encode(s));
+  const spy = vi.spyOn(JSON, "stringify").mockImplementation(() => {
+    throw new Error("secret serialization forbidden");
+  });
+  try {
+    await bridge.vaultCreate(encode(" valid 密码 "));
+    expect(invoke).toHaveBeenCalledTimes(1);
+    invoke.mockClear();
+    for (const newline of ["\r", "\n", "\u0085", "\u2028", "\u2029"]) {
+      const bad = encode(`a${newline}b`);
+      await expect(bridge.vaultUnlock(bad)).rejects.toMatchObject({
+        code: "INVALID_INPUT",
+      });
+      await expect(
+        bridge.vaultChangeMaster(encode("ok"), bad),
+      ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+      await expect(
+        bridge.vaultApply({
+          operation: "create",
+          channel: "ch",
+          account: `a${newline}b`,
+          password: encode("ok"),
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+      await expect(
+        bridge.vaultApply({
+          operation: "create",
+          channel: "ch",
+          account: "ok",
+          password: bad,
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    }
+    expect(invoke).not.toHaveBeenCalled();
+  } finally {
+    spy.mockRestore();
+  }
+});
+it("unchanged_existing_channel_preserves_cr_and_crlf_when_editing_password", async () => {
+  const channel = " 渠道\r单独\r\n换行 ";
+  let savedChannel = "";
+  await act(async () =>
+    root.render(
+      <EntryForm
+        initial={{ ...rows[0], channel }}
+        onSave={async (value) => {
+          savedChannel = value.channel;
+        }}
+      />,
+    ),
+  );
+  await fill("密码", "changed password");
+  await click("保存条目");
+  expect(savedChannel).toBe(channel);
+});
+it("detached_entry_controls_clear_existing_account_and_channel", async () => {
+  await act(async () =>
+    root.render(<EntryForm initial={rows[0]} onSave={async () => {}} />),
+  );
+  const controls = [
+    ...host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      "input, textarea",
+    ),
+  ];
+  await act(async () => root.render(<div>closed</div>));
+  expect(controls.map((input) => input.value)).toEqual(["", "", ""]);
+});

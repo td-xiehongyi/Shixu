@@ -77,7 +77,7 @@ fn dto_roundtrip_matches_rust_fixture() {
     assert!(serialized.get("password").is_none());
 }
 #[test]
-fn actual_vault_is_unsupported_until_engine_verified() {
+fn unavailable_vault_never_claims_engine_support() {
     use shixu_desktop::{app_state::AppState, commands::dispatch};
     let vault = CallingContext {
         label: "vault",
@@ -94,7 +94,6 @@ fn actual_vault_is_unsupported_until_engine_verified() {
             "vault_apply",
             serde_json::json!({"mutation":{"operation":"create","channel":"演示","account":"synthetic","password":[7,8,9]}}),
         ),
-        ("vault_lock", serde_json::json!({})),
     ] {
         assert_eq!(
             dispatch(&vault, command, payload, &AppState::default()),
@@ -222,4 +221,18 @@ fn d3_commands_are_vault_only_bounded_and_honestly_unsupported() {
             Err(AppError::InvalidInput)
         );
     }
+}
+
+#[test]
+fn unavailable_vault_lock_succeeds_without_disabling_calendar_state() {
+    use shixu_desktop::{app_state::AppState, commands::dispatch};
+    let state = AppState::default();
+    let ctx = CallingContext {
+        label: "vault",
+        origin: MAIN.origin,
+    };
+    assert_eq!(
+        dispatch(&ctx, "vault_lock", serde_json::json!({}), &state),
+        Ok(serde_json::Value::Null)
+    );
 }

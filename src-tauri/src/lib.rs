@@ -7,3 +7,5 @@ pub mod wire;
 pub mod lifecycle;
 
 pub mod release;
+
+pub mod vault;

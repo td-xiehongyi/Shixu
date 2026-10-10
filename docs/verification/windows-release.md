@@ -20,7 +20,7 @@ capabilities 是代码维护的当前能力清单，必须在真实实现、审�
 
 SHA-256 在这里用于绑定实际本地构建和文件身份，**不是签名、远程证明或对操作员陈述的密码学证明**。校验器检查结构、范围、覆盖、声明的组件/日志元数据及指标；不自行运行 QQ、引擎、网络探针，也不验证引用日志的真实性。审阅者还须独立检查原始合成测试、组件来源、日志文件摘要/直接退出码及实际 Windows 行为。任何输入报告都不能替代缺失的产品实现。
 
-当前 `SystemClipboard` 有新的同步 write-only Win32 源码，clipboard能力为 `written_untested`，绝不是 `native_implemented`。非Windows仍Unsupported，vault dispatcher仍Unsupported；安装组件不能启用复制UI。暂停的所有权草稿仍归档，未恢复。实际共用编码/发布链有portable行为测试，Windows专用合成测试显式ignored；GNU Rust cfg/type-check不链接、不运行Win32/SQLite，不能关闭门槛。
+当前 `SystemClipboard` 有新的同步 write-only Win32 源码，clipboard能力为 `written_untested`，绝不是 `native_implemented`。非Windows仍Unsupported，vault dispatcher已有Linux合成接线，但Windows引擎仍Unsupported且复制仍未接线；安装组件不能启用复制UI。暂停的所有权草稿仍归档，未恢复。实际共用编码/发布链有portable行为测试，Windows专用合成测试显式ignored；GNU Rust cfg/type-check不链接、不运行Win32/SQLite，不能关闭门槛。
 
 Windows调用使用同线程临时nonnull owner HWND、立即渲染及GMEM_MOVEABLE；注册格式与分配全部在Open/Empty前完成。先发布 `ExcludeClipboardContentFromMonitorProcessing`、`CanIncludeInClipboardHistory` DWORD0、`CanUploadToCloudClipboard` DWORD0，再发布CF_UNICODETEXT；任一步失败返回固定错误，无不受保护的文本fallback。成功的HGLOBAL由Windows所有，程序绝不清零/释放它；只清零未发布缓冲和暂存秘密。Close/Destroy失败也报告错误，清理只释放本地资源，不再次EmptyClipboard。Microsoft契约见 [SetClipboardData](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setclipboarddata) 与 [历史/云格式](https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-formats)。
 
@@ -67,7 +67,7 @@ wrapper 只调用指定二进制的校验命令，不构建、登录、发送、
 
 ## 所需组件与真实证据
 
-G1：用户从 [KeePassXC 官方 Windows 下载页](https://keepassxc.org/download/#windows) 独立准备可信组件；2026-10-09 查阅页面列出 2.7.12、Windows 10/11 x64、SHA-256/PGP 链接及 MSVC Redistributable 要求。固定实际版本/来源/许可/摘要，不自动随包分发。安装或启动 KeePassXC 只完成准备。产品 VaultEngine、私有会话协议、UUID 定位和 KDBX 读写尚未实现。接通后必须以虚构三字段完成 Shixu 写入→KeePassXC GUI 核对/修改→Shixu 重开，逐字验证 UUID、Unicode、斜杠、引号、空格、换行、同名条目；主密码仅经私有 IPC，不能出现在 argv/env/日志/临时明文。还需错误密码、截断/篡改、KDF 限额、原子保存、冲突/占用/磁盘满/崩溃、改密新旧密码、备份恢复与锁定迟到响应等证据。若独立 CLI 不能满足私有会话和可逆协议，应评估并审批引擎路线修订；不要缩减字符范围或实验性写库来冒充成功。
+G1：用户已选择固定KdbxWeb2.1.1/hash-wasm4.12.0/Node26.11.1独立进程，资源预先校验，无自动安装或系统Node回退。Linux实际helper、VaultService有界actor、权限命令与独立UI已有虚构三字段/CRUD/换密/错密/篡改/外部冲突证据，稳定启动取消代际和后台idle保护均已接线。Windows构造器仍Unsupported，必须完成Job/token/resource/network/ACL/reparse/原子替换/GUI/资源性能等本机验证；不能将Linux验证视作Windows隔离。KeePassXC仅可作为未来可选独立GUI互操作检查，非运行组件要求。主密码/账号/密码禁止CR/LF/NEL/LS/PS，不trim，渠道保留换行；合法UTF8 protected字段可含NUL，剪贴板有单独NUL限制。十份备份恢复、真实剪贴板和OS会话/电源钩子仍阻断。Q1 OPEN及全部12发布门槛BLOCKED不变。
 
 G2：用户独立选择和配置合法许可的第三方 QQ 适配器、专用测试账号、授权专用测试群、群白名单及时区，并在自己的机器本地登录。当前 QQ wire/真实下载未实现；不存在可执行的 vault/QQ 验证专用脚本。完成实现后，测试至少 100 条已知合成群消息、8 小时后台，在线接收到持久化 P95 ≤5 秒、规则入历 P95 ≤10 秒；保留真实普通群送达、原件下载（图片/PDF/DOCX/XLSX）、断网/登录失效/重连/遗漏区间证据。心跳或已启动不等于普通群已验收，重连不自动证明缺失已补齐。此脚本不会替用户登录或发送测试消息。
 

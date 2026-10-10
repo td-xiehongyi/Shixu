@@ -34,6 +34,7 @@ fn main() {
             "vault_copy",
             "vault_unlock",
             "vault_list",
+            "vault_activity",
             "vault_apply",
             "vault_reveal",
             "vault_lock",

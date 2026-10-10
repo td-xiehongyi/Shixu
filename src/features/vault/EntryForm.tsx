@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { VaultSummary } from "../../contracts/domain";
 import { vaultError } from "./errors";
+import { guardForm, newline, newlineMessage } from "./inputGuard";
 export interface EntryFormProps {
   initial?: VaultSummary;
   onSave: (value: {
@@ -12,6 +13,7 @@ export interface EntryFormProps {
 }
 export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
   const form = useRef<HTMLFormElement>(null);
+  const mountedChannel = useRef<string | null>(null);
   const owned = useRef<Uint8Array | null>(null);
   const alive = useRef(true);
   const [busy, setBusy] = useState(false);
@@ -19,22 +21,46 @@ export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
   useEffect(() => {
     alive.current = true;
     const element = form.current;
+    mountedChannel.current =
+      (element?.elements.namedItem("channel") as HTMLTextAreaElement | null)
+        ?.value ?? null;
+    const removeGuard = element
+      ? guardForm(element, ["account", "password"], setError)
+      : () => {};
     return () => {
+      removeGuard();
       alive.current = false;
       owned.current?.fill(0);
       element?.reset();
+      for (const input of element?.querySelectorAll<
+        HTMLInputElement | HTMLTextAreaElement
+      >("input, textarea") ?? [])
+        input.value = "";
+      mountedChannel.current = null;
     };
   }, []);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
     const element = form.current!;
-    const channel = (element.elements.namedItem("channel") as HTMLInputElement)
-      .value;
+    const channelInput = element.elements.namedItem(
+      "channel",
+    ) as HTMLTextAreaElement;
+    const channel =
+      initial && channelInput.value === mountedChannel.current
+        ? initial.channel
+        : channelInput.value;
     const account = (element.elements.namedItem("account") as HTMLInputElement)
       .value;
     const input = element.elements.namedItem("password") as HTMLInputElement;
-    if (!channel.trim() || !account.trim() || !input.value) {
+    if (newline.test(account) || newline.test(input.value)) {
+      setError(newlineMessage);
+      element.reset();
+      (element.elements.namedItem("account") as HTMLInputElement).value = "";
+      input.value = "";
+      return;
+    }
+    if (!channel || !account || !input.value) {
       setError("请填写渠道、账号和密码。");
       return;
     }
@@ -57,7 +83,7 @@ export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
     <form ref={form} onSubmit={submit} className="vault-form">
       <label>
         渠道
-        <input
+        <textarea
           aria-label="渠道"
           name="channel"
           defaultValue={initial?.channel ?? ""}

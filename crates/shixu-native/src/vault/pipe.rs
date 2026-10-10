@@ -15,13 +15,42 @@ use zeroize::Zeroizing;
 const MAX_FRAME: usize = 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// Native-only cancellation capability. No process ID or arbitrary command API.
-#[derive(Clone)]
-pub struct VaultCancellation(Arc<Mutex<Child>>);
+#[derive(Clone, Default)]
+pub struct VaultCancellation(Arc<Mutex<CancellationState>>);
+#[derive(Default)]
+struct CancellationState {
+    cancelled: bool,
+    child: Option<Arc<Mutex<Child>>>,
+}
 impl VaultCancellation {
     pub fn cancel(&self) {
-        if let Ok(mut child) = self.0.lock() {
-            let _ = child.kill();
+        if let Ok(mut state) = self.0.lock() {
+            state.cancelled = true;
+            if let Some(child) = &state.child
+                && let Ok(mut child) = child.lock()
+            {
+                let _ = child.kill();
+            }
         }
+    }
+    pub fn check(&self) -> AppResult<()> {
+        if self.0.lock().map_err(|_| AppError::Locked)?.cancelled {
+            Err(AppError::Locked)
+        } else {
+            Ok(())
+        }
+    }
+    fn register(&self, child: Arc<Mutex<Child>>) -> AppResult<()> {
+        let mut state = self.0.lock().map_err(|_| AppError::Locked)?;
+        if state.cancelled {
+            if let Ok(mut child) = child.lock() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(AppError::Locked);
+        }
+        state.child = Some(child);
+        Ok(())
     }
 }
 pub(super) struct PrivatePipe {
@@ -31,7 +60,12 @@ pub(super) struct PrivatePipe {
     worker: Option<JoinHandle<()>>,
 }
 impl PrivatePipe {
-    pub fn spawn(resources: &Path, work: &Path) -> AppResult<Self> {
+    pub fn spawn(
+        resources: &Path,
+        work: &Path,
+        cancellation: VaultCancellation,
+    ) -> AppResult<Self> {
+        cancellation.check()?;
         let mut command = Command::new(resources.join("runtime/node"));
         command
             .env_clear()
@@ -56,6 +90,7 @@ impl PrivatePipe {
         let mut input = child.stdin.take().ok_or(AppError::Unsupported)?;
         let mut output = child.stdout.take().ok_or(AppError::Unsupported)?;
         let child = Arc::new(Mutex::new(child));
+        cancellation.register(child.clone())?;
         let (tx, rx) = mpsc::sync_channel::<Zeroizing<Vec<u8>>>(1);
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         let worker = thread::spawn(move || {
@@ -93,9 +128,6 @@ impl PrivatePipe {
             worker: Some(worker),
         })
     }
-    pub fn cancellation(&self) -> VaultCancellation {
-        VaultCancellation(self.child.clone())
-    }
     pub fn send(&mut self, frame: Zeroizing<Vec<u8>>) -> AppResult<Zeroizing<Vec<u8>>> {
         if frame.is_empty() || frame.len() > MAX_FRAME {
             return Err(AppError::InvalidInput);
@@ -128,6 +160,55 @@ impl Drop for PrivatePipe {
 mod tests {
     use super::*;
     #[test]
+    fn cancelled_generation_kills_child_registered_after_cancel() {
+        let cancel = VaultCancellation::default();
+        cancel.cancel();
+        let child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert!(matches!(
+            cancel.register(Arc::new(Mutex::new(child))),
+            Err(AppError::Locked)
+        ));
+        assert!(!Path::new(&format!("/proc/{pid}")).exists());
+    }
+    #[test]
+    fn registered_real_helper_is_cancelled_during_operation() {
+        let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let work = repo
+            .join(".superpowers/sdd/shixu-v0.1")
+            .join(format!("task-kdbxweb-ui-pipe-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&work).unwrap();
+        let cancel = VaultCancellation::default();
+        let mut pipe = PrivatePipe::spawn(
+            &repo.join("resources/vault-linux-x64"),
+            &work,
+            cancel.clone(),
+        )
+        .unwrap();
+        let pid = pipe.child.lock().unwrap().id();
+        let stop = cancel.clone();
+        let killer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            stop.cancel();
+        });
+        assert!(
+            pipe.send(Zeroizing::new(
+                b"{\"v\":1,\"id\":1,\"op\":\"create\",\"master\":\"synthetic master\"}".to_vec()
+            ))
+            .is_err()
+        );
+        killer.join().unwrap();
+        drop(pipe);
+        assert!(!Path::new(&format!("/proc/{pid}")).exists());
+        std::fs::remove_dir_all(work).unwrap();
+    }
+    #[test]
     fn actual_stopped_helper_timeout_kills_and_joins_without_unbounded_queue() {
         let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -138,7 +219,12 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir(&work).unwrap();
-        let mut pipe = PrivatePipe::spawn(&repo.join("resources/vault-linux-x64"), &work).unwrap();
+        let mut pipe = PrivatePipe::spawn(
+            &repo.join("resources/vault-linux-x64"),
+            &work,
+            VaultCancellation::default(),
+        )
+        .unwrap();
         assert!(matches!(
             pipe.send(Zeroizing::new(vec![0; MAX_FRAME + 1])),
             Err(AppError::InvalidInput)

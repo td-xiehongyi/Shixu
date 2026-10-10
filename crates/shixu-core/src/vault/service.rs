@@ -53,6 +53,13 @@ impl<E: VaultEngine> VaultService<E> {
         self.session.status()
     }
 
+    /// Explicit trusted vault-window activity; background timers never call this.
+    pub fn activity(&mut self, session: &SessionId, now: UtcMillis) -> AppResult<()> {
+        self.authorize_at(session, now)?;
+        self.session.refresh(now);
+        Ok(())
+    }
+
     pub fn list(&mut self, session: &SessionId, now: UtcMillis) -> AppResult<Vec<VaultSummary>> {
         self.authorize_at(session, now)?;
         let result = self.engine.list();

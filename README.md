@@ -1,6 +1,6 @@
 # Shixu / 拾序 v0.1
 
-中文Windows日历与密码工作台的portable开发基础。当前真实密码引擎、QQ接收、系统剪贴板、Windows端到端与完整附件质量仍BLOCKED；浏览器演示不代表已验收产品。
+中文Windows日历与密码工作台的portable开发基础。KdbxWeb 独立进程、原生密码库 dispatcher 与独立窗口已接通，并通过 Linux 虚构数据测试。Windows 密码库隔离、真实QQ接收、系统剪贴板、Windows端到端与完整附件质量仍BLOCKED；浏览器演示不代表已验收产品。
 
 - [使用与Windows准备说明](docs/user-guide-v0.1.md)
 - [Windows发布门槛、证据格式及阻断项](docs/verification/windows-release.md)
