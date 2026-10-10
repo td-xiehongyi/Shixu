@@ -2,6 +2,8 @@
 
 Stage C implements notification wiring and engineering build inputs. Windows production vault remains `Unsupported`; Q1 stays OPEN and all twelve release gates stay BLOCKED. Cloud type checks and injected tests do not accept Windows behavior or enable production.
 
+Local update, 2026-10-10: the unchanged minimum workflow passed on committed source `c638668`, including actual MSVC build, the synthetic native vault/OS boundary and the three controller regressions below. The observation desktop reported registration ready; the user confirmed opening the vault and tray exit, and the process exited 0. Manual lock/suspend remain unverified; a WebView window-class unregister error 1412 on exit remains unexplained. See [the local evidence report](windows-local-2026-10-10.md). These results do not enable production or upgrade a release gate.
+
 Use an installed standard-user x64 Visual Studio Developer PowerShell with C++ compiler, linker and Windows SDK resource compiler; installed Rust 1.99.0 MSVC host/target and locked offline Cargo cache; Python; frontend Node24.19.0/pnpm11.19.0 with frozen dependencies already prepared; and installed WebView2 for observation. The scripts install none of these prerequisites. Missing components produce a specific BLOCKED result. Prepare prerequisites separately; no credentials, QQ login or production KDBX are needed.
 
 Explicit public runtime preparation remains:

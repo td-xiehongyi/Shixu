@@ -2,6 +2,8 @@
 
 2026-10-10，当前仍 **BLOCKED**。目标先接通“渠道、账号、密码”和“获准群纯文字→持久日历”。云端能补代码、做合成portable测试；用户自己的Windows能做真实系统/组件验收。准备机器与安装组件不能代替缺失代码，纯文字子集通过也不能关闭完整首版的12门槛。
 
+本机更新：提交 `c638668` 的固定 Windows 最小工作流已实际通过，包括合成 KDBX 生命周期、隔离边界和 MSVC 桌面构建；真实窗口完成通知注册，用户确认密码库可以点击、托盘可以退出，进程 exit 0。锁屏/休眠待验，退出时 WebView 注销错误 1412 待定位。生产构造器仍 Unsupported，真实桌面密码接线、剪贴板、QQ 与安装仍未验收。最新证据和明确阻断见 [本机阶段报告](windows-local-2026-10-10.md)；以下完整门槛不因此自动通过。
+
 ## 按依赖补代码
 
 1. **G1 Windows实际隔离仍前置。** 已接通固定KdbxWeb/Node独立进程、私有协议、VaultService有界actor、命令与独立UI；Linux合成测试覆盖创建/CRUD/重开/换密/错密/篡改/冲突/代际取消。Windows构造器仍Unsupported，需实际Job/token/resource/network/ACL/reparse/原子文件替换及GUI验证；十份加密备份/恢复仍在最小阶段外；剪贴板命令已接线但Windows未验收，不能把Linux证据当Windows生产G1通过。
