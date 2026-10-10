@@ -1083,9 +1083,26 @@ fn per_format_character_semantic_and_durable_calendar_metrics() {
         let _ = std::fs::remove_file(path.with_extension("db-shm"));
     }
     let report = serde_json::json!({"synthetic_only":true,"ocr_mode":"no engine in 50-case corpus; separately controlled-observation port test","native_product_host":"Unsupported; Windows containment gate open","definitions":{"characters":"Unicode LCS; whole-source gold includes omitted/unsupported positive content","semantic":"one-to-one event title matches, regardless of date precision","calendar":"actual durable events: one-to-one title + precision + local_date; wrong tuples count FP and FN","aggregation":"separate DOCX/XLSX; no excluded unsupported cases"},"formats":formats});
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.superpowers/sdd/shixu-v0.1/N5-quality.json");
-    std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    // Each synthetic run produces new evidence; never replace a historical report.
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.superpowers/sdd/shixu-v0.1");
+    std::fs::create_dir_all(&directory).unwrap();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = directory.join(format!(
+        "N5-quality-run-{stamp}-{}.json",
+        std::process::id()
+    ));
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .unwrap();
+    output
+        .write_all(&serde_json::to_vec_pretty(&report).unwrap())
+        .unwrap();
+    output.sync_all().unwrap();
     println!(
         "N5 per-format metrics {}",
         serde_json::json!({"docx":report["formats"]["docx"].as_object().unwrap().iter().filter(|(k,_)|k.as_str()!="cases").map(|(k,v)|(k.clone(),v.clone())).collect::<serde_json::Map<_,_>>(),"xlsx":report["formats"]["xlsx"].as_object().unwrap().iter().filter(|(k,_)|k.as_str()!="cases").map(|(k,v)|(k.clone(),v.clone())).collect::<serde_json::Map<_,_>>() })

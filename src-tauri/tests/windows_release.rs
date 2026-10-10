@@ -296,6 +296,6 @@ fn current_clipboard_coverage_does_not_claim_native_acceptance() {
         clipboard
             .reasons
             .iter()
-            .any(|s| s == "BUILD_CAPABILITY_BLOCKED: clipboard=unimplemented")
+            .any(|s| s == "BUILD_CAPABILITY_BLOCKED: clipboard=written_untested")
     );
 }

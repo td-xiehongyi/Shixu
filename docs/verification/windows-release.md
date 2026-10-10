@@ -16,11 +16,23 @@ shixu-desktop --verify-release EVIDENCE_OR_DASH OUTPUT
 
 编译时 build script 使用 Git 列出的已跟踪及未忽略新增文件的路径与实际字节生成 source_sha256；source_commit 记录当时 HEAD，**不是 dirty 构建的唯一身份**。build_id 绑定 source_sha256、目标平台、构建 profile、应用版本；versions 包含应用、Tauri 和两个依赖锁文件摘要。可执行文件运行时计算自身 artifact_sha256；证据必须匹配这些实际编译/文件值，不能从证据 JSON 提供预期能力。新增/修改源文件应重新构建并重新收集证据，不能复制旧 build_id。构建需要 Git checkout；未提供无需 Git 的发布源码打包模式。
 
-capabilities 是代码维护的当前能力清单，必须在真实实现、审阅和验证之后才更新。它不是从操作员 `passed`、程序启动或 ignored 计数推导的。当前 native 能力为 unimplemented / written_untested_incomplete / quality_open，即使所有输入声称 PASS，仍有 BUILD_CAPABILITY_BLOCKED。Linux 编译目标额外产生 WINDOWS_BLOCKED。optional 云端模型未选定、默认关闭，不是必需 baseline provider 门槛。
+capabilities 是代码维护的当前能力清单，必须在真实实现、审阅和验证之后才更新。它不是从操作员 `passed`、程序启动或 ignored 计数推导的。当前 native 能力为 unimplemented / written_untested / written_untested_incomplete / quality_open，即使所有输入声称 PASS，仍有 BUILD_CAPABILITY_BLOCKED。Linux 编译目标额外产生 WINDOWS_BLOCKED。optional 云端模型未选定、默认关闭，不是必需 baseline provider 门槛。
 
 SHA-256 在这里用于绑定实际本地构建和文件身份，**不是签名、远程证明或对操作员陈述的密码学证明**。校验器检查结构、范围、覆盖、声明的组件/日志元数据及指标；不自行运行 QQ、引擎、网络探针，也不验证引用日志的真实性。审阅者还须独立检查原始合成测试、组件来源、日志文件摘要/直接退出码及实际 Windows 行为。任何输入报告都不能替代缺失的产品实现。
 
-当前仅有消耗 `SecretBytes` 的 write-only portable ClipboardPort；暂停的所有权Win32草稿已移出产品源码，clipboard能力恢复为 `unimplemented`。SystemClipboard 与 vault dispatcher 仍 Unsupported。原生复制、Unicode/空格/换行、实际粘贴、历史/云同步排除和vault-only权限仍需实现及真实Windows验收；不再有30秒/锁库/退出自动清除门槛。新的复制覆盖项是 `copy_persists_until_user_overwrite_or_manual_clear`，旧 `copy_30_seconds_generation` 证据将被拒绝；portable合成端口/UI通过不代表原生剪贴板通过。
+当前 `SystemClipboard` 有新的同步 write-only Win32 源码，clipboard能力为 `written_untested`，绝不是 `native_implemented`。非Windows仍Unsupported，vault dispatcher仍Unsupported；安装组件不能启用复制UI。暂停的所有权草稿仍归档，未恢复。实际共用编码/发布链有portable行为测试，Windows专用合成测试显式ignored；GNU Rust cfg/type-check不链接、不运行Win32/SQLite，不能关闭门槛。
+
+Windows调用使用同线程临时nonnull owner HWND、立即渲染及GMEM_MOVEABLE；注册格式与分配全部在Open/Empty前完成。先发布 `ExcludeClipboardContentFromMonitorProcessing`、`CanIncludeInClipboardHistory` DWORD0、`CanUploadToCloudClipboard` DWORD0，再发布CF_UNICODETEXT；任一步失败返回固定错误，无不受保护的文本fallback。成功的HGLOBAL由Windows所有，程序绝不清零/释放它；只清零未发布缓冲和暂存秘密。Close/Destroy失败也报告错误，清理只释放本地资源，不再次EmptyClipboard。Microsoft契约见 [SetClipboardData](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setclipboarddata) 与 [历史/云格式](https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-formats)。
+
+输入必须为UTF-8、无内嵌NUL且≤65536字节；保留Unicode、空白与原始换行，不裁剪/截断。任意SecretBytes并非都能表示为CF_UNICODETEXT，这项不兼容保持原生验收BLOCKED。准备或Open失败不会清旧内容；Empty成功之后再失败可丢失旧内容或只留下部分排除格式，Close/owner清理失败甚至可在报错时已经留下文本。fake端口“失败保留旧内容”不是OS事务保证；不回滚/读回/清除已发布内容。无generation/marker/sequence观察、定时、锁库、退出或Drop剪贴板清除。新的覆盖项是 `copy_persists_until_user_overwrite_or_manual_clear`；旧 `copy_30_seconds_generation` 证据拒绝。
+
+用户明确选择可覆盖的合成测试剪贴板后，在交互式Windows账号运行：
+
+```powershell
+cargo test -p shixu-native --test clipboard_policy --locked windows_synthetic_unicode_and_exclusion_formats_are_published -- --ignored --exact --test-threads=1
+```
+
+它真实写入并读取合成文本/排除DWORD，验证owner销毁后立即渲染数据仍在；Linux不编译这项，不能以零测试通过代替执行。它不验证vault权限、历史UI/云同步、15秒掩码或5分钟闲置锁库。完整验收还须实际粘贴、跨计时/锁库/退出观察持久性、用其他程序覆盖/手动清除，启用Windows历史/云同步的受控合成测试并确认排除，检查固定错误和写入失败边界；不得把一次单元测试当完整clipboard PASS。优先顺序及用户准备见 [最小首次运行链](minimal-first-run.md)。
 
 ## Windows 手工准备与运行
 
