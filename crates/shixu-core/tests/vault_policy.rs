@@ -75,11 +75,7 @@ fn duplicate_channel_account_uses_distinct_ids() {
 #[test]
 fn password_is_not_trimmed() {
     let (mut service, session) = created();
-    for bytes in [
-        &b"  SYNTHETIC-ONLY \n"[..],
-        &b" \t\n"[..],
-        &[0, 255, b' '][..],
-    ] {
+    for bytes in [&b"  SYNTHETIC-ONLY "[..], &b" \t"[..], &[0, 255, b' '][..]] {
         let row = service.apply(&session, create_entry(bytes), 1).unwrap();
         let revealed = service
             .reveal(&session, &row.entry_id.to_string(), 1)
@@ -541,4 +537,65 @@ fn timeout_close_error_still_revokes_authority() {
         service.accept_reply(&session, Ok(secret(b"SYNTHETIC-ONLY"))),
         AppError::Locked,
     );
+}
+
+#[test]
+fn requested_newlines_rejected_in_master_account_password_without_trimming() {
+    for nl in ["\r", "\n", "\u{85}", "\u{2028}", "\u{2029}"] {
+        let mut service = VaultService::new(FakeVaultEngine::default());
+        assert_error(
+            service.create(secret(format!("master{nl}x").as_bytes()), 0),
+            AppError::InvalidInput,
+        );
+        let session = service.create(master(), 0).unwrap();
+        assert_eq!(
+            service.apply(
+                &session,
+                VaultMutation::Create {
+                    channel: "channel\nallowed".into(),
+                    account: format!("a{nl}x"),
+                    password: secret(b"p")
+                },
+                1
+            ),
+            Err(AppError::InvalidInput)
+        );
+        assert_eq!(
+            service.apply(
+                &session,
+                VaultMutation::Create {
+                    channel: "channel\nallowed".into(),
+                    account: " account ".into(),
+                    password: secret(format!("p{nl}x").as_bytes())
+                },
+                1
+            ),
+            Err(AppError::InvalidInput)
+        );
+        assert_eq!(
+            service.change_master(&session, master(), secret(format!("m{nl}x").as_bytes())),
+            Err(AppError::InvalidInput)
+        );
+        assert!(service.list(&session, 2).unwrap().is_empty());
+        let row = service
+            .apply(
+                &session,
+                VaultMutation::Create {
+                    channel: "channel\nallowed".into(),
+                    account: " account ".into(),
+                    password: secret(b" password "),
+                },
+                3,
+            )
+            .unwrap();
+        assert_eq!(row.channel, "channel\nallowed");
+        assert_eq!(row.account, " account ");
+        assert!(
+            service
+                .reveal(&session, &row.entry_id.to_string(), 4)
+                .unwrap()
+                .expose()
+                == b" password "
+        );
+    }
 }

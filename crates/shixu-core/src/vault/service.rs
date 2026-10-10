@@ -191,7 +191,17 @@ impl<E: VaultEngine> VaultService<E> {
 }
 
 fn validate_secret(secret: &SecretBytes) -> AppResult<()> {
-    if secret.expose().is_empty() {
+    let bytes = secret.expose();
+    let newline = [
+        b"\r".as_slice(),
+        b"\n".as_slice(),
+        "\u{85}".as_bytes(),
+        "\u{2028}".as_bytes(),
+        "\u{2029}".as_bytes(),
+    ]
+    .iter()
+    .any(|pattern| bytes.windows(pattern.len()).any(|part| part == *pattern));
+    if bytes.is_empty() || newline {
         Err(AppError::InvalidInput)
     } else {
         Ok(())
@@ -199,9 +209,14 @@ fn validate_secret(secret: &SecretBytes) -> AppResult<()> {
 }
 
 fn validate_fields(channel: &str, account: &str, password: &SecretBytes) -> AppResult<()> {
-    if channel.trim().is_empty() || account.trim().is_empty() {
+    if channel.trim().is_empty()
+        || account.trim().is_empty()
+        || account.contains(['\r', '\n', '\u{85}', '\u{2028}', '\u{2029}'])
+    {
         return Err(AppError::InvalidInput);
     }
-    // Validate nonempty bytes without normalization, UTF-8 assumptions or copies.
+    // Reject requested encoded newline characters without normalization/copies.
+    // The real text engine separately rejects invalid UTF-8; fake policy tests
+    // retain the byte-oriented port contract.
     validate_secret(password)
 }

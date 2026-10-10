@@ -158,3 +158,8 @@
 !/tests/fixtures/attachments/office/macro.xlsx
 !/tests/fixtures/attachments/office/wrong_namespace.xlsx
 !/tests/fixtures/attachments/office/dtd.xlsx
+
+# Prepared fixed vault runtime and helper dependencies; never track binaries.
+/resources/
+/vault-helper/node_modules/
+/vault-helper/kdbx-lib/

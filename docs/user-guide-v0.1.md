@@ -8,7 +8,7 @@
 | 状态 | 当前内容 |
 |---|---|
 | 已实现并经 portable 测试 | 有类型/权限的命令边界、日历事件事务与来源/历史/撤销/防重放、消息及逐附件状态、白名单/时区/授权设置、确定性文字规则、有限图片/PDF/OOXML算法、注入工作端口的后台协调、保护端口下的SQLite持久化、日历快照/JSON迁移/确认恢复、界面及关闭时清理策略 |
-| 未实现/未接通，返回 Unsupported | 真正 VaultEngine、私有引擎会话/本机秘密定时清理、KDBX备份，密码库命令接通与剪贴板真实验收，QQ下载/登录重连，真实隔离parser进程/原生引擎/Windows保护缓存与输入交接；可选模型provider也未选定/未接通 |
+| 未实现/未接通，返回 Unsupported | UI 接通、Windows真实 VaultEngine隔离验收/本机秘密定时清理、KDBX备份，密码库命令接通与剪贴板真实验收，QQ下载/登录重连，真实隔离parser进程/原生引擎/Windows保护缓存与输入交接；可选模型provider也未选定/未接通 |
 | QQ配置与纯文字生产接线已实现，仅合成验证 | 设置只写保护令牌、literal loopback地址、显式连接/断开与runtime receiver；同一保存/连接入口合成socket到Calendar已验证；单活动来源，保存/重启不自动连接，实际Windows/G2仍BLOCKED |
 | Windows cfg 已写但编译/运行未验收 | Tauri窗口/能力/命令注册、QQ配置/receiver实际Windows运行、运行时DPAPI目录/SQLite/备份协调、托盘和关闭/退出、owner文件实例排他 |
 | 实际钩子尚未实现 | Windows会话锁定/电源事件、自启注册、第二进程通知首进程并聚焦；owner文件锁不等于已有跨进程聚焦 |
@@ -25,7 +25,7 @@
 
 ## 密码库规则（目前阻断）
 
-表单业务字段只有**渠道、账号、密码**；同渠道可多个账号，同名条目有内部UUID，不按渠道覆盖。主密码必须真正参与成熟KDBX引擎解密，错误密码不能解锁；当前无生产引擎，所以创建/解锁/读写不是已实现可用功能。安装KeePassXC不会自动使Shixu密码功能可用。
+表单业务字段只有**渠道、账号、密码**；同渠道可多个账号，同名条目有内部UUID，不按渠道覆盖。主密码必须真正参与成熟KDBX引擎解密，错误密码不能解锁；当前实现阶段选择 KdbxWeb 独立进程；Linux合成后端测试不等于Windows生产验收，UI创建/解锁/读写仍不可用。主密码、账号、密码禁止 CR/LF/NEL/LS/PS 换行，不裁剪空格或替换字符；渠道未新增换行禁令。引擎支持合法 UTF-8 文本，明确拒绝非法 UTF-8；protected value 保持渠道换行。剪贴板仍有独立NUL限制。
 
 设计及portable策略为密码默认掩码、显示15秒后恢复、5分钟无密码库交互自动锁库；日历/QQ后台不能刷新计时。复制账号/密码成功后提示：内容不会自动清除，将保留至你覆盖或手动清除，可能留有密码；计时、锁库、休眠和退出不清空系统剪贴板。手动锁定、会话锁定、休眠、退出仍应销毁会话、清零瞬时秘密内存并丢弃迟到结果；关闭主窗口应入托盘并锁库。当前已有新的write-only Win32 writer及历史/云同步排除源码，能力仅written_untested；暂停的所有权草稿仍归档。只支持≤65536字节的UTF-8文本且不能含内嵌NUL，不支持任意秘密字节。EmptyClipboard成功之后的失败可能丢失旧内容，清理失败也可能已留下新内容，不能保证失败时保留旧剪贴板。真实引擎/dispatcher及Windows钩子仍未接通/实测，复制UI继续Unsupported。
 
@@ -51,7 +51,7 @@
 
 先按 [Windows门槛说明](verification/windows-release.md) 准备C++工具、Rust MSVC、Node/pnpm/Git和WebView2；相关官方来源已于2026-10-09复核：[Tauri](https://v2.tauri.app/start/prerequisites/#windows)、[Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution)。`pnpm run tauri build` 当前只尝试本地二进制，bundle关闭，无安装包承诺。
 
-再独立从 [KeePassXC官方页](https://keepassxc.org/download/#windows) 准备可信Windows组件并记录版本、校验/来源/许可。在**引擎实现之后**只用虚构密码做私有会话、UUID/Unicode/换行三字段及KeePassXC GUI双向往返；只安装组件不能关闭G1。
+用仓库准备脚本固定准备 Node/KdbxWeb/hash-wasm 资源，记录来源、校验和许可；程序运行时不下载、不查找系统 Node。在**引擎实现之后**只用虚构密码做私有会话、UUID/Unicode/空格三字段及换行拒绝及KeePassXC GUI双向往返；只安装组件不能关闭G1。
 
 QQ需要自己选择/配置许可合适的适配器、专用测试账号和获准测试群、白名单/时区，在本机登录。**通用OneBot11纯文字wire已实现并通过本机合成socket测试；Windows安全令牌/保护配置与runtime receiver已接线；单活动来源、显式连接，保存或重启不自动连接，实际Windows/真实组件G2仍待验收。接通真实组件后**才可做100条合成消息、各类型附件原件、8小时和P95证据。无需发送任何访问令牌、真实密码或聊天秘密到对话中。
 
@@ -66,3 +66,5 @@ QQ需要自己选择/配置许可合适的适配器、专用测试账号和获�
 设置中先保存 `onebot11-text` 来源、账号、时区与获准群，再填写本机 literal loopback 地址（例如 `127.0.0.1:3001`）和你在本机组件设置的令牌，点击“保存连接配置”。令牌只写入当前 Windows 用户保护存储，不读取或回显。最后点击“连接此来源”；仅保存不会连接。一次启用的群文字通知自动入历。
 
 当前同时只支持一个活动来源，换来源请先断开；配置变更、恢复备份或重启后需要重新连接，不自动重连。锁库、关闭主窗口继续后台运行，完整退出停止。备份不保留连接凭据。纯文字本机连接代码已接线，实际 Windows/QQ 接收仍待本机验收，不代表已通过真实群测试。详情见[安全连接说明](verification/qq-connection-ui.md)。
+
+本阶段仅支持自有平坦三字段、未压缩 KDBX4/AES/Argon2id19。压缩库在解压前返回 Unsupported；不承诺任意标准 KDBX 导入/互操作。初始KDF为64MiB、3次、1通道；接受上限64MiB、4次、1通道，文件8MiB、帧1MiB、字段64KiB、条目1000、请求30秒。Windows性能及隔离门槛仍未验证。
