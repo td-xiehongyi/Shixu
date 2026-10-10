@@ -444,3 +444,33 @@ it("cancel_detaches_and_resets_current_change_master_form", async () => {
   await click("取消");
   expect(inputs.map((x) => x.value)).toEqual(["", "", ""]);
 });
+
+it.each(["account", "password"] as const)(
+  "copy_%s_warns_content_persists_without_automatic_cleanup",
+  async (field) => {
+    const requests: Array<[string, "account" | "password"]> = [];
+    let clipboard = "";
+    await render(
+      port({
+        vaultCopy: async (id, copiedField) => {
+          requests.push([id, copiedField]);
+          clipboard = "synthetic-clipboard";
+        },
+      }),
+    );
+    await unlock();
+    await click(field === "password" ? "复制密码" : "复制账号");
+    expect(requests).toEqual([[rows[0].entry_id, field]]);
+    expect(host.textContent).toContain("不会自动清除");
+    expect(host.textContent).toContain("覆盖或手动清除");
+    expect(host.textContent).not.toContain("synthetic-clipboard");
+    await act(async () => vi.advanceTimersByTime(30000));
+    expect(clipboard).toBe("synthetic-clipboard");
+    await click("锁定密码库");
+    expect(clipboard).toBe("synthetic-clipboard");
+    await act(async () => window.dispatchEvent(new Event("pagehide")));
+    await act(async () => root.render(<div>已关闭</div>));
+    expect(clipboard).toBe("synthetic-clipboard");
+    expect(requests).toEqual([[rows[0].entry_id, field]]);
+  },
+);

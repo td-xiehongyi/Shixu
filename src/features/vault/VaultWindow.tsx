@@ -234,7 +234,9 @@ export function VaultWindow({ port = nativePort }: { port?: VaultPort }) {
     try {
       await port.vaultCopy(id, field);
       if (valid(original) && unlocked.current) {
-        setMessage("已复制，30 秒后尝试清除本次内容。");
+        setMessage(
+          "已复制，剪贴板内容不会自动清除，将保留至你覆盖或手动清除。",
+        );
         touch();
       }
     } catch (error) {

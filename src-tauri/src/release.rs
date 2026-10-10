@@ -163,8 +163,10 @@ pub fn policies() -> Vec<Policy> {
             "clipboard",
             vec![
                 "reveal_15_seconds",
-                "copy_30_seconds_generation",
+                "copy_persists_until_user_overwrite_or_manual_clear",
                 "clipboard_history",
+                "clipboard_cloud_exclusion",
+                "vault_copy_permission",
                 "idle_5_minutes_background_independent",
             ],
         ),
@@ -399,7 +401,7 @@ fn report(artifact: &str) -> ReleaseReport {
         verdict: Verdict::Blocked,
         gates: vec![],
         unsupported_cases: vec![
-            "Real VaultEngine/private session/KDBX backup and SystemClipboard/history are unimplemented".into(),
+            "Real VaultEngine/private session/KDBX backup and native clipboard writer/history/cloud exclusion remain unimplemented; copy must persist until user overwrite or manual clear".into(),
             "QQ wire, isolated parser process and Windows protected cache/handoff are unimplemented".into(),
             "Windows build/installer/WebView/DPAPI/ACL and lifecycle hooks lack genuine acceptance".into(),
             "N4 full 20 image / 20 PDF corpus: image regions29/31 boxes39/47; PDF eligible regions72/73 boxes77/81, plus44 rejected gold regions with0 output. Chinese cases1/2 regions and6/10 boxes; event-quality OPEN".into(),

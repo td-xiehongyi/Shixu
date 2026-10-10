@@ -271,3 +271,31 @@ fn duplicate_log_references_cannot_inflate_evidence() {
     v["gates"] = json!([g]);
     assert_eq!(check(&v).verdict, Verdict::Fail);
 }
+
+#[test]
+fn stale_automatic_clipboard_cleanup_coverage_is_rejected() {
+    let mut v = evidence();
+    let mut g = gate("clipboard");
+    g["coverage"] = json!([
+        "reveal_15_seconds",
+        "copy_30_seconds_generation",
+        "clipboard_history",
+        "idle_5_minutes_background_independent"
+    ]);
+    v["gates"] = json!([g]);
+    assert_eq!(check(&v).verdict, Verdict::Fail);
+}
+#[test]
+fn current_clipboard_coverage_does_not_claim_native_acceptance() {
+    let mut v = evidence();
+    v["gates"] = json!([gate("clipboard")]);
+    let r = check(&v);
+    let clipboard = r.gates.iter().find(|g| g.id == "clipboard").unwrap();
+    assert_eq!(clipboard.verdict, Verdict::Blocked);
+    assert!(
+        clipboard
+            .reasons
+            .iter()
+            .any(|s| s == "BUILD_CAPABILITY_BLOCKED: clipboard=unimplemented")
+    );
+}

@@ -64,3 +64,12 @@ it("shows_runtime_queues_and_storage_failure_without_claiming_connected", async 
   expect(r.host.textContent).toContain("QQ 未连接");
   await r.close();
 });
+
+it("clipboard_policy_explains_persistence_without_automatic_clear", async () => {
+  const r = await render(<SettingsPage port={port()} />);
+  expect(r.host.textContent).toContain("不会自动清除");
+  expect(r.host.textContent).toContain("覆盖或手动清除");
+  expect(r.host.textContent).toContain("15 秒");
+  expect(r.host.textContent).toContain("5 分钟");
+  await r.close();
+});

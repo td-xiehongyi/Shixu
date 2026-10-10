@@ -1,5 +1,6 @@
 # Windows 首版发布门槛（D7）
 
+2026-10-10 剪贴板需求修订：复制账号/密码后不因计时、锁库或退出自动清除；内容保留至用户覆盖或手动清除，可能留有密码。15 秒掩码、5 分钟闲置锁库、会话撤销和瞬时秘密内存清零保持要求；原生复制、历史/云同步排除及权限隔离仍须真实验收。
 2026-10-09：**发布 BLOCKED**。云端可运行严格证据校验器及 portable 测试；Windows 包、真实密码库、QQ 接收、剪贴板、进程隔离、全格式质量尚未验收。此文档及脚本不发布软件。默认测试中的 ignored 原生门槛不是通过，显式选择它会失败并说明 BLOCKED。
 
 ## 当前实现与证据边界
@@ -18,6 +19,8 @@ shixu-desktop --verify-release EVIDENCE_OR_DASH OUTPUT
 capabilities 是代码维护的当前能力清单，必须在真实实现、审阅和验证之后才更新。它不是从操作员 `passed`、程序启动或 ignored 计数推导的。当前 native 能力为 unimplemented / written_untested_incomplete / quality_open，即使所有输入声称 PASS，仍有 BUILD_CAPABILITY_BLOCKED。Linux 编译目标额外产生 WINDOWS_BLOCKED。optional 云端模型未选定、默认关闭，不是必需 baseline provider 门槛。
 
 SHA-256 在这里用于绑定实际本地构建和文件身份，**不是签名、远程证明或对操作员陈述的密码学证明**。校验器检查结构、范围、覆盖、声明的组件/日志元数据及指标；不自行运行 QQ、引擎、网络探针，也不验证引用日志的真实性。审阅者还须独立检查原始合成测试、组件来源、日志文件摘要/直接退出码及实际 Windows 行为。任何输入报告都不能替代缺失的产品实现。
+
+当前仅有消耗 `SecretBytes` 的 write-only portable ClipboardPort；暂停的所有权Win32草稿已移出产品源码，clipboard能力恢复为 `unimplemented`。SystemClipboard 与 vault dispatcher 仍 Unsupported。原生复制、Unicode/空格/换行、实际粘贴、历史/云同步排除和vault-only权限仍需实现及真实Windows验收；不再有30秒/锁库/退出自动清除门槛。新的复制覆盖项是 `copy_persists_until_user_overwrite_or_manual_clear`，旧 `copy_30_seconds_generation` 证据将被拒绝；portable合成端口/UI通过不代表原生剪贴板通过。
 
 ## Windows 手工准备与运行
 
@@ -56,7 +59,7 @@ G1：用户从 [KeePassXC 官方 Windows 下载页](https://keepassxc.org/downlo
 
 G2：用户独立选择和配置合法许可的第三方 QQ 适配器、专用测试账号、授权专用测试群、群白名单及时区，并在自己的机器本地登录。当前 QQ wire/真实下载未实现；不存在可执行的 vault/QQ 验证专用脚本。完成实现后，测试至少 100 条已知合成群消息、8 小时后台，在线接收到持久化 P95 ≤5 秒、规则入历 P95 ≤10 秒；保留真实普通群送达、原件下载（图片/PDF/DOCX/XLSX）、断网/登录失效/重连/遗漏区间证据。心跳或已启动不等于普通群已验收，重连不自动证明缺失已补齐。此脚本不会替用户登录或发送测试消息。
 
-其他门槛：实际 Windows WebView IPC 权限隔离、托盘/退出、会话锁定/休眠/恢复、自启注册、第二进程聚焦；同/不同用户 DPAPI、ACL/reparse、保护缓存和只读输入交接；15 秒显示、30 秒复制及 generation 检查、剪贴板历史、5 分钟闲置锁库且后台不刷新；真实 parser Job Object 512 MiB/子进程限制/kill-on-close、无网络/无密码库、30 秒单图/120 秒单文件超时。whole_flow 要有自动事项来源证据、改期取消、人工覆盖、撤销、重启防重放及确认恢复观察，不能只有“打开成功”。这些 native 门槛目前均 OPEN。
+其他门槛：实际 Windows WebView IPC 权限隔离、托盘/退出、会话锁定/休眠/恢复、自启注册、第二进程聚焦；同/不同用户 DPAPI、ACL/reparse、保护缓存和只读输入交接；15 秒显示、复制后保留至用户覆盖/手动清除且计时/锁库/退出不自动清空、剪贴板历史/云同步排除和vault-only复制权限、5 分钟闲置锁库且后台不刷新；真实 parser Job Object 512 MiB/子进程限制/kill-on-close、无网络/无密码库、30 秒单图/120 秒单文件超时。whole_flow 要有自动事项来源证据、改期取消、人工覆盖、撤销、重启防重放及确认恢复观察，不能只有“打开成功”。这些 native 门槛目前均 OPEN。
 
 ## 输入版本 1
 

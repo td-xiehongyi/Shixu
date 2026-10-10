@@ -1,68 +1,69 @@
-use shixu_core::contracts::{AppResult, vault::SecretBytes};
-use shixu_native::vault::clipboard::{ClipboardPolicy, ClipboardPort};
+// Synthetic write-only port tests; these do not establish Windows acceptance.
+use shixu_core::contracts::{AppResult, error::AppError, vault::SecretBytes};
+use shixu_native::vault::clipboard::{ClipboardPort, SystemClipboard, copy};
 #[derive(Default)]
 struct Memory {
-    generation: u64,
-    value: Option<SecretBytes>,
-    clears: usize,
-}
-impl Memory {
-    fn user_copy(&mut self) {
-        self.generation += 1;
-        self.value = Some(SecretBytes::new(vec![7]));
-    }
+    value: Vec<u8>,
+    fail: bool,
 }
 impl ClipboardPort for Memory {
-    fn write_owned(&mut self, value: SecretBytes) -> AppResult<u64> {
-        self.generation += 1;
-        self.value = Some(value);
-        Ok(self.generation)
-    }
-    fn clear_generation(&mut self, generation: u64) -> AppResult<bool> {
-        if self.generation != generation {
-            return Ok(false);
+    fn write(&mut self, value: SecretBytes) -> AppResult<()> {
+        if self.fail {
+            return Err(AppError::Unsupported);
         }
-        self.value = None;
-        self.generation += 1;
-        self.clears += 1;
-        Ok(true)
+        self.value = value.expose().to_vec();
+        Ok(())
     }
 }
 #[test]
-fn clipboard_clears_own_content_at_thirty_seconds() {
-    let mut p = ClipboardPolicy::new(Memory::default());
-    p.copy_owned(SecretBytes::new(vec![7]), 0).unwrap();
-    assert!(!p.clear_if_owned(29999).unwrap());
-    assert!(p.clear_if_owned(30000).unwrap());
-    assert!(p.port().value.is_none());
-    assert!(!p.clear_if_owned(60000).unwrap());
-    assert_eq!(p.port().clears, 1);
+fn copy_preserves_unicode_whitespace_and_newlines() {
+    let mut port = Memory::default();
+    let value = "  合成🔐\npassword  ".as_bytes();
+    copy(&mut port, SecretBytes::new(value.to_vec())).unwrap();
+    assert_eq!(port.value, value);
 }
 #[test]
-fn clipboard_new_content_survives_even_same_content() {
-    let mut p = ClipboardPolicy::new(Memory::default());
-    p.copy_owned(SecretBytes::new(vec![7]), 0).unwrap();
-    p.port_mut().user_copy();
-    assert!(!p.clear_if_owned(30000).unwrap());
-    assert!(p.port().value.is_some());
-    assert_eq!(p.port().clears, 0);
+fn borrowed_copy_returns_without_clearing_clipboard() {
+    let mut port = Memory::default();
+    {
+        let borrowed = &mut port;
+        copy(borrowed, SecretBytes::new(vec![7])).unwrap();
+    }
+    assert_eq!(port.value, [7]);
+    // Ending a borrowed copy scope cannot clear a subsequent user overwrite.
+    {
+        let borrowed = &mut port;
+        copy(borrowed, SecretBytes::new(vec![7])).unwrap();
+        borrowed.value = vec![8];
+    }
+    assert_eq!(port.value, [8]);
+    // Manual clear is an external action, never a policy callback.
+    port.value.clear();
+    assert!(port.value.is_empty());
 }
 #[test]
-fn repeat_copy_replaces_deadline() {
-    let mut p = ClipboardPolicy::new(Memory::default());
-    p.copy_owned(SecretBytes::new(vec![7]), 0).unwrap();
-    p.copy_owned(SecretBytes::new(vec![8]), 20000).unwrap();
-    assert!(!p.clear_if_owned(30000).unwrap());
-    assert!(p.clear_if_owned(50000).unwrap());
+fn repeat_copy_replaces_content_without_retaining_cleanup_authority() {
+    let mut port = Memory::default();
+    copy(&mut port, SecretBytes::new(vec![7])).unwrap();
+    copy(&mut port, SecretBytes::new(vec![8])).unwrap();
+    assert_eq!(port.value, [8]);
 }
-
+#[test]
+fn failed_write_preserves_existing_user_content() {
+    let mut port = Memory {
+        value: vec![9],
+        fail: true,
+    };
+    assert_eq!(
+        copy(&mut port, SecretBytes::new(vec![7])),
+        Err(AppError::Unsupported)
+    );
+    assert_eq!(port.value, [9]);
+}
 #[test]
 fn system_clipboard_is_explicitly_unsupported() {
-    use shixu_core::contracts::error::AppError;
-    use shixu_native::vault::clipboard::SystemClipboard;
-    let mut p = ClipboardPolicy::new(SystemClipboard);
     assert_eq!(
-        p.copy_owned(SecretBytes::new(vec![7]), 0),
+        copy(&mut SystemClipboard, SecretBytes::new(vec![7])),
         Err(AppError::Unsupported)
     );
 }
