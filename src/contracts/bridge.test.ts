@@ -29,6 +29,10 @@ describe("strict native bridge contract", () => {
         "notificationParts",
         "retryPart",
         "settingsRead",
+        "qqConnectionRead",
+        "qqConnectionSave",
+        "qqConnect",
+        "qqDisconnect",
         "saveSourceConfig",
         "setModelConsent",
         "setAutostart",
@@ -348,4 +352,46 @@ it("backup_bridge_rejects_unconfirmed_output_and_unbounded_or_forged_results", a
     bridge.backupImport(" ".repeat(20 * 1024 * 1024 + 1)),
   ).rejects.toThrow("INVALID_INPUT");
   expect(invoke).toHaveBeenCalledTimes(1);
+});
+
+it("qq_token_arrays_are_consumed_without_secret_serialization_on_failure", async () => {
+  const token = new TextEncoder().encode("synthetic-token");
+  let owned: number[] | undefined;
+  const bridge = createMainBridge(async (command, payload) => {
+    expect(command).toBe("qq_connection_save");
+    owned = payload?.token as number[];
+    throw "STORAGE_FULL";
+  });
+  await expect(
+    bridge.qqConnectionSave(
+      "11111111-1111-4111-8111-111111111111",
+      "127.0.0.1:123",
+      token,
+    ),
+  ).rejects.toMatchObject({ code: "STORAGE_FULL" });
+  expect(token.every((b) => b === 0)).toBe(true);
+  expect(owned?.every((b) => b === 0)).toBe(true);
+});
+it("abort_clears_owned_ipc_array_before_native_settlement", async () => {
+  const abort = new AbortController();
+  let owned: number[] | undefined;
+  let complete!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    complete = resolve;
+  });
+  const bridge = createMainBridge(async (_command, payload) => {
+    owned = payload?.token as number[];
+    await pending;
+  });
+  const saving = bridge.qqConnectionSave(
+    "11111111-1111-4111-8111-111111111111",
+    "127.0.0.1:123",
+    new TextEncoder().encode("synthetic-token"),
+    abort.signal,
+  );
+  expect(owned?.some((b) => b !== 0)).toBe(true);
+  abort.abort();
+  expect(owned?.every((b) => b === 0)).toBe(true);
+  complete();
+  await saving;
 });

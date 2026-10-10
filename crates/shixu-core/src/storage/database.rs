@@ -156,6 +156,13 @@ impl Database {
         let sealed = self.protector.protect(secret.expose())?;
         self.transaction(|tx| { tx.execute("INSERT INTO source_secrets VALUES (?1,?2,?3,?4) ON CONFLICT(source_id,adapter_type,account_id) DO UPDATE SET payload=excluded.payload", rusqlite::params![config.source_id.to_string(), config.adapter_type, config.account_id, sealed]).map_err(storage_error)?; Ok(()) })
     }
+    /// Presence only: metadata for disabled sources never decrypts credentials.
+    pub fn has_source_secret(
+        &self,
+        config: &crate::contracts::notification::SourceConfig,
+    ) -> AppResult<bool> {
+        self.transaction(|tx| tx.query_row("SELECT EXISTS(SELECT 1 FROM source_secrets WHERE source_id=?1 AND adapter_type=?2 AND account_id=?3)", rusqlite::params![config.source_id.to_string(),config.adapter_type,config.account_id], |r| r.get(0)).map_err(storage_error))
+    }
     pub fn source_secret(
         &self,
         config: &crate::contracts::notification::SourceConfig,

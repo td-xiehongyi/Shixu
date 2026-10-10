@@ -5,7 +5,7 @@
 ## 按依赖补代码
 
 1. **G1固定协议先于V2/V3。** 当前 `crates/shixu-native/src/vault/mod.rs` 只有clipboard；`src-tauri/src/commands.rs` 对全部vault命令只验证载荷并返回Unsupported。没有真正的生产VaultEngine、私有引擎会话、KDBX创建/打开/读取/写入/原子提交/备份、换密重新打开验证或本机秘密会话销毁。先为选定且记录实际版本的引擎定义并实现秘密仅走私有通道的协议与合成G1探针；UUID、Unicode、前后空白、换行、错误密码/篡改、冲突/磁盘满、旧备份主密码必须验证。G1探针/脚本目前是待开发代码，仓库没有可以交给用户立即运行的G1脚本。通过固定协议探针后，才实现V2/V3并接通vault dispatcher，15秒显示/5分钟锁定/迟到响应丢弃与复制权限合并验收。
-2. **独立决定QQ组件和客户端版本，再做G2。** `qq/transport.rs` 只有ReceiveTransport规范，`qq/adapter.rs` 消费归一化消息；不是任何组件的真实wire协议。当前组件、精确release、QQ客户端及协议未决定。需实现字面loopback receive-only transport、身份/能力验证、断线/登录过期/补拉、原件下载，并把配置/令牌的本机秘密保护和worker连接接通。`src-tauri/src/runtime.rs` 的WorkerPorts仅配parser/backup，receiver/model保持默认None；不能从normalized合成消息测试推出实际QQ接收成功。G2探针/脚本同样尚未开发。组件版本决定与G2协议验证之后，用一个普通获准合成测试群做实际接收→持久化→规则→日历，不加逐条确认。完整G2仍需≥100条、≥8小时、持久化P95≤5秒/规则P95≤10秒与各格式原件证据。
+2. **独立决定QQ组件和客户端版本，再做G2。** 已实现 receive-only OneBot11 `/event` 纯文字 wire、literal loopback 与身份验证，并通过本机合成真实 socket 测试。Windows 设置现有只写令牌/用户级保护保存与显式连接、断开；runtime 已将可管理 receiver 注入 `WorkerPorts.receiver`，model 仍默认 None。当前仅一个活动来源，切换须先断开，保存不连接，配置变更/恢复/重启须显式重新连接，没有自动重连。组件精确 release、QQ 客户端及本机真实群尚未验收，Windows UI/DPAPI/WebView 实际运行仍 written_untested/BLOCKED；缺少 G2 探针、补拉/附件下载和真实端到端证据。用户一次授权群的新文字通知自动入历，不加逐条确认。完整G2仍需≥100条、≥8小时、持久化P95≤5秒/规则P95≤10秒与各格式原件证据。详见[安全连接接线](qq-connection-ui.md)。
 3. **连接Windows宿主和存储。** 已写DPAPI/ACL适配器、日历SQLite/备份、tray/window与生命周期抽象；runtime使用UnavailableVault，文件锁仅作第二进程排除。需真实会话锁/电源通知、跨进程聚焦、OS登录自启、打包安装/卸载及WebView权限连接。`--login-start`分支并不证明注册自启；生命周期抽象测试并不证明收到Windows通知。日历打开DPAPI失败会退回Unavailable AppState，也需本机可见错误/恢复验收。保护缓存与parser输入交接仍不完整。
 4. **复制写边界已有源码，仍待接通和实测。** SystemClipboard在Windows用nonnull owner HWND同步发布三个排除格式后写CF_UNICODETEXT，非WindowsUnsupported。UTF-8无内嵌NUL、最多65536字节；超范围/非文本失败，无截断。准备/Open失败保留旧内容；Empty成功后更晚失败可能丢失旧内容/留下部分格式，Close或owner清理报错时甚至已留下文本。Windows拥有成功发布内存；只有未发布缓冲和暂存内存清零。复制后内容保留至用户覆盖/手动清除；锁库/退出清瞬时秘密但不清剪贴板。固定接口不是任意字节承诺，clipboard仍written_untested/BLOCKED。真实测试命令与手工边界见 [Windows门槛](windows-release.md)。
 5. **合成端到端验收。** 用虚构三字段密码库进行创建→解锁→保存→重开→显示/复制→锁库/换密/备份恢复；另一条独立链做纯文字实际群消息→持久来源→自动入历→改期/取消→编辑/撤销→重启不重放。两条链并行运行不应让QQ/日历刷新密码库闲置计时。全部是合成数据，失败/断连不能反馈成功。
@@ -17,12 +17,12 @@
 | 门槛 | 代码状态/云端剩余工作 | 用户机器或决定 | 最小链关系 |
 | --- | --- | --- | --- |
 | g1_vault | 未实现引擎/固定私有协议、G1探针、V2/V3原子加密提交/备份、dispatcher | 引擎实际版本/哈希；Windows合成UUID/Unicode/换行/错误密码/冲突/换密旧备份往返 | 密码链前置，安装本身不足 |
-| g2_qq | 通用OneBot11纯文字wire与生产receiver工厂已实现并经本机合成socket测试；Windows UI配置/本机令牌保护接线、重连/附件及G2探针仍缺失 | 明确组件/客户端/协议；本机独立登录；获准普通测试群；100条8小时及附件 | 真实群验收仍前置；本机合成socket不等于G2 |
+| g2_qq | OneBot11纯文字wire、Windows UI只写保护配置与runtime receiver已接线并经本机合成socket到Calendar测试；实际Windows written_untested，重连/附件及G2探针仍缺失 | 明确组件/客户端/协议；本机独立登录；获准普通测试群；100条8小时及附件 | 真实群验收仍前置；本机合成socket不等于G2 |
 | windows_shell | 部分tray/window/锁排除/生命周期代码；通知钩子、跨进程聚焦、登录自启、包仍缺 | 真实Windows/WebView/IPC授权、托盘退出/电源/登录/安装运行 | 两条链所需，未实测 |
 | windows_storage | 部分DPAPI/ACL/数据库代码；保护缓存/交接与生产恢复缺口 | 两个真实Windows身份；ACL/reparse/占用/磁盘满/崩溃恢复 | 两条链所需，未实测 |
 | clipboard | write-only Windows源码written_untested；vault命令未连接，字节兼容受限 | 真实粘贴/持久性/覆盖/手清、历史/云排除/权限/闲置 | 密码链所需，BLOCKED |
 | parser_isolation | 真实隔离进程/Job Object限制、无网络/库访问/输入保护交接缺失 | Windows真实512MiB/超时/关闭杀进程/子进程限制 | 超出纯文字链，完整发布仍BLOCKED |
-| whole_flow | vault及Windows QQ UI配置未连通；生产receiver工厂已证合成socket→worker→来源→日历，真实桌面端到端未证 | 合成密码库、来源入历/改期/撤销/重启/恢复真实往返 | 最小链要收集子集证据；不等于全门槛PASS |
+| whole_flow | vault未连通；QQ UI保护配置与runtime receiver已接线，已证同save/connect入口的合成socket→worker→来源→日历，真实桌面端到端未证 | 合成密码库、来源入历/改期/撤销/重启/恢复真实往返 | 最小链要收集子集证据；不等于全门槛PASS |
 | quality_text | portable冻结语料已有157例132gold；TP123 FP3 FN9，P97.619% R93.182%，含糊猜测0 | 为实际source/artifact/build重新绑定全语料证据 | 文字指标已达阈值；不是QQ实际接收证据 |
 | quality_image | portable解析/OCR接缝已有；真实引擎/定位/质量OPEN | 后续Windows引擎与完整冻结图像集 | 超出最小链，完整发布BLOCKED |
 | quality_pdf | portable解析/OCR接缝已有；真实PDF/OCR/质量OPEN | 后续Windows引擎与完整冻结PDF集 | 超出最小链，完整发布BLOCKED |

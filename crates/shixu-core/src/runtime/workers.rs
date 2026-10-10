@@ -14,6 +14,10 @@ pub struct Delivery {
     pub cursor: String,
 }
 pub trait ReceivePort: Send {
+    /// Bounded control processing also runs while the supervisor is suspended.
+    fn service_controls(&mut self) -> AppResult<()> {
+        Ok(())
+    }
     fn poll(&mut self) -> AppResult<Option<Delivery>>;
     fn acknowledge(&mut self, cursor: &str) -> AppResult<()>;
     fn disconnect(&mut self) -> AppResult<()>;
@@ -113,6 +117,7 @@ impl Supervisor {
             threads.push(std::thread::spawn(move || {
                 while !*signal.cancelled.lock().unwrap_or_else(|p| p.into_inner()) {
                     let result = (|| {
+                        receiver.service_controls()?;
                         let _transport =
                             s.transport_io.lock().map_err(|_| AppError::Disconnected)?;
                         if !s.is_running() {

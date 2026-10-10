@@ -22,6 +22,10 @@ pub const COMMANDS: &[&str] = &[
     "retry_part",
     "settings_read",
     "save_source_config",
+    "qq_connection_save",
+    "qq_connection_read",
+    "qq_connect",
+    "qq_disconnect",
     "set_model_consent",
     "set_autostart",
     "calendar_query",
@@ -69,6 +73,10 @@ pub fn authorize(context: &CallingContext<'_>, command: &str) -> AppResult<()> {
                 | "retry_part"
                 | "settings_read"
                 | "save_source_config"
+                | "qq_connection_save"
+                | "qq_connection_read"
+                | "qq_connect"
+                | "qq_disconnect"
                 | "set_model_consent"
                 | "set_autostart"
         ),
@@ -151,6 +159,18 @@ struct RetryArgs {
 #[serde(deny_unknown_fields)]
 struct SourceArgs {
     config: shixu_core::contracts::notification::SourceConfig,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConnectionArgs {
+    source_id: shixu_core::contracts::notification::SourceId,
+    endpoint: String,
+    token: zeroize::Zeroizing<Vec<u8>>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceIdArgs {
+    source_id: shixu_core::contracts::notification::SourceId,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -325,6 +345,32 @@ pub fn dispatch(
                 .retry_part(a.part_id, now)?;
             Ok(serde_json::Value::Null)
         }
+        "qq_connection_save" => {
+            let mut a: ConnectionArgs = decode(payload)?;
+            state.qq()?.save(
+                a.source_id,
+                &a.endpoint,
+                shixu_core::contracts::vault::SecretBytes::new(std::mem::take(&mut *a.token)),
+            )?;
+            Ok(serde_json::Value::Null)
+        }
+        "qq_connection_read" => {
+            let a: SourceIdArgs = decode(payload)?;
+            serialized(state.qq()?.read(a.source_id)?)
+        }
+        "qq_connect" => {
+            let a: SourceIdArgs = decode(payload)?;
+            if !state.runtime()?.status().running {
+                return Err(AppError::Disconnected);
+            }
+            state.qq()?.connect(a.source_id)?;
+            Ok(serde_json::Value::Null)
+        }
+        "qq_disconnect" => {
+            let a: SourceIdArgs = decode(payload)?;
+            state.qq()?.disconnect(a.source_id)?;
+            Ok(serde_json::Value::Null)
+        }
         "settings_read" => {
             let _: EmptyArgs = decode(payload)?;
             let settings = state.settings()?;
@@ -340,6 +386,7 @@ pub fn dispatch(
                     .collect(),
                 model: state.consent.snapshot()?.into(),
                 autostart: settings.autostart()?,
+                // Legacy acceptance flag remains false until real Windows/QQ gates.
                 transport_supported: false,
             })
         }
@@ -606,7 +653,31 @@ fn preview_summary(p: shixu_core::contracts::backup::RestorePreview) -> serde_js
 /// The only large IPC command is a single explicit JSON import string. No path,
 /// SQL, command or arbitrary filesystem argument is accepted.
 pub fn validate_command_size(command: &str, value: &serde_json::Value) -> AppResult<()> {
-    if command == "backup_import" {
+    if command == "qq_connection_save" {
+        let object = value.as_object().ok_or(AppError::InvalidInput)?;
+        if object.len() != 3
+            || object
+                .get("source_id")
+                .and_then(|v| v.as_str())
+                .is_none_or(|s| s.len() != 36)
+            || object
+                .get("endpoint")
+                .and_then(|v| v.as_str())
+                .is_none_or(|s| s.len() > 128)
+            || object
+                .get("token")
+                .and_then(|v| v.as_array())
+                .is_none_or(|a| {
+                    a.is_empty()
+                        || a.len() > 4096
+                        || a.iter()
+                            .any(|v| v.as_u64().is_none_or(|b| !(33..=126).contains(&b)))
+                })
+        {
+            return Err(AppError::InvalidInput);
+        }
+        Ok(())
+    } else if command == "backup_import" {
         let object = value.as_object().ok_or(AppError::InvalidInput)?;
         if object.len() != 1
             || object

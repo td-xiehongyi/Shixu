@@ -127,6 +127,7 @@ pub fn run() {
                     supervisor.resume()?;
                 }
                 let workers = supervisor.spawn_workers(WorkerPorts {
+                    receiver: Some(state.take_qq_receiver()?),
                     parser: Some(Arc::new(NativeParser)),
                     backup: state.backup().ok(),
                     ..WorkerPorts::default()

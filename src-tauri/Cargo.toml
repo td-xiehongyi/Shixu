@@ -10,6 +10,7 @@ default = []
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
+shixu-native = { path = "../crates/shixu-native" }
 shixu-core = { path = "../crates/shixu-core" }
 serde.workspace = true
 serde_json.workspace = true
@@ -20,8 +21,10 @@ sha2 = "=0.11.0"
 sha2 = "=0.11.0"
 
 [target.'cfg(windows)'.dependencies]
-shixu-native = { path = "../crates/shixu-native" }
 tauri = { version = "=2.12.2", default-features = false, features = ["wry", "compression", "common-controls-v6", "tray-icon"] }
 
 [target.'cfg(windows)'.build-dependencies]
 tauri-build = "=2.7.1"
+
+[dev-dependencies]
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }

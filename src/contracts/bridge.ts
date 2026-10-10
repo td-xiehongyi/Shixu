@@ -16,6 +16,12 @@ import type {
   VaultMutation,
   VaultSummary,
 } from "./domain";
+export type QQConnectionMetadata = {
+  endpoint: string | null;
+  has_credential: boolean;
+  active: boolean;
+  last_error: AppErrorCode | null;
+};
 export type Invoke = (
   command: string,
   payload?: Record<string, unknown>,
@@ -250,6 +256,7 @@ async function call(
   try {
     if (
       command !== "backup_import" &&
+      command !== "qq_connection_save" &&
       new TextEncoder().encode(JSON.stringify(payload)).length > 65536
     )
       invalid();
@@ -268,16 +275,21 @@ async function secretCall(
   invoke: Invoke,
   command: string,
   payload: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<unknown> {
+  const wipe = (value: unknown): void => {
+    if (Array.isArray(value)) value.fill(0);
+    else if (value && typeof value === "object")
+      Object.values(value).forEach(wipe);
+  };
+  const clear = () => wipe(payload);
+  signal?.addEventListener("abort", clear, { once: true });
   try {
+    if (signal?.aborted) throw new BridgeError("DISCONNECTED");
     return await call(invoke, command, payload);
   } finally {
-    const wipe = (value: unknown): void => {
-      if (Array.isArray(value)) value.fill(0);
-      else if (value && typeof value === "object")
-        Object.values(value).forEach(wipe);
-    };
-    wipe(payload);
+    signal?.removeEventListener("abort", clear);
+    clear();
   }
 }
 
@@ -708,6 +720,55 @@ export function createMainBridge(invoke: Invoke) {
     async retryPart(partId: string): Promise<void> {
       id(partId);
       await call(invoke, "retry_part", { part_id: partId });
+    },
+    async qqConnectionRead(sourceId: string): Promise<QQConnectionMetadata> {
+      id(sourceId);
+      const d = object(
+        await call(invoke, "qq_connection_read", { source_id: sourceId }),
+        ["endpoint", "has_credential", "active", "last_error"],
+      );
+      nullable(d.endpoint, (v) => text(v, 128));
+      bool(d.has_credential);
+      bool(d.active);
+      nullable(d.last_error, (v) => enumeration(v, codes));
+      return d as unknown as QQConnectionMetadata;
+    },
+    async qqConnectionSave(
+      sourceId: string,
+      endpoint: string,
+      token: Uint8Array,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      try {
+        id(sourceId);
+        text(endpoint, 128);
+        if (
+          !token.length ||
+          token.length > 4096 ||
+          !token.every((b) => b >= 33 && b <= 126)
+        )
+          invalid();
+        await secretCall(
+          invoke,
+          "qq_connection_save",
+          {
+            source_id: sourceId,
+            endpoint,
+            token: Array.from(token),
+          },
+          signal,
+        );
+      } finally {
+        token.fill(0);
+      }
+    },
+    async qqConnect(sourceId: string): Promise<void> {
+      id(sourceId);
+      await call(invoke, "qq_connect", { source_id: sourceId });
+    },
+    async qqDisconnect(sourceId: string): Promise<void> {
+      id(sourceId);
+      await call(invoke, "qq_disconnect", { source_id: sourceId });
     },
     async settingsRead(): Promise<SettingsSnapshot> {
       return settings(await call(invoke, "settings_read"));

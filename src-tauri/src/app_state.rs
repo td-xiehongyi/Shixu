@@ -11,6 +11,8 @@ use shixu_core::{
 use std::sync::Arc;
 /// One database and live consent authority shared with the background runtime.
 pub struct AppState {
+    qq: Option<Arc<shixu_native::qq::connection::ConnectionController>>,
+    qq_receiver: std::sync::Mutex<Option<Box<dyn shixu_core::runtime::workers::ReceivePort>>>,
     backup: Option<Arc<shixu_core::backup::CalendarBackup>>,
     runtime: Option<Arc<shixu_core::runtime::Supervisor>>,
     calendar: Option<EventService>,
@@ -20,6 +22,8 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            qq: None,
+            qq_receiver: std::sync::Mutex::new(None),
             backup: None,
             runtime: None,
             calendar: None,
@@ -40,7 +44,10 @@ impl AppState {
         consent
             .bind(db.coordinator())
             .expect("fresh consent binding");
+        let (qq, receiver) = shixu_native::qq::connection::ConnectionController::new(db.clone());
         Self {
+            qq: Some(qq),
+            qq_receiver: std::sync::Mutex::new(Some(receiver)),
             backup: None,
             runtime: Some(Arc::new(shixu_core::runtime::Supervisor::new(
                 db.clone(),
@@ -58,6 +65,18 @@ impl AppState {
             root,
         )?));
         Ok(self)
+    }
+    pub fn qq(&self) -> AppResult<Arc<shixu_native::qq::connection::ConnectionController>> {
+        self.qq.clone().ok_or(AppError::Unsupported)
+    }
+    pub fn take_qq_receiver(
+        &self,
+    ) -> AppResult<Box<dyn shixu_core::runtime::workers::ReceivePort>> {
+        self.qq_receiver
+            .lock()
+            .map_err(|_| AppError::Disconnected)?
+            .take()
+            .ok_or(AppError::Conflict)
     }
     pub fn backup(&self) -> AppResult<Arc<shixu_core::backup::CalendarBackup>> {
         self.backup.clone().ok_or(AppError::Unsupported)

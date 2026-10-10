@@ -1,3 +1,4 @@
+import { QQConnectionPanel } from "./QQConnectionPanel";
 import { BackupPanel } from "./BackupPanel";
 import { useEffect, useState } from "react";
 import { mainBridge } from "../../contracts/bridge";
@@ -73,7 +74,7 @@ export function SettingsPage({
   return (
     <main className="module-content settings-page">
       <h1>设置</h1>
-      <p>QQ 未连接；接收、持久化、入历和后台运行须分别验证。</p>
+      <p>QQ 未连接前不会接收；连接、持久化、入历和后台运行须分别验证。</p>
       <p>模型服务尚未接通；保存授权不会发起网络请求。</p>
       {ready && (
         <section aria-label="后台状态">
@@ -161,7 +162,7 @@ export function SettingsPage({
               required
               maxLength={128}
               readOnly={!!config}
-              defaultValue={config?.adapter_type ?? "onebot"}
+              defaultValue={config?.adapter_type ?? "onebot11-text"}
             />
           </label>
           <label>
@@ -201,9 +202,13 @@ export function SettingsPage({
             保存来源
           </button>
         </form>
-        <p className="muted">
-          接入凭据在本机独立组件配置，本界面不读取或回显令牌。
-        </p>
+        {selected && (
+          <QQConnectionPanel
+            key={"qq-" + selected + (row?.epoch ?? "")}
+            sourceId={selected}
+            port={port}
+          />
+        )}
       </section>
       <section>
         <h2>云端模型授权</h2>
