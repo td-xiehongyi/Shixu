@@ -3,3 +3,9 @@
 /tests/fixtures/attachments/*.jpg binary
 /tests/fixtures/attachments/*.gif binary
 /tests/fixtures/attachments/*.pdf binary
+
+# These copied source bytes are pinned by the reviewed runtime manifests.
+/vault-helper/helper.mjs text eol=lf
+/vault-helper/crypto.mjs text eol=lf
+/vault-helper/package.json text eol=lf
+/vault-helper/package-lock.json text eol=lf

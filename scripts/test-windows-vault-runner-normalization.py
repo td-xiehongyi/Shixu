@@ -6,9 +6,12 @@ or single-quoted literal rules (only doubled apostrophes are escaped). Python's
 replacement models .NET's ordinal replacement for these ASCII arguments.
 """
 
+import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
+import tempfile
 import unittest
 
 
@@ -41,6 +44,34 @@ def normalized_relative_name(root, full_name):
 
 
 class RunnerNormalization(unittest.TestCase):
+    def test_autocrlf_checkout_preserves_reviewed_helper_hashes(self):
+        manifest = json.loads((ROOT / "vault-helper/resources-win-x64.json").read_text())
+        names = ("helper.mjs", "crypto.mjs", "package.json", "package-lock.json")
+        with tempfile.TemporaryDirectory(prefix="shixu-checkout-") as temporary:
+            repository = Path(temporary) / "repository"
+            checkout = Path(temporary) / "checkout"
+            repository.mkdir()
+            checkout.mkdir()
+            (repository / "vault-helper").mkdir()
+            (repository / ".gitattributes").write_bytes((ROOT / ".gitattributes").read_bytes())
+            for name in names:
+                canonical = subprocess.run(
+                    ["git", "-C", str(ROOT), "show", f"HEAD:vault-helper/{name}"],
+                    check=True, capture_output=True,
+                ).stdout
+                (repository / "vault-helper" / name).write_bytes(canonical)
+            git = ["git", "-C", str(repository), "-c", "core.autocrlf=true", "-c", "core.safecrlf=false"]
+            subprocess.run(git + ["init", "--quiet"], check=True, capture_output=True)
+            subprocess.run(git + ["add", "--", ".gitattributes", "vault-helper"], check=True, capture_output=True)
+            subprocess.run(
+                git + ["checkout-index", "--all", "--prefix=" + checkout.as_posix() + "/"],
+                check=True, capture_output=True,
+            )
+            for name in names:
+                with self.subTest(name=name):
+                    digest = hashlib.sha256((checkout / "vault-helper" / name).read_bytes()).hexdigest()
+                    self.assertEqual(digest, manifest["files"]["helper/" + name])
+
     def test_actual_literal_is_one_windows_separator(self):
         self.assertEqual(runner_replacement(), ("\\", "/"))
 
