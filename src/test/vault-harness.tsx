@@ -12,6 +12,7 @@ let rows: VaultSummary[] = [1, 2].map((n) => ({
   created_at: 0,
   updated_at: 0,
 }));
+const syntheticSubscription = async () => () => {};
 const port: VaultPort = {
   vaultCreate: async () => {},
   vaultActivity: async () => {},
@@ -46,5 +47,5 @@ const port: VaultPort = {
   },
 };
 createRoot(document.getElementById("root")!).render(
-  <VaultWindow port={port} />,
+  <VaultWindow subscribeLocked={syntheticSubscription} port={port} />,
 );

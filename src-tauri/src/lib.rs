@@ -11,3 +11,5 @@ pub mod release;
 pub mod vault;
 
 mod vault_signal;
+
+pub mod startup;

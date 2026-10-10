@@ -336,12 +336,31 @@ fn verify_token(process: HANDLE, profile: &Profile) -> AppResult<()> {
     }
     Ok(())
 }
+fn node_executable(resources: &Path) -> PathBuf {
+    resources.join("runtime").join("node.exe")
+}
+fn helper_script(resources: &Path) -> PathBuf {
+    resources.join("helper").join("helper.mjs")
+}
+#[cfg(test)]
+fn fixture_resources(manifest: &Path) -> PathBuf {
+    // Cargo's trusted absolute manifest directory may use either separator spelling.
+    // Rebuild its native components, then traverse parents without introducing '..'.
+    let manifest: PathBuf = manifest.components().collect();
+    manifest
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("resources")
+        .join("vault-win-x64")
+}
 pub(super) fn launch(
     resources: &Path,
     inbox: &Path,
     profile: Arc<Profile>,
 ) -> AppResult<Suspended> {
-    let executable = resources.join("runtime/node.exe");
+    let executable = node_executable(resources);
     let args = vec![
         executable.to_str().ok_or(AppError::Unsupported)?.to_owned(),
         "--permission".into(),
@@ -351,8 +370,7 @@ pub(super) fn launch(
         format!("--allow-fs-read={}", resources.join("helper").display()),
         format!("--allow-fs-read={}", inbox.display()),
         format!("--allow-fs-write={}", inbox.display()),
-        resources
-            .join("helper/helper.mjs")
+        helper_script(resources)
             .to_str()
             .ok_or(AppError::Unsupported)?
             .to_owned(),
@@ -1216,18 +1234,37 @@ mod tests {
         SecretBytes::new(value.as_bytes().to_vec())
     }
     fn fixture() -> (Store, PathBuf) {
-        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
         // No env override, arbitrary executable selection, production root or secrets.
         let base =
             std::env::temp_dir().join(format!("shixu synthetic 空 格 {}", uuid::Uuid::new_v4()));
-        let store = Store::synthetic(&base, &repo.join("resources/vault-win-x64"))
-            .expect("BLOCKED: fixed Windows resource/ACL fixture admission failed");
+        let store = Store::synthetic(
+            &base,
+            &fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR"))),
+        )
+        .expect("BLOCKED: fixed Windows resource/ACL fixture admission failed");
         (store, base)
+    }
+    #[test]
+    fn actual_trusted_constructors_pass_strict_windows_admission() {
+        let actual = fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR")));
+        assert!(path_wide(&actual).is_ok());
+        assert!(path_wide(&node_executable(&actual)).is_ok());
+        assert!(path_wide(&helper_script(&actual)).is_ok());
+        for manifest in [
+            r"C:\src\空 格\repo\crates\shixu-native",
+            "C:/src/空 格/repo/crates/shixu-native",
+        ] {
+            let resources = fixture_resources(Path::new(manifest));
+            assert_eq!(
+                resources,
+                PathBuf::from(r"C:\src\空 格\repo\resources\vault-win-x64")
+            );
+            assert!(path_wide(&resources).is_ok());
+            assert!(path_wide(&node_executable(&resources)).is_ok());
+            assert!(path_wide(&helper_script(&resources)).is_ok());
+        }
+        // The same validator still rejects slash-containing external paths.
+        assert!(path_wide(Path::new("C:/untrusted/runtime/node.exe")).is_err());
     }
     #[test]
     fn production_constructor_remains_blocked() {
@@ -1250,8 +1287,8 @@ mod tests {
         )
         .expect("fixed metadata parse");
         for path in [
-            base.join("active/vault.kdbx"),
-            base.join("active/vault.checkpoint-probe.kdbx"),
+            base.join("active").join("vault.kdbx"),
+            base.join("active").join("vault.checkpoint-probe.kdbx"),
             base.join("calendar.marker"),
         ] {
             assert!(File::open(&path).is_err(), "OS private read must be denied");
@@ -1277,18 +1314,18 @@ mod tests {
         assert!(
             std::fs::OpenOptions::new()
                 .write(true)
-                .open(base.join("resources/helper/helper.mjs"))
+                .open(base.join("resources").join("helper").join("helper.mjs"))
                 .is_err(),
             "OS resource write must be denied"
         );
         assert!(
-            File::open(base.join("resources/helper/helper.mjs")).is_ok(),
+            File::open(base.join("resources").join("helper").join("helper.mjs")).is_ok(),
             "OS resource read allowed"
         );
         assert!(
             std::fs::OpenOptions::new()
                 .write(true)
-                .open(base.join("diagnostic/readonly.marker"))
+                .open(base.join("diagnostic").join("readonly.marker"))
                 .is_err(),
             "OS resource DACL denies write without sharing guard"
         );
@@ -1511,7 +1548,7 @@ mod tests {
         std::fs::write(target.join("extra"), b"extra").unwrap();
         assert!(super::super::engine::verify_resources(&target).is_err());
         std::fs::remove_file(target.join("extra")).unwrap();
-        let helper = target.join("helper/helper.mjs");
+        let helper = target.join("helper").join("helper.mjs");
         let bytes = std::fs::read(&helper).unwrap();
         std::fs::write(&helper, b"tamper").unwrap();
         assert!(super::super::engine::verify_resources(&target).is_err());
@@ -1521,7 +1558,7 @@ mod tests {
         assert!(
             std::fs::OpenOptions::new()
                 .write(true)
-                .open(store.resources.join("helper/helper.mjs"))
+                .open(store.resources.join("helper").join("helper.mjs"))
                 .is_err(),
             "pinned resources deny write sharing"
         );
@@ -1872,7 +1909,7 @@ mod tests {
             Failure::AfterFinalFlush,
         ] {
             engine.open(secret("synthetic-only-master-v2")).unwrap();
-            let before = std::fs::read(base.join("active/vault.kdbx")).unwrap();
+            let before = std::fs::read(base.join("active").join("vault.kdbx")).unwrap();
             engine.windows.as_mut().unwrap().failure = failure;
             assert!(
                 engine
@@ -1942,7 +1979,8 @@ mod tests {
                 assert!(ancestors(&link.join("nested")).is_err());
                 std::fs::remove_dir(&link).unwrap();
                 let leaf = base.join("reparse-leaf.kdbx");
-                std::os::windows::fs::symlink_file(base.join("active/vault.kdbx"), &leaf).unwrap();
+                std::os::windows::fs::symlink_file(base.join("active").join("vault.kdbx"), &leaf)
+                    .unwrap();
                 assert!(open_handle(&leaf, false, false, FILE_SHARE_READ).is_err());
                 std::fs::remove_file(leaf).unwrap();
                 reparse_passed = true;
@@ -1953,7 +1991,7 @@ mod tests {
             Err(_) => panic!("reparse fixture creation failed"),
         }
         engine.open(secret("synthetic-only-master-v2")).unwrap();
-        let active = base.join("active/vault.kdbx");
+        let active = base.join("active").join("vault.kdbx");
         let saved = std::fs::read(&active).unwrap();
         std::fs::write(&active, b"fixed external edit").unwrap();
         assert_eq!(engine.list(), Err(AppError::Conflict));

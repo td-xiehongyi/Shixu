@@ -18,7 +18,7 @@ const nativePort = createVaultBridge(desktopInvoke);
 /** Injection is for controlled UI tests. App always uses nativePort; no demo unlock. */
 export type LockedSubscription = (callback: () => void) => Promise<() => void>;
 const subscribeNativeLocked: LockedSubscription = async (callback) => {
-  if (!isTauri()) return () => {};
+  if (!isTauri()) throw new BridgeError("UNSUPPORTED");
   const remove = await listen("vault_locked", () => callback(), {
     target: { kind: "WebviewWindow", label: "vault" },
   });
@@ -45,6 +45,10 @@ export function VaultWindow({
   const [deletion, setDeletion] = useState<VaultSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState<string | null>(null);
+  const registrationReady = useRef(false);
+  const [registration, setRegistration] = useState<
+    "pending" | "ready" | "failed"
+  >("pending");
   const epoch = useRef(0);
   const mounted = useRef(true);
   const unlocked = useRef(false);
@@ -89,9 +93,9 @@ export function VaultWindow({
     setBusy(false);
   }, [clearReveal]);
   const valid = (original: number) =>
-    mounted.current && epoch.current === original;
+    mounted.current && registrationReady.current && epoch.current === original;
   const touch = useCallback(() => {
-    if (!unlocked.current) return;
+    if (!registrationReady.current || !unlocked.current) return;
     if (idleTimer.current) clearTimeout(idleTimer.current);
     idleTimer.current = setTimeout(() => lockRef.current(), 300000);
   }, []);
@@ -99,6 +103,7 @@ export function VaultWindow({
   const activityPending = useRef(false);
   const interact = useCallback(() => {
     if (
+      !registrationReady.current ||
       !unlocked.current ||
       activityPending.current ||
       Date.now() - lastActivity.current < 1000
@@ -162,28 +167,41 @@ export function VaultWindow({
     };
   }, [port, clearLocal]);
   useEffect(() => {
+    registrationReady.current = false;
+    setRegistration("pending");
+    clearLocal();
     let active = true;
     let unsubscribe: (() => void) | undefined;
     void subscribeLocked(() => {
       if (active && mounted.current) clearLocal();
     })
       .then((remove) => {
-        if (active) unsubscribe = remove;
-        else remove();
+        if (active && mounted.current) {
+          unsubscribe = remove;
+          registrationReady.current = true;
+          setRegistration("ready");
+        } else remove();
       })
       .catch(() => {
         if (active && mounted.current) {
+          registrationReady.current = false;
+          setRegistration("failed");
           clearLocal();
           void port.vaultLock().catch(() => {});
         }
       });
     return () => {
       active = false;
+      registrationReady.current = false;
       unsubscribe?.();
     };
   }, [subscribeLocked, clearLocal, port]);
   async function authenticate(e: React.FormEvent) {
     e.preventDefault();
+    if (!registrationReady.current) {
+      clearLocal();
+      return;
+    }
     if (busy) return;
     const element = masterForm.current!;
     const get = (name: string) =>
@@ -250,7 +268,8 @@ export function VaultWindow({
     }
   }
   async function mutate(value: VaultMutation) {
-    if (!unlocked.current) throw new BridgeError("LOCKED");
+    if (!registrationReady.current || !unlocked.current)
+      throw new BridgeError("LOCKED");
     clearReveal();
     const original = ++epoch.current;
     setBusy(true);
@@ -283,7 +302,7 @@ export function VaultWindow({
     }
   }
   async function reveal(id: string) {
-    if (!unlocked.current || busy) return;
+    if (!registrationReady.current || !unlocked.current || busy) return;
     clearReveal();
     const original = epoch.current,
       sequence = revealSequence.current;
@@ -291,6 +310,7 @@ export function VaultWindow({
       const bytes = await port.vaultReveal(id);
       if (
         !valid(original) ||
+        !registrationReady.current ||
         !unlocked.current ||
         sequence !== revealSequence.current
       ) {
@@ -310,7 +330,7 @@ export function VaultWindow({
     }
   }
   async function copy(id: string, field: "account" | "password") {
-    if (!unlocked.current || busy) return;
+    if (!registrationReady.current || !unlocked.current || busy) return;
     const original = epoch.current;
     try {
       await port.vaultCopy(id, field);
@@ -369,7 +389,7 @@ export function VaultWindow({
                   type="password"
                   autoComplete="off"
                   required
-                  disabled={busy}
+                  disabled={busy || registration !== "ready"}
                 />
               </label>
               {mode === "create" && (
@@ -381,11 +401,14 @@ export function VaultWindow({
                     type="password"
                     autoComplete="off"
                     required
-                    disabled={busy}
+                    disabled={busy || registration !== "ready"}
                   />
                 </label>
               )}
-              <button className="primary" disabled={busy}>
+              <button
+                className="primary"
+                disabled={busy || registration !== "ready"}
+              >
                 {state === "unlocking"
                   ? "正在解锁…"
                   : mode === "create"
@@ -396,7 +419,7 @@ export function VaultWindow({
             <div className="vault-actions">
               {mode === "create" ? (
                 <button
-                  disabled={busy}
+                  disabled={busy || registration !== "ready"}
                   onClick={() => {
                     setMode("unlock");
                     setMessage("");
@@ -407,7 +430,7 @@ export function VaultWindow({
               ) : (
                 <>
                   <button
-                    disabled={busy}
+                    disabled={busy || registration !== "ready"}
                     onClick={() => {
                       masterForm.current?.reset();
                       setMode("create");
@@ -451,7 +474,7 @@ export function VaultWindow({
               />
               <button
                 className="primary"
-                disabled={busy}
+                disabled={busy || registration !== "ready"}
                 onClick={() => {
                   clearReveal();
                   setForm("new");
@@ -460,7 +483,7 @@ export function VaultWindow({
                 新增条目
               </button>
               <button
-                disabled={busy}
+                disabled={busy || registration !== "ready"}
                 onClick={() => {
                   clearReveal();
                   setMode("change");
@@ -507,7 +530,10 @@ export function VaultWindow({
                   />
                 </label>
                 <div className="vault-actions">
-                  <button className="primary" disabled={busy}>
+                  <button
+                    className="primary"
+                    disabled={busy || registration !== "ready"}
+                  >
                     保存主密码
                   </button>
                   <button
@@ -550,7 +576,7 @@ export function VaultWindow({
                       <h2>{row.channel}</h2>
                       <button
                         data-edit
-                        disabled={busy}
+                        disabled={busy || registration !== "ready"}
                         onClick={() => {
                           clearReveal();
                           setForm(row);
@@ -558,7 +584,10 @@ export function VaultWindow({
                       >
                         编辑
                       </button>
-                      <button disabled={busy} onClick={() => setDeletion(row)}>
+                      <button
+                        disabled={busy || registration !== "ready"}
+                        onClick={() => setDeletion(row)}
+                      >
                         删除
                       </button>
                     </div>
@@ -566,7 +595,7 @@ export function VaultWindow({
                       <span>账号</span>
                       <strong>{row.account}</strong>
                       <button
-                        disabled={busy}
+                        disabled={busy || registration !== "ready"}
                         onClick={() => void copy(row.entry_id, "account")}
                       >
                         复制账号
@@ -580,7 +609,7 @@ export function VaultWindow({
                           : "••••••••"}
                       </code>
                       <button
-                        disabled={busy}
+                        disabled={busy || registration !== "ready"}
                         onClick={() =>
                           visible === row.entry_id
                             ? clearReveal()
@@ -590,7 +619,7 @@ export function VaultWindow({
                         {visible === row.entry_id ? "隐藏密码" : "显示密码"}
                       </button>
                       <button
-                        disabled={busy}
+                        disabled={busy || registration !== "ready"}
                         onClick={() => void copy(row.entry_id, "password")}
                       >
                         复制密码
@@ -619,7 +648,7 @@ export function VaultWindow({
                 </p>
                 <div className="vault-actions">
                   <button
-                    disabled={busy}
+                    disabled={busy || registration !== "ready"}
                     onClick={() =>
                       void mutate({
                         operation: "delete",
@@ -630,7 +659,10 @@ export function VaultWindow({
                   >
                     确认删除
                   </button>
-                  <button disabled={busy} onClick={() => setDeletion(null)}>
+                  <button
+                    disabled={busy || registration !== "ready"}
+                    onClick={() => setDeletion(null)}
+                  >
                     取消
                   </button>
                 </div>
@@ -639,7 +671,11 @@ export function VaultWindow({
           </>
         )}
         <p role="status" className="vault-message">
-          {message}
+          {registration === "pending"
+            ? "正在准备密码库。"
+            : registration === "failed"
+              ? "密码库暂不可用，请重新打开窗口。"
+              : message}
         </p>
       </div>
       <footer className="vault-footer">

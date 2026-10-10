@@ -51,6 +51,9 @@ $null = Invoke-Recorded 'prepare' 'python' @('scripts/prepare-vault-runtime.py',
 $null = Invoke-Recorded 'resources' 'python' @('scripts/prepare-vault-runtime.py','--platform','win-x64','--verify-only')
 $null = Invoke-Recorded 'typecheck' 'pnpm.cmd' @('run','typecheck')
 $null = Invoke-Recorded 'frontend' 'pnpm.cmd' @('run','build')
+# Verify the actual trusted constructors on Windows before the expensive native probe.
+$paths = Invoke-Recorded 'trusted-path-constructors' 'cargo' @('test','-p','shixu-native','--lib','--target','x86_64-pc-windows-msvc','--locked','--offline','vault::windows::tests::actual_trusted_constructors_pass_strict_windows_admission','--','--exact','--nocapture','--test-threads=1')
+if ($paths -notmatch 'running 1 test' -or $paths -notmatch '1 passed; 0 failed; 0 ignored') { throw 'FAIL: trusted path constructor regression must actually run once' }
 # Existing runner validates exact 1 native test and all 33 fixed case families;
 # each of its direct Cargo exits and source/artifact identities is preserved.
 & (Join-Path $PSScriptRoot 'test-windows-vault-boundary.ps1')
@@ -88,5 +91,5 @@ if ($LASTEXITCODE -ne 0) { throw 'FAIL: source identity unavailable' }
 foreach ($name in $sourceNames) { $sourceHashes[$name] = (Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash.ToLowerInvariant() }
 $exe = 'target/x86_64-pc-windows-msvc/debug/shixu-desktop.exe'
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'FAIL: desktop artifact missing after successful build' }
-Write-NewText 'result.json' ((@{ head=$head.Trim(); source_sha256=$sourceHashes; artifact_sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant(); resource_sha256=$resourceHashes; production='Unsupported'; Q1='OPEN'; release_gates=@(1..12 | ForEach-Object { 'BLOCKED' }); synthetic_controller_count=3; manual_session_power='NOT EXECUTED' } | ConvertTo-Json -Depth 8) + "`n")
+Write-NewText 'result.json' ((@{ head=$head.Trim(); source_sha256=$sourceHashes; artifact_sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant(); resource_sha256=$resourceHashes; production='Unsupported'; Q1='OPEN'; release_gates=@(1..12 | ForEach-Object { 'BLOCKED' }); trusted_path_constructor_count=1; synthetic_controller_count=3; manual_session_power='NOT EXECUTED' } | ConvertTo-Json -Depth 8) + "`n")
 Write-Output "Minimum MSVC build/native synthetic evidence=$evidence. Production Unsupported; Q1 OPEN; all12 gates BLOCKED. Manual WTS/power observation: scripts/observe-windows-vault-lifecycle.ps1"

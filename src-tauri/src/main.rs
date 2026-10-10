@@ -1,9 +1,19 @@
 fn main() {
-    if let Some(code) = release_command() {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let observation = match shixu_desktop::startup::observation_mode(&args) {
+        Ok(mode) => mode,
+        Err(_) => {
+            eprintln!("FAIL: observation accepts only --vault-lifecycle-observe");
+            std::process::exit(1);
+        }
+    };
+    if observation.is_none()
+        && let Some(code) = release_command()
+    {
         std::process::exit(code);
     }
     #[cfg(windows)]
-    shixu_desktop::runtime::run();
+    shixu_desktop::runtime::run(observation.unwrap_or(shixu_desktop::startup::Mode::Normal));
     #[cfg(not(windows))]
     {
         eprintln!("UNSUPPORTED: Windows desktop runtime required");

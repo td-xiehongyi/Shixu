@@ -43,8 +43,11 @@ function port(extra: Partial<VaultPort> = {}): VaultPort {
     ...extra,
   } as VaultPort;
 }
+const readySubscription = async () => () => {};
 async function render(p: VaultPort) {
-  await act(async () => root.render(<VaultWindow port={p} />));
+  await act(async () =>
+    root.render(<VaultWindow port={p} subscribeLocked={readySubscription} />),
+  );
 }
 function button(text: string) {
   const b = [...host.querySelectorAll("button")].find(
@@ -839,4 +842,84 @@ it("late native listener registration is retired after unmount", async () => {
   expect(remove).toHaveBeenCalledTimes(1);
   await act(async () => callback());
   expect(host.textContent).toBe("");
+});
+
+for (const status of ["pending", "failed"] as const) {
+  it(`subscription_${status}_refuses_even_programmatic_authentication`, async () => {
+    const unlockSpy = vi.fn(async () => {});
+    const subscribe = () =>
+      status === "pending"
+        ? new Promise<() => void>(() => {})
+        : Promise.reject(new Error("synthetic listener failure"));
+    await act(async () =>
+      root.render(
+        <VaultWindow
+          port={port({ vaultUnlock: unlockSpy })}
+          subscribeLocked={subscribe}
+        />,
+      ),
+    );
+    await fill("主密码", "synthetic-master");
+    await act(async () =>
+      host
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    expect(unlockSpy).not.toHaveBeenCalled();
+    expect(host.textContent).toContain(
+      status === "pending" ? "正在准备密码库" : "密码库暂不可用",
+    );
+    expect(
+      (host.querySelector('[aria-label="主密码"]') as HTMLInputElement).value,
+    ).toBe("");
+    expect(button("解锁密码库").disabled).toBe(true);
+  });
+}
+it("subscription_success_admits_authentication_and_retirement_revokes_it", async () => {
+  const registration = deferred<() => void>();
+  const subscribe = () => registration.promise;
+  const unlockSpy = vi.fn(async () => {});
+  const p = port({ vaultUnlock: unlockSpy });
+  await act(async () =>
+    root.render(<VaultWindow port={p} subscribeLocked={subscribe} />),
+  );
+  expect(button("解锁密码库").disabled).toBe(true);
+  const remove = vi.fn();
+  await act(async () => registration.resolve(remove));
+  await unlock();
+  expect(unlockSpy).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain("虚构账号1");
+  const replacement = () => new Promise<() => void>(() => {});
+  await act(async () =>
+    root.render(<VaultWindow port={p} subscribeLocked={replacement} />),
+  );
+  expect(remove).toHaveBeenCalledTimes(1);
+  expect(host.textContent).not.toContain("虚构账号1");
+  await act(async () =>
+    host
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+  );
+  expect(unlockSpy).toHaveBeenCalledTimes(1);
+});
+
+it("failed_subscription_stays_unavailable_until_deliberate_successful_registration", async () => {
+  const p = port({ vaultUnlock: vi.fn(async () => {}) });
+  const failed = () => Promise.reject(new Error("synthetic failure"));
+  await act(async () =>
+    root.render(<VaultWindow port={p} subscribeLocked={failed} />),
+  );
+  await act(async () =>
+    host
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+  );
+  expect(p.vaultUnlock).not.toHaveBeenCalled();
+  await act(async () =>
+    root.render(<VaultWindow port={p} subscribeLocked={readySubscription} />),
+  );
+  await unlock();
+  expect(p.vaultUnlock).toHaveBeenCalledTimes(1);
 });

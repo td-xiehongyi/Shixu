@@ -124,42 +124,53 @@ fn local_url(url: &tauri::Url) -> bool {
     url.origin().ascii_serialization() == "http://tauri.localhost"
         && matches!(url.path(), "/" | "/index.html")
 }
-pub fn run() {
+fn normal_state(app: &mut tauri::App) -> AppResult<AppState> {
+    let root = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| AppError::Unsupported)?;
+    std::fs::create_dir_all(&root).map_err(|_| AppError::Unsupported)?;
+    // Process exclusion is fail-closed. Cross-process focus/session/power
+    // delivery still needs the Windows native integration gate.
+    let owner_path = root.join(".instance-owner");
+    if let Ok(metadata) = std::fs::symlink_metadata(&owner_path)
+        && (!metadata.is_file() || metadata.file_type().is_symlink())
+    {
+        return Err(AppError::InvalidInput);
+    }
+    let owner = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(owner_path)
+        .map_err(|_| AppError::Unsupported)?;
+    owner.try_lock().map_err(|_| AppError::Conflict)?;
+    app.manage(InstanceOwner { _file: owner });
+    let directory = root.join("calendar");
+    // Product storage is only the existing Windows DPAPI/ACL adapter.
+    let state = match shixu_native::protection::DpapiProtector::open_database(&directory) {
+        Ok(db) => AppState::from_database(Arc::new(db)).with_backups(&directory.join("backups"))?,
+        Err(_) => AppState::default(),
+    };
+    let vault_root = root.join("vault");
+    // Windows vault admission must create its private leaf atomically.
+    // The public constructor remains blocked pending native proof.
+    let state = if let Ok(resources) = app.path().resource_dir() {
+        state.with_vault(resources.join("vault-win-x64"), vault_root)
+    } else {
+        state
+    };
+    Ok(state)
+}
+pub fn run(mode: crate::startup::Mode) {
     tauri::Builder::default()
-        .setup(|app| {
-            let root = app.path().app_local_data_dir()?;
-            std::fs::create_dir_all(&root)?;
-            // Process exclusion is fail-closed. Cross-process focus/session/power
-            // delivery still needs the Windows native integration gate.
-            let owner_path = root.join(".instance-owner");
-            if let Ok(metadata) = std::fs::symlink_metadata(&owner_path)
-                && (!metadata.is_file() || metadata.file_type().is_symlink())
-            {
-                return Err(Box::new(AppError::InvalidInput));
+        .setup(move |app| {
+            let (state, observation_root) = crate::startup::initialize(mode, || normal_state(app))?;
+            if let Some(root) = observation_root {
+                app.manage(root);
+                eprintln!("SHIXU_VAULT_OBSERVATION mode=fresh-synthetic-unavailable production_store=untouched");
             }
-            let owner = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .read(true)
-                .write(true)
-                .open(owner_path)?;
-            owner.try_lock().map_err(|_| AppError::Conflict)?;
-            app.manage(InstanceOwner { _file: owner });
-            let directory = root.join("calendar");
-            // Product storage is only the existing Windows DPAPI/ACL adapter.
-            let state = match shixu_native::protection::DpapiProtector::open_database(&directory) {
-                Ok(db) => AppState::from_database(Arc::new(db))
-                    .with_backups(&directory.join("backups"))?,
-                Err(_) => AppState::default(),
-            };
-            let vault_root = root.join("vault");
-            // Windows vault admission must create its private leaf atomically.
-            // The public constructor remains blocked pending native proof.
-            let state = if let Ok(resources) = app.path().resource_dir() {
-                state.with_vault(resources.join("vault-win-x64"), vault_root)
-            } else {
-                state
-            };
             if let Ok(supervisor) = state.runtime() {
                 if std::env::args().any(|arg| arg == "--login-start") {
                     supervisor.login_start()?;
@@ -212,7 +223,11 @@ pub fn run() {
             }))?;
             app.manage(state);
             install_tray(app)?;
-            let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let mut main_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()));
+            if let Some(root) = app.try_state::<crate::startup::ObservationRoot>() {
+                main_builder = main_builder.data_directory(root.webview_directory());
+            }
+            let main = main_builder
                 .title("拾序")
                 .inner_size(1487.0, 1058.0)
                 .min_inner_size(760.0, 600.0)
@@ -309,12 +324,15 @@ pub fn run() {
                                     window.show().map_err(|_| AppError::Unsupported)?;
                                     window.set_focus().map_err(|_| AppError::Unsupported)?;
                                 } else {
-                                    WebviewWindowBuilder::new(
+                                    let mut builder = WebviewWindowBuilder::new(
                                         view.app_handle(),
                                         "vault",
                                         WebviewUrl::App("index.html?window=vault".into()),
-                                    )
-                                    .title("拾序 · 密码库")
+                                    );
+                                    if let Some(root) = view.app_handle().try_state::<crate::startup::ObservationRoot>() {
+                                        builder = builder.data_directory(root.webview_directory());
+                                    }
+                                    builder.title("拾序 · 密码库")
                                     .inner_size(640.0, 620.0)
                                     .on_navigation(local_url)
                                     .build()
