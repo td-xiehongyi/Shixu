@@ -31,21 +31,39 @@ struct ResourceManifest {
     archive_sha256: String,
     files: BTreeMap<String, String>,
 }
+#[cfg(not(windows))]
 const MANIFEST: &str = include_str!("../../../../vault-helper/resources-linux-x64.json");
-fn verify_resources(root: &Path) -> AppResult<()> {
+#[cfg(windows)]
+const MANIFEST: &str = include_str!("../../../../vault-helper/resources-win-x64.json");
+pub(super) fn verify_resources(root: &Path) -> AppResult<()> {
     let manifest: ResourceManifest =
         serde_json::from_str(MANIFEST).map_err(|_| AppError::Unsupported)?;
+    let (archive, archive_sha256) = if cfg!(windows) {
+        (
+            "node-v26.11.1-win-x64.zip",
+            "97f36a8a9684ff0d3e35758b4610fef5b628a5880e96f2ccc11240e5daf9934e",
+        )
+    } else {
+        (
+            "node-v26.11.1-linux-x64.tar.xz",
+            "3883bfc73f9a680ca4eab04b196068aaaab1373ffa77d8fc1a4408222495b651",
+        )
+    };
     if manifest.version != 1
         || manifest.node != "26.11.1"
         || manifest.kdbxweb != "2.1.1"
         || manifest.hash_wasm != "4.12.0"
-        || manifest.archive != "node-v26.11.1-linux-x64.tar.xz"
-        || manifest.archive_sha256
-            != "3883bfc73f9a680ca4eab04b196068aaaab1373ffa77d8fc1a4408222495b651"
+        || manifest.archive != archive
+        || manifest.archive_sha256 != archive_sha256
     {
         return Err(AppError::Unsupported);
     }
-    fn visit(dir: &Path, root: &Path, actual: &mut BTreeSet<String>) -> AppResult<()> {
+    fn visit(
+        dir: &Path,
+        root: &Path,
+        actual: &mut BTreeSet<String>,
+        directories: &mut BTreeSet<String>,
+    ) -> AppResult<()> {
         for item in fs::read_dir(dir).map_err(|_| AppError::Unsupported)? {
             let file = item.map_err(|_| AppError::Unsupported)?.path();
             let metadata = fs::symlink_metadata(&file).map_err(|_| AppError::Unsupported)?;
@@ -53,13 +71,23 @@ fn verify_resources(root: &Path) -> AppResult<()> {
                 return Err(AppError::Unsupported);
             }
             if metadata.is_dir() {
-                visit(&file, root, actual)?;
+                directories.insert(
+                    file.strip_prefix(root)
+                        .map_err(|_| AppError::Unsupported)?
+                        .components()
+                        .map(|part| part.as_os_str().to_str().ok_or(AppError::Unsupported))
+                        .collect::<AppResult<Vec<_>>>()?
+                        .join("/"),
+                );
+                visit(&file, root, actual, directories)?;
             } else if metadata.is_file() {
                 actual.insert(
                     file.strip_prefix(root)
                         .map_err(|_| AppError::Unsupported)?
-                        .to_string_lossy()
-                        .into_owned(),
+                        .components()
+                        .map(|part| part.as_os_str().to_str().ok_or(AppError::Unsupported))
+                        .collect::<AppResult<Vec<_>>>()?
+                        .join("/"),
                 );
             } else {
                 return Err(AppError::Unsupported);
@@ -68,7 +96,21 @@ fn verify_resources(root: &Path) -> AppResult<()> {
         Ok(())
     }
     let mut actual = BTreeSet::new();
-    visit(root, root, &mut actual)?;
+    let mut directories = BTreeSet::new();
+    visit(root, root, &mut actual, &mut directories)?;
+    let expected_directories: BTreeSet<String> = manifest
+        .files
+        .keys()
+        .flat_map(|key| {
+            let parts: Vec<_> = key.split('/').collect();
+            (1..parts.len())
+                .map(|length| parts[..length].join("/"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    if directories != expected_directories {
+        return Err(AppError::Unsupported);
+    }
     if actual != manifest.files.keys().cloned().collect() {
         return Err(AppError::Unsupported);
     }
@@ -204,6 +246,8 @@ pub struct KdbxWebEngine {
     cancellation: VaultCancellation,
     expected: Option<String>,
     next_id: u64,
+    #[cfg(windows)]
+    pub(super) windows: Option<super::windows::Store>,
 }
 impl KdbxWebEngine {
     /// Inputs come from trusted native configuration, never WebView arguments.
@@ -231,7 +275,21 @@ impl KdbxWebEngine {
             cancellation: VaultCancellation::default(),
             expected: None,
             next_id: 0,
+            #[cfg(windows)]
+            windows: None,
         })
+    }
+    #[cfg(all(test, windows))]
+    pub(super) fn synthetic_windows(store: super::windows::Store) -> Self {
+        Self {
+            resources: store.resources.clone(),
+            work: store.inbox.clone(),
+            pipe: None,
+            cancellation: VaultCancellation::default(),
+            expected: None,
+            next_id: 0,
+            windows: Some(store),
+        }
     }
     /// Obtain before dispatching blocking operations; another native owner can
     /// immediately terminate the helper when locking/revoking a session.
@@ -247,6 +305,16 @@ impl KdbxWebEngine {
         self.close()?;
         self.cancellation.check()?;
         verify_resources(&self.resources)?;
+        #[cfg(windows)]
+        if let Some(store) = &mut self.windows {
+            store.snapshot()?;
+            self.pipe = Some(PrivatePipe::spawn_windows(
+                store,
+                self.cancellation.clone(),
+            )?);
+            self.next_id = 0;
+            return Ok(());
+        }
         for name in ["vault.pending.kdbx", "vault.checkpoint.kdbx"] {
             let path = self.work.join(name);
             if path.try_exists().map_err(|_| AppError::AuthFailed)? {
@@ -289,16 +357,38 @@ impl KdbxWebEngine {
         }
         Ok(response)
     }
-    fn check(&self) -> AppResult<()> {
+    fn check(&mut self) -> AppResult<()> {
         if self.pipe.is_none() {
             return Err(AppError::Locked);
         }
-        if Some(commit::digest(&self.work.join("vault.kdbx"))?) != self.expected {
+        if Some(self.digest_active()?) != self.expected {
             return Err(AppError::Conflict);
         }
         Ok(())
     }
+    fn digest_active(&mut self) -> AppResult<String> {
+        #[cfg(windows)]
+        if let Some(store) = &mut self.windows {
+            return store.digest_active();
+        }
+        commit::digest(&self.work.join("vault.kdbx"))
+    }
+    fn active_exists(&self) -> AppResult<bool> {
+        #[cfg(windows)]
+        if let Some(store) = &self.windows {
+            return store.active_exists();
+        }
+        self.work
+            .join("vault.kdbx")
+            .try_exists()
+            .map_err(|_| AppError::AuthFailed)
+    }
     fn persist(&mut self, verified_digest: &str) -> AppResult<()> {
+        #[cfg(windows)]
+        if let Some(store) = &mut self.windows {
+            self.expected = Some(store.commit(self.expected.as_deref(), verified_digest)?);
+            return Ok(());
+        }
         self.expected = Some(commit::commit(
             &self.work,
             self.expected.as_deref(),
@@ -339,12 +429,7 @@ impl VaultEngine for KdbxWebEngine {
         let result = (|| {
             let master = text(&master)?;
             self.start()?;
-            if self
-                .work
-                .join("vault.kdbx")
-                .try_exists()
-                .map_err(|_| AppError::AuthFailed)?
-            {
+            if self.active_exists()? {
                 return Err(AppError::Conflict);
             }
             let digest =
@@ -357,7 +442,7 @@ impl VaultEngine for KdbxWebEngine {
         let result = (|| {
             let master = text(&master)?;
             self.start()?;
-            self.expected = Some(commit::digest(&self.work.join("vault.kdbx"))?);
+            self.expected = Some(self.digest_active()?);
             unit(self.request(RequestOp::Open { master })?)?;
             self.check()
         })();

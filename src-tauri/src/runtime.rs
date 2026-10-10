@@ -121,7 +121,8 @@ pub fn run() {
                 Err(_) => AppState::default(),
             };
             let vault_root = root.join("vault");
-            let _ = std::fs::create_dir_all(&vault_root);
+            // Windows vault admission must create its private leaf atomically.
+            // The public constructor remains blocked pending native proof.
             let state = if let Ok(resources) = app.path().resource_dir() {
                 state.with_vault(resources.join("vault-win-x64"), vault_root)
             } else {

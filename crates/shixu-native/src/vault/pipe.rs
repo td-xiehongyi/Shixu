@@ -14,13 +14,40 @@ use std::{
 use zeroize::Zeroizing;
 const MAX_FRAME: usize = 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) enum ChildOwner {
+    Std(Child),
+    #[cfg(windows)]
+    Windows(super::windows::WindowsProcess),
+}
+impl ChildOwner {
+    fn kill(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Std(child) => child.kill(),
+            #[cfg(windows)]
+            Self::Windows(child) => child.kill(),
+        }
+    }
+    fn wait(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Std(child) => child.wait().map(|_| ()),
+            #[cfg(windows)]
+            Self::Windows(child) => child.wait(),
+        }
+    }
+    #[cfg(all(test, target_os = "linux"))]
+    fn id(&self) -> u32 {
+        match self {
+            Self::Std(child) => child.id(),
+        }
+    }
+}
 /// Native-only cancellation capability. No process ID or arbitrary command API.
 #[derive(Clone, Default)]
 pub struct VaultCancellation(Arc<Mutex<CancellationState>>);
 #[derive(Default)]
 struct CancellationState {
     cancelled: bool,
-    child: Option<Arc<Mutex<Child>>>,
+    child: Option<Arc<Mutex<ChildOwner>>>,
 }
 impl VaultCancellation {
     pub fn cancel(&self) {
@@ -40,7 +67,7 @@ impl VaultCancellation {
             Ok(())
         }
     }
-    fn register(&self, child: Arc<Mutex<Child>>) -> AppResult<()> {
+    fn register(&self, child: Arc<Mutex<ChildOwner>>) -> AppResult<()> {
         let mut state = self.0.lock().map_err(|_| AppError::Locked)?;
         if state.cancelled {
             if let Ok(mut child) = child.lock() {
@@ -54,7 +81,7 @@ impl VaultCancellation {
     }
 }
 pub(super) struct PrivatePipe {
-    child: Arc<Mutex<Child>>,
+    child: Arc<Mutex<ChildOwner>>,
     requests: Option<SyncSender<Zeroizing<Vec<u8>>>>,
     replies: Receiver<AppResult<Zeroizing<Vec<u8>>>>,
     worker: Option<JoinHandle<()>>,
@@ -87,10 +114,62 @@ impl PrivatePipe {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let mut child = command.spawn().map_err(|_| AppError::Unsupported)?;
-        let mut input = child.stdin.take().ok_or(AppError::Unsupported)?;
-        let mut output = child.stdout.take().ok_or(AppError::Unsupported)?;
-        let child = Arc::new(Mutex::new(child));
+        let input = child.stdin.take().ok_or(AppError::Unsupported)?;
+        let output = child.stdout.take().ok_or(AppError::Unsupported)?;
+        let child = Arc::new(Mutex::new(ChildOwner::Std(child)));
         cancellation.register(child.clone())?;
+        Self::from_io(child, Box::new(input), Box::new(output))
+    }
+    #[cfg(windows)]
+    pub(super) fn spawn_windows(
+        store: &super::windows::Store,
+        cancellation: VaultCancellation,
+    ) -> AppResult<Self> {
+        cancellation.check()?;
+        let suspended =
+            super::windows::launch(&store.resources, &store.inbox, store.profile.clone())?;
+        Self::register_windows(suspended, cancellation)
+    }
+    #[cfg(windows)]
+    pub(super) fn register_windows(
+        suspended: super::windows::Suspended,
+        cancellation: VaultCancellation,
+    ) -> AppResult<Self> {
+        let super::windows::Suspended {
+            process,
+            thread,
+            input,
+            output,
+        } = suspended;
+        let child = Arc::new(Mutex::new(ChildOwner::Windows(process)));
+        // Cancellation and resume are serialized by the same authority mutex.
+        let mut state = cancellation.0.lock().map_err(|_| AppError::Locked)?;
+        if state.cancelled {
+            child
+                .lock()
+                .map_err(|_| AppError::Locked)?
+                .kill()
+                .map_err(|_| AppError::Unsupported)?;
+            return Err(AppError::Locked);
+        }
+        state.child = Some(child.clone());
+        if let Err(error) = super::windows::Suspended::resume_thread(&thread) {
+            if let Ok(mut owner) = child.lock() {
+                let _ = owner.kill();
+                let _ = owner.wait();
+            }
+            state.child = None;
+            return Err(error);
+        }
+        drop(state);
+        drop(thread);
+        Self::from_io(child, Box::new(input), Box::new(output))
+    }
+    pub(super) fn from_io(
+        child: Arc<Mutex<ChildOwner>>,
+        mut input: Box<dyn Write + Send>,
+        mut output: Box<dyn Read + Send>,
+    ) -> AppResult<Self> {
         let (tx, rx) = mpsc::sync_channel::<Zeroizing<Vec<u8>>>(1);
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         let worker = thread::spawn(move || {
@@ -151,7 +230,10 @@ impl Drop for PrivatePipe {
         }
         self.requests.take();
         if let Some(worker) = self.worker.take() {
+            #[cfg(not(windows))]
             let _ = worker.join();
+            #[cfg(windows)]
+            super::windows::finish_worker(worker);
         }
     }
 }
@@ -169,7 +251,7 @@ mod tests {
             .unwrap();
         let pid = child.id();
         assert!(matches!(
-            cancel.register(Arc::new(Mutex::new(child))),
+            cancel.register(Arc::new(Mutex::new(ChildOwner::Std(child)))),
             Err(AppError::Locked)
         ));
         assert!(!Path::new(&format!("/proc/{pid}")).exists());
