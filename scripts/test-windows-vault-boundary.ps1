@@ -46,7 +46,7 @@ $root = Join-Path (Get-Location).Path 'resources/vault-win-x64'
 if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'BLOCKED: pinned Windows resources missing; prepare them explicitly with Python/npm before this offline runner' }
 $actual = @(Get-ChildItem -LiteralPath $root -Recurse -Force)
 if ($actual | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'BLOCKED: resource reparse point' }
-$actualNames = @($actual | Where-Object { -not $_.PSIsContainer } | ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\','/') } | Sort-Object)
+$actualNames = @($actual | Where-Object { -not $_.PSIsContainer } | ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace([char]92,[char]47) } | Sort-Object)
 $expectedNames = @($manifest.files.PSObject.Properties.Name | Sort-Object)
 if ($actualNames.Count -ne 198 -or (Compare-Object $actualNames $expectedNames)) { throw 'BLOCKED: resource set differs from exact reviewed 198 files' }
 foreach ($entry in $manifest.files.PSObject.Properties) {
