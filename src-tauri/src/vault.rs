@@ -363,7 +363,6 @@ impl VaultController {
                 }
             }
             let _consumer = Consumer(dispatch_signal.clone());
-            let mut power_suspended = false;
             while !stopping.load(Ordering::Acquire) {
                 match wake_rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -378,17 +377,7 @@ impl VaultController {
                 if let Some(callback) = &callback {
                     callback(NativeVaultEvent::Revoked);
                 }
-                if pending & 8 != 0
-                    && let Some(callback) = &callback
-                {
-                    callback(NativeVaultEvent::SessionLocked);
-                }
-                if pending & 16 != 0
-                    && let Some(callback) = &callback
-                {
-                    callback(NativeVaultEvent::SessionUnlocked);
-                }
-                if pending & 32 != 0
+                if pending & crate::vault_signal::WINDOW_CLOSED != 0
                     && let Some(callback) = &callback
                 {
                     callback(NativeVaultEvent::WindowClosed);
@@ -397,18 +386,6 @@ impl VaultController {
                     a.synchronize(&dispatch_signal);
                 } else {
                     break;
-                }
-                if pending & 2 != 0 && !power_suspended {
-                    if let Some(callback) = &callback {
-                        callback(NativeVaultEvent::Suspend);
-                    }
-                    power_suspended = true;
-                }
-                if pending & 6 != 0 && !dispatch_signal.suspended() && power_suspended {
-                    if let Some(callback) = &callback {
-                        callback(NativeVaultEvent::Resume);
-                    }
-                    power_suspended = false;
                 }
             }
         });
@@ -500,7 +477,7 @@ impl VaultController {
     pub fn lock(&self, reason: LockReason) -> AppResult<()> {
         self.execute(Operation::Lock(reason)).map(|_| ())
     }
-    /// Orderly shutdown is outside the OS notification callback. It releases
+    /// Orderly shutdown is outside the notification callback. It releases
     /// handler ownership and waits for actual service/engine cleanup.
     pub fn shutdown(&self) {
         self.signal.fail();
@@ -670,7 +647,7 @@ mod tests {
         });
         ready.recv_timeout(Duration::from_secs(2)).unwrap();
         let locked = c.clone();
-        let locked = thread::spawn(move || locked.lock(LockReason::SessionLock));
+        let locked = thread::spawn(move || locked.lock(LockReason::Manual));
         wait_epoch(&c, 2);
         release.send(()).unwrap();
         assert!(matches!(old.join().unwrap(), Err(AppError::Locked)));
@@ -778,19 +755,15 @@ mod tests {
         let old = c.clone();
         let old = thread::spawn(move || old.execute(Operation::Reveal(SELECTED.into())));
         ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        let original = c.signal().generation();
         let began = Instant::now();
-        c.signal().notify(NativeVaultEvent::SessionLocked);
+        c.signal().notify(NativeVaultEvent::WindowClosed);
         assert!(began.elapsed() < Duration::from_millis(100));
-        let blocked = c.signal().check(c.signal().generation());
+        let blocked = c.signal().check(original);
         release.send(()).unwrap();
         let old_result = old.join().unwrap();
         assert_eq!(blocked, Err(AppError::Locked));
-        assert!(matches!(
-            c.execute(Operation::Unlock(master())),
-            Err(AppError::Locked)
-        ));
         assert!(matches!(old_result, Err(AppError::Locked)));
-        c.signal().notify(NativeVaultEvent::SessionUnlocked);
         assert!(matches!(c.execute(Operation::List), Err(AppError::Locked)));
         c.execute(Operation::Unlock(master())).unwrap();
         assert!(c.execute(Operation::List).is_ok());
@@ -811,7 +784,7 @@ mod tests {
                     panic!("secret expected")
                 };
                 let _serialized = serde_json::to_vec(secret.expose()).unwrap();
-                c.signal().notify(NativeVaultEvent::SessionLocked);
+                c.signal().notify(NativeVaultEvent::WindowClosed);
                 check()?;
                 submitted = true;
                 Ok(())
@@ -832,14 +805,13 @@ mod tests {
         let old = c.clone();
         let old = thread::spawn(move || old.execute(Operation::Unlock(master())));
         ready.recv_timeout(Duration::from_secs(2)).unwrap();
-        c.signal().notify(NativeVaultEvent::Suspend);
-        c.signal().notify(NativeVaultEvent::Resume);
+        c.signal().notify(NativeVaultEvent::WindowClosed);
         release.send(()).unwrap();
         assert!(matches!(old.join().unwrap(), Err(AppError::Locked)));
         assert!(matches!(c.execute(Operation::List), Err(AppError::Locked)));
         c.execute(Operation::Unlock(master())).unwrap();
         c.signal().fail();
-        c.signal().notify(NativeVaultEvent::SessionUnlocked);
+        c.signal().notify(NativeVaultEvent::Revoked);
         assert!(matches!(
             c.execute(Operation::Unlock(master())),
             Err(AppError::Locked)

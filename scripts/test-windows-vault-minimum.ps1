@@ -69,8 +69,8 @@ foreach ($case in $controllerCases) {
     $output = Invoke-Recorded $case[0] 'cargo' ($controllerPrefix + @($case[1],'--','--exact','--nocapture','--test-threads=1'))
     if ($output -notmatch 'running 1 test' -or $output -notmatch '1 passed; 0 failed; 0 ignored') { throw 'FAIL: each synthetic controller probe must actually run once' }
 }
-# These controller tests use controlled engines; no claim that they exercised OS
-# notifications. Actual WTS/power manual observation is a separate fixed script.
+# These controlled-engine tests exercise window-close revocation and reply guards.
+# Session lock and suspend/resume handling are outside the user-approved scope.
 $destination = Join-Path (Get-Location).Path 'target/x86_64-pc-windows-msvc/debug/vault-win-x64'
 $manifest = Get-Content 'vault-helper/resources-win-x64.json' -Raw | ConvertFrom-Json
 $files = @(Get-ChildItem -LiteralPath $destination -Recurse -Force)
@@ -91,5 +91,5 @@ if ($LASTEXITCODE -ne 0) { throw 'FAIL: source identity unavailable' }
 foreach ($name in $sourceNames) { $sourceHashes[$name] = (Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash.ToLowerInvariant() }
 $exe = 'target/x86_64-pc-windows-msvc/debug/shixu-desktop.exe'
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'FAIL: desktop artifact missing after successful build' }
-Write-NewText 'result.json' ((@{ head=$head.Trim(); source_sha256=$sourceHashes; artifact_sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant(); resource_sha256=$resourceHashes; production='Unsupported'; Q1='OPEN'; release_gates=@(1..12 | ForEach-Object { 'BLOCKED' }); trusted_path_constructor_count=1; synthetic_controller_count=3; manual_session_power='NOT EXECUTED' } | ConvertTo-Json -Depth 8) + "`n")
-Write-Output "Minimum MSVC build/native synthetic evidence=$evidence. Production Unsupported; Q1 OPEN; all12 gates BLOCKED. Manual WTS/power observation: scripts/observe-windows-vault-lifecycle.ps1"
+Write-NewText 'result.json' ((@{ head=$head.Trim(); source_sha256=$sourceHashes; artifact_sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant(); resource_sha256=$resourceHashes; production='Unsupported'; Q1='OPEN'; release_gates=@(1..12 | ForEach-Object { 'BLOCKED' }); trusted_path_constructor_count=1; synthetic_controller_count=3; session_power_scope='REMOVED_BY_USER'; manual_window_tray='NOT EXECUTED BY THIS SCRIPT' } | ConvertTo-Json -Depth 8) + "`n")
+Write-Output "Minimum MSVC build/native synthetic evidence=$evidence. Production Unsupported; Q1 OPEN; all12 gates BLOCKED. Optional window/tray observation: scripts/observe-windows-vault-lifecycle.ps1"

@@ -1,5 +1,7 @@
 # Windows 首版发布门槛（D7）
 
+2026-10-10 范围修订：用户取消锁屏、睡眠/唤醒逻辑与验收；`windows_shell` 移除该覆盖项，保留其余要求和全部12门槛。取消不是 PASS。
+
 2026-10-10 剪贴板需求修订：复制账号/密码后不因计时、锁库或退出自动清除；内容保留至用户覆盖或手动清除，可能留有密码。15 秒掩码、5 分钟闲置锁库、会话撤销和瞬时秘密内存清零保持要求；原生复制、历史/云同步排除及权限隔离仍须真实验收。
 2026-10-09：**发布 BLOCKED**。云端可运行严格证据校验器及 portable 测试；Windows 包、真实密码库、QQ 接收、剪贴板、进程隔离、全格式质量尚未验收。此文档及脚本不发布软件。默认测试中的 ignored 原生门槛不是通过，显式选择它会失败并说明 BLOCKED。
 
@@ -73,7 +75,7 @@ Windows最小接线stageA已在代码关闭已知check-then-publish间隙：Pend
 
 G2：用户独立选择和配置合法许可的第三方 QQ 适配器、专用测试账号、授权专用测试群、群白名单及时区，并在自己的机器本地登录。当前 QQ wire/真实下载未实现；不存在可执行的 vault/QQ 验证专用脚本。完成实现后，测试至少 100 条已知合成群消息、8 小时后台，在线接收到持久化 P95 ≤5 秒、规则入历 P95 ≤10 秒；保留真实普通群送达、原件下载（图片/PDF/DOCX/XLSX）、断网/登录失效/重连/遗漏区间证据。心跳或已启动不等于普通群已验收，重连不自动证明缺失已补齐。此脚本不会替用户登录或发送测试消息。
 
-其他门槛：实际 Windows WebView IPC 权限隔离、托盘/退出、会话锁定/休眠/恢复、自启注册、第二进程聚焦；同/不同用户 DPAPI、ACL/reparse、保护缓存和只读输入交接；15 秒显示、复制后保留至用户覆盖/手动清除且计时/锁库/退出不自动清空、剪贴板历史/云同步排除和vault-only复制权限、5 分钟闲置锁库且后台不刷新；真实 parser Job Object 512 MiB/子进程限制/kill-on-close、无网络/无密码库、30 秒单图/120 秒单文件超时。whole_flow 要有自动事项来源证据、改期取消、人工覆盖、撤销、重启防重放及确认恢复观察，不能只有“打开成功”。这些 native 门槛目前均 OPEN。
+其他门槛：实际 Windows WebView IPC 权限隔离、托盘/退出、自启注册、第二进程聚焦；同/不同用户 DPAPI、ACL/reparse、保护缓存和只读输入交接；15 秒显示、复制后保留至用户覆盖/手动清除且计时/锁库/退出不自动清空、剪贴板历史/云同步排除和vault-only复制权限、5 分钟闲置锁库且后台不刷新；真实 parser Job Object 512 MiB/子进程限制/kill-on-close、无网络/无密码库、30 秒单图/120 秒单文件超时。whole_flow 要有自动事项来源证据、改期取消、人工覆盖、撤销、重启防重放及确认恢复观察，不能只有“打开成功”。这些 native 门槛目前均 OPEN。
 
 ## 输入版本 1
 
@@ -104,4 +106,4 @@ N5：冻结 DOCX25/XLSX25 全部保留（包括安全拒绝/复杂格式/unsuppo
 
 含糊日期猜测0；全格式质量仍 OPEN。这些低召回/精度问题、真实引擎和 Windows 集成需要实际实现或明确设计修订，用户安装组件本身无法修复。云端通过、portable 独立审阅通过、构建身份报告生成，均不意味着首版可使用真实密码或已完成发布验收。
 
-2026-10-10 Stage C source wiring: retained-main WTS/session and power subclass hooks, same-controller atomic lifecycle barrier with bounded deferred cleanup, actual clipboard EmptyClipboard/Tauri resolver final checks, native-only targeted vault_locked UI redaction, deterministic ICO and exact198-file resource map are implemented. Actual Windows execution remains unaccepted and production Unsupported. The executable minimum MSVC workflow and manual unavailable-vault observation are documented in [windows-vault-lifecycle.md](windows-vault-lifecycle.md); all12 gates stay BLOCKED and Q1 OPEN.
+历史 Stage C（锁屏/电源部分已按用户要求删除，其他实现与证据按本机报告核对）：retained-main WTS/session and power subclass hooks, same-controller atomic lifecycle barrier with bounded deferred cleanup, actual clipboard EmptyClipboard/Tauri resolver final checks, native-only targeted vault_locked UI redaction, deterministic ICO and exact198-file resource map are implemented. Actual Windows execution remains unaccepted and production Unsupported. The executable minimum MSVC workflow and manual unavailable-vault observation are documented in [windows-vault-lifecycle.md](windows-vault-lifecycle.md); all12 gates stay BLOCKED and Q1 OPEN.

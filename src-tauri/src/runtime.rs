@@ -13,7 +13,6 @@ use shixu_core::{
         workers::{BackgroundWorkers, WorkerPorts},
     },
 };
-use shixu_native::vault::notifications::windows as vault_notifications;
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 struct NativeWorkers(Mutex<Option<BackgroundWorkers>>);
@@ -49,19 +48,6 @@ impl DesktopLifecycle for NativeDesktop {
         Ok(())
     }
 }
-fn close_notifications(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main")
-        && let Ok(hwnd) = window.hwnd()
-    {
-        // SAFETY: exit callback runs on owning UI thread, before main destruction.
-        if unsafe { vault_notifications::uninstall(hwnd.0) }.is_err()
-            && let Some(state) = app.try_state::<AppState>()
-        {
-            state.vault().signal().fail();
-            eprintln!("SHIXU_VAULT_LIFECYCLE cleanup=failed availability=blocked");
-        }
-    }
-}
 fn stop_workers(app: &tauri::AppHandle) {
     if let Some(workers) = app.try_state::<NativeWorkers>()
         && let Ok(mut workers) = workers.0.lock()
@@ -94,7 +80,6 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
                 let handle = app.clone();
                 if app
                     .run_on_main_thread(move || {
-                        close_notifications(&handle);
                         if let Some(state) = handle.try_state::<AppState>() {
                             state.vault().shutdown();
                         }
@@ -130,8 +115,8 @@ fn normal_state(app: &mut tauri::App) -> AppResult<AppState> {
         .app_local_data_dir()
         .map_err(|_| AppError::Unsupported)?;
     std::fs::create_dir_all(&root).map_err(|_| AppError::Unsupported)?;
-    // Process exclusion is fail-closed. Cross-process focus/session/power
-    // delivery still needs the Windows native integration gate.
+    // Process exclusion is fail-closed. Cross-process focus still needs
+    // the Windows native integration gate.
     let owner_path = root.join(".instance-owner");
     if let Ok(metadata) = std::fs::symlink_metadata(&owner_path)
         && (!metadata.is_file() || metadata.file_type().is_symlink())
@@ -192,33 +177,18 @@ pub fn run(mode: crate::startup::Mode) {
             }
             let vault = state.vault();
             let signal = vault.signal();
-            signal.require_registration();
             let handle = app.handle().clone();
-            let supervisor = state.runtime().ok();
             let redaction_signal = signal.clone();
             vault.set_lifecycle_handler(Arc::new(move |event| {
                 eprintln!("SHIXU_VAULT_LIFECYCLE deferred={event:?} production=Unsupported");
-                match event {
-                    NativeVaultEvent::Revoked => {
-                        if let Some(window) = handle.get_webview_window("vault") {
-                            // Fixed empty native event; never a session/secret payload.
-                            if window.emit_to(tauri::EventTarget::webview_window("vault"), "vault_locked", ()).is_err() {
-                                redaction_signal.fail();
-                                eprintln!("SHIXU_VAULT_LIFECYCLE redaction_submit=failed availability=blocked");
-                            }
-                        }
+                if event == NativeVaultEvent::Revoked
+                    && let Some(window) = handle.get_webview_window("vault")
+                {
+                    // Fixed empty native event; never a session/secret payload.
+                    if window.emit_to(tauri::EventTarget::webview_window("vault"), "vault_locked", ()).is_err() {
+                        redaction_signal.fail();
+                        eprintln!("SHIXU_VAULT_LIFECYCLE redaction_submit=failed availability=blocked");
                     }
-                    NativeVaultEvent::Suspend => {
-                        if let Some(s) = &supervisor {
-                            let _ = s.suspend(0);
-                        }
-                    }
-                    NativeVaultEvent::Resume => {
-                        if let Some(s) = &supervisor {
-                            let _ = s.resume();
-                        }
-                    }
-                    _ => {}
                 }
             }))?;
             app.manage(state);
@@ -227,46 +197,13 @@ pub fn run(mode: crate::startup::Mode) {
             if let Some(root) = app.try_state::<crate::startup::ObservationRoot>() {
                 main_builder = main_builder.data_directory(root.webview_directory());
             }
-            let main = main_builder
+            main_builder
                 .title("拾序")
                 .inner_size(1487.0, 1058.0)
                 .min_inner_size(760.0, 600.0)
                 .on_navigation(local_url)
                 .build()?;
-            let install_window = main.clone();
-            let failed_signal = signal.clone();
-            // Tauri queues on the owning UI thread; raw HWND is fetched there.
-            if main
-                .run_on_main_thread(move || {
-                    let result = install_window
-                        .hwnd()
-                        .map_err(|_| AppError::Unsupported)
-                        .and_then(|hwnd| {
-                            let notify_signal = signal.clone();
-                            let fail_signal = signal.clone();
-                            // SAFETY: retained actual top-level window, owning UI thread.
-                            unsafe {
-                                vault_notifications::install(
-                                    hwnd.0,
-                                    Arc::new(move |e| notify_signal.notify(e)),
-                                    Arc::new(move || fail_signal.fail()),
-                                )
-                            }
-                        });
-                    if result.is_ok() {
-                        signal.registration_ready();
-                        eprintln!(
-                            "SHIXU_VAULT_LIFECYCLE registration=ready production=Unsupported"
-                        );
-                    } else {
-                        signal.fail();
-                        eprintln!("SHIXU_VAULT_LIFECYCLE registration=failed availability=blocked");
-                    }
-                })
-                .is_err()
-            {
-                failed_signal.fail();
-            }
+            eprintln!("SHIXU_VAULT_LIFECYCLE dispatcher=ready session_power=out_of_scope production=Unsupported");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -364,7 +301,6 @@ pub fn run(mode: crate::startup::Mode) {
         .expect("desktop runtime failed")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
-                close_notifications(app);
                 if let Some(state) = app.try_state::<AppState>() {
                     state.vault().shutdown();
                 }

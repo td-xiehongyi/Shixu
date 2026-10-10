@@ -7,9 +7,6 @@ use std::sync::Arc;
 pub enum LifecycleEvent {
     WindowClose,
     Exit,
-    SessionLock,
-    Suspend,
-    Resume,
     LoginStart,
     SecondInstance,
 }
@@ -28,7 +25,7 @@ pub struct Lifecycle {
     pub desktop: Arc<dyn DesktopLifecycle>,
 }
 impl Lifecycle {
-    pub fn handle_lifecycle(&self, event: LifecycleEvent, now: i64) -> AppResult<()> {
+    pub fn handle_lifecycle(&self, event: LifecycleEvent, _now: i64) -> AppResult<()> {
         match event {
             LifecycleEvent::WindowClose => {
                 let locked = self.vault.lock(LockReason::Manual);
@@ -36,17 +33,6 @@ impl Lifecycle {
                 locked.and(hidden)
             }
             LifecycleEvent::SecondInstance => self.desktop.focus_main(),
-            LifecycleEvent::SessionLock => self.vault.lock(LockReason::SessionLock),
-            LifecycleEvent::Suspend => {
-                let locked = self.vault.lock(LockReason::Suspend);
-                let stopped = self.supervisor.suspend(now);
-                locked.and(stopped)
-            }
-            LifecycleEvent::Resume => {
-                let locked = self.vault.lock(LockReason::Suspend);
-                let resumed = self.supervisor.resume();
-                locked.and(resumed)
-            }
             LifecycleEvent::LoginStart => {
                 let locked = self.vault.lock(LockReason::Manual);
                 let started = self.supervisor.login_start();

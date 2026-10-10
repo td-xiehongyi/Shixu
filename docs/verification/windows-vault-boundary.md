@@ -1,6 +1,6 @@
 # Windows 合成 vault 边界执行
 
-Stage B 新增私有 Windows launcher/store 和固定的原生测试，公开 `KdbxWebEngine::prepared` **仍返回 Unsupported**。Linux crypto 测试、GNU Windows cfg/type/lint 和源码中存在测试，都不证明 AppContainer/Job/ACL/MIC 或 MSVC 实际运行通过。Q1 OPEN、全部12发布门槛 BLOCKED；Stage C 已实现 retained-main WTS/电源钩子、原生代际屏障、工程 ICO 和精确资源映射；真实 Windows通知/链接/桌面运行仍未验收。完整最小工作流见 [windows-vault-lifecycle.md](windows-vault-lifecycle.md)。
+Stage B 新增私有 Windows launcher/store 和固定的原生测试，公开 `KdbxWebEngine::prepared` **仍返回 Unsupported**。Linux crypto 测试、GNU Windows cfg/type/lint 和源码中存在测试，都不证明 AppContainer/Job/ACL/MIC 或 MSVC 实际运行通过。Q1 OPEN、全部12发布门槛 BLOCKED；当前保留关窗撤销代际屏障、工程 ICO 和精确资源映射；锁屏/睡眠及唤醒逻辑与验收已由用户取消。实际本机合成链及 MSVC 构建已通过，生产桌面接线仍未验收。完整最小工作流见 [windows-vault-lifecycle.md](windows-vault-lifecycle.md)。
 
 只用脚本自己创建的全新临时目录、固定虚构密码和仓库审核的资源；不传真实库、凭据、程序、路径、能力或环境覆盖。标准用户执行，不改防火墙/loopback 豁免，不登录 QQ，不自动安装组件，不启用生产引擎。
 
@@ -50,4 +50,4 @@ Launcher 使用 regular 零能力 AppContainer、验证 low token、suspended-st
 
 实际 Windows 的运行结果与剩余失败见 [本机阶段报告](windows-local-2026-10-10.md)；独立源码审核、实际 OS运行和剩余验收缺口解决前不能开启生产。原生复制命令已在 Stage A 经 epoch/session guard 接到 SystemClipboard，但真实 Windows/历史与云排除仍未验收。只有 master/current/new/confirmation 和存储PASSWORD禁换行，ACCOUNT/CHANNEL保留原先字符，不恢复旧的账号禁令。
 
-2026-10-10 Stage C source wiring: retained-main WTS/session and power subclass hooks, same-controller atomic lifecycle barrier with bounded deferred cleanup, actual clipboard EmptyClipboard/Tauri resolver final checks, native-only targeted vault_locked UI redaction, deterministic ICO and exact198-file resource map are implemented. Actual Windows execution remains unaccepted and production Unsupported. The executable minimum MSVC workflow and manual unavailable-vault observation are documented in [windows-vault-lifecycle.md](windows-vault-lifecycle.md); all12 gates stay BLOCKED and Q1 OPEN.
+历史 Stage C（WTS/电源钩子已按用户要求删除；最新状态见本机报告）：retained-main WTS/session and power subclass hooks, same-controller atomic lifecycle barrier with bounded deferred cleanup, actual clipboard EmptyClipboard/Tauri resolver final checks, native-only targeted vault_locked UI redaction, deterministic ICO and exact198-file resource map are implemented. Actual Windows execution remains unaccepted and production Unsupported. The executable minimum MSVC workflow and manual unavailable-vault observation are documented in [windows-vault-lifecycle.md](windows-vault-lifecycle.md); all12 gates stay BLOCKED and Q1 OPEN.

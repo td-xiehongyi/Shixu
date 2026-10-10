@@ -342,13 +342,7 @@ fn failed_close_is_fail_closed_and_requires_cleanup_before_reopen() {
 
 #[test]
 fn every_lock_reason_revokes_session() {
-    for reason in [
-        LockReason::Manual,
-        LockReason::Timeout,
-        LockReason::SessionLock,
-        LockReason::Suspend,
-        LockReason::Exit,
-    ] {
+    for reason in [LockReason::Manual, LockReason::Timeout, LockReason::Exit] {
         let (mut service, session) = created();
         service.lock(reason).unwrap();
         service.lock(reason).unwrap();

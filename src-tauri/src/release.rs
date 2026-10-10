@@ -142,7 +142,6 @@ pub fn policies() -> Vec<Policy> {
                 "windows_build_installer",
                 "webview_ipc_authorization",
                 "tray_exit",
-                "session_lock_suspend_resume",
                 "autostart_registration",
                 "second_process_focus",
             ],
@@ -403,7 +402,7 @@ fn report(artifact: &str) -> ReleaseReport {
         unsupported_cases: vec![
             "KdbxWeb engine/private session/vault actor and dispatcher are implemented with Linux synthetic evidence; Windows production isolation remains Unsupported, guarded resolver publication and native vault copy wiring are implemented with portable synthetic evidence; ten-backup/restore remains unimplemented; Windows write-only clipboard/history/cloud exclusion source is written_untested, native acceptance BLOCKED; UTF-8 without embedded NUL only, at most65536bytes; copy persists until user overwrite or manual clear".into(),
             "QQ wire, isolated parser process and Windows protected cache/handoff are unimplemented".into(),
-            "Windows build/installer/WebView/DPAPI/ACL and lifecycle hooks lack genuine acceptance".into(),
+            "Windows installer/WebView/DPAPI/ACL and window/tray integration lack complete native acceptance; session lock and suspend/resume handling removed by user scope decision".into(),
             "N4 full 20 image / 20 PDF corpus: image regions29/31 boxes39/47; PDF eligible regions72/73 boxes77/81, plus44 rejected gold regions with0 output. Chinese cases1/2 regions and6/10 boxes; event-quality OPEN".into(),
             "N5 full25 DOCX: chars TP194 FP0 FN179 P100 R52.01; titles8/0/9 P100 R47.06; calendar6/2/11 P75 R35.29. Full25 XLSX: chars196/0/114 P100 R63.23; titles7/0/6 P100 R53.85; calendar4/3/9 P57.14 R30.77. Ambiguous guesses0; unsupported gold retained, quality OPEN".into(),
             "N6 portable text157 cases132 gold TP123 FP3 FN9 P97.619 R93.182 ambiguous guesses0; scope only frozen portable text corpus".into(),

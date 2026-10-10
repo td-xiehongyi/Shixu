@@ -2,13 +2,13 @@
 
 2026-10-10，当前仍 **BLOCKED**。目标先接通“渠道、账号、密码”和“获准群纯文字→持久日历”。云端能补代码、做合成portable测试；用户自己的Windows能做真实系统/组件验收。准备机器与安装组件不能代替缺失代码，纯文字子集通过也不能关闭完整首版的12门槛。
 
-本机更新：提交 `c638668` 的固定 Windows 最小工作流已实际通过，包括合成 KDBX 生命周期、隔离边界和 MSVC 桌面构建；真实窗口完成通知注册，用户确认密码库可以点击、托盘可以退出，进程 exit 0。锁屏/休眠待验，退出时 WebView 注销错误 1412 待定位。生产构造器仍 Unsupported，真实桌面密码接线、剪贴板、QQ 与安装仍未验收。最新证据和明确阻断见 [本机阶段报告](windows-local-2026-10-10.md)；以下完整门槛不因此自动通过。
+本机更新：提交 `c638668` 的固定 Windows 最小工作流已实际通过，包括合成 KDBX 生命周期、隔离边界和 MSVC 桌面构建；真实窗口完成通知注册，用户确认密码库可以点击、托盘可以退出，进程 exit 0。锁屏/睡眠/唤醒已按用户决定删除相关逻辑与验收（范围外，不记通过）；历史退出时 WebView 注销错误 1412 待定位。生产构造器仍 Unsupported，真实桌面密码接线、剪贴板、QQ 与安装仍未验收。最新证据和明确阻断见 [本机阶段报告](windows-local-2026-10-10.md)；以下完整门槛不因此自动通过。
 
 ## 按依赖补代码
 
 1. **G1 Windows实际隔离仍前置。** 已接通固定KdbxWeb/Node独立进程、私有协议、VaultService有界actor、命令与独立UI；Linux合成测试覆盖创建/CRUD/重开/换密/错密/篡改/冲突/代际取消。Windows构造器仍Unsupported，需实际Job/token/resource/network/ACL/reparse/原子文件替换及GUI验证；十份加密备份/恢复仍在最小阶段外；剪贴板命令已接线但Windows未验收，不能把Linux证据当Windows生产G1通过。
 2. **独立决定QQ组件和客户端版本，再做G2。** 已实现 receive-only OneBot11 `/event` 纯文字 wire、literal loopback 与身份验证，并通过本机合成真实 socket 测试。Windows 设置现有只写令牌/用户级保护保存与显式连接、断开；runtime 已将可管理 receiver 注入 `WorkerPorts.receiver`，model 仍默认 None。当前仅一个活动来源，切换须先断开，保存不连接，配置变更/恢复/重启须显式重新连接，没有自动重连。组件精确 release、QQ 客户端及本机真实群尚未验收，Windows UI/DPAPI/WebView 实际运行仍 written_untested/BLOCKED；缺少 G2 探针、补拉/附件下载和真实端到端证据。用户一次授权群的新文字通知自动入历，不加逐条确认。完整G2仍需≥100条、≥8小时、持久化P95≤5秒/规则P95≤10秒与各格式原件证据。详见[安全连接接线](qq-connection-ui.md)。
-3. **连接Windows宿主和存储。** 已写DPAPI/ACL适配器、日历SQLite/备份、tray/window与生命周期抽象；runtime与命令共享failclosed vault controller，Windows引擎不可用时保留日历/QQ，文件锁仅作第二进程排除。需真实会话锁/电源通知、跨进程聚焦、OS登录自启、打包安装/卸载及WebView权限连接。`--login-start`分支并不证明注册自启；生命周期抽象测试并不证明收到Windows通知。日历打开DPAPI失败会退回Unavailable AppState，也需本机可见错误/恢复验收。保护缓存与parser输入交接仍不完整。
+3. **连接Windows宿主和存储。** 已写DPAPI/ACL适配器、日历SQLite/备份、tray/window与生命周期抽象；runtime与命令共享failclosed vault controller，Windows引擎不可用时保留日历/QQ，文件锁仅作第二进程排除。需跨进程聚焦、OS登录自启、打包安装/卸载及WebView权限连接。`--login-start`分支并不证明注册自启；生命周期抽象测试并不证明真实窗口/托盘行为。日历打开DPAPI失败会退回Unavailable AppState，也需本机可见错误/恢复验收。保护缓存与parser输入交接仍不完整。
 4. **复制命令已守卫接到原生写边界，仍待Windows实测。** SystemClipboard在Windows用nonnull owner HWND同步发布三个排除格式后写CF_UNICODETEXT，非WindowsUnsupported。UTF-8无内嵌NUL、最多65536字节；超范围/非文本失败，无截断。准备/Open失败保留旧内容；Empty成功后更晚失败可能丢失旧内容/留下部分格式，Close或owner清理报错时甚至已留下文本。Windows拥有成功发布内存；只有未发布缓冲和暂存内存清零。复制后内容保留至用户覆盖/手动清除；锁库/退出清瞬时秘密但不清剪贴板。固定接口不是任意字节承诺，clipboard仍written_untested/BLOCKED。真实测试命令与手工边界见 [Windows门槛](windows-release.md)。
 5. **合成端到端验收。** 用虚构三字段密码库进行创建→解锁→保存→重开→显示/复制→锁库/换密/备份恢复；另一条独立链做纯文字实际群消息→持久来源→自动入历→改期/取消→编辑/撤销→重启不重放。两条链并行运行不应让QQ/日历刷新密码库闲置计时。全部是合成数据，失败/断连不能反馈成功。
 
@@ -20,7 +20,7 @@
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------- |
 | g1_vault         | Linux真实引擎/私有协议/actor/dispatcher/UI已接通；Windows隔离和十份备份恢复未验收                                                                         | 引擎实际版本/哈希；Windows合成UUID/Unicode/换行/错误密码/冲突/换密旧备份往返 | 密码链前置，安装本身不足                 |
 | g2_qq            | OneBot11纯文字wire、Windows UI只写保护配置与runtime receiver已接线并经本机合成socket到Calendar测试；实际Windows written_untested，重连/附件及G2探针仍缺失 | 明确组件/客户端/协议；本机独立登录；获准普通测试群；100条8小时及附件         | 真实群验收仍前置；本机合成socket不等于G2 |
-| windows_shell    | 部分tray/window/锁排除/生命周期代码；通知钩子、跨进程聚焦、登录自启、包仍缺                                                                               | 真实Windows/WebView/IPC授权、托盘退出/电源/登录/安装运行                     | 两条链所需，未实测                       |
+| windows_shell    | 部分tray/window/锁排除/生命周期代码；跨进程聚焦、登录自启、包仍缺                                                                               | 真实Windows/WebView/IPC授权、托盘退出/登录/安装运行                     | 两条链所需，未实测                       |
 | windows_storage  | 部分DPAPI/ACL/数据库代码；保护缓存/交接与生产恢复缺口                                                                                                     | 两个真实Windows身份；ACL/reparse/占用/磁盘满/崩溃恢复                        | 两条链所需，未实测                       |
 | clipboard        | write-only Windows源码written_untested；vault_copy命令已按epoch/session守卫连接，字节兼容受限                                                             | 真实粘贴/持久性/覆盖/手清、历史/云排除/权限/闲置                             | 密码链所需，BLOCKED                      |
 | parser_isolation | 真实隔离进程/Job Object限制、无网络/库访问/输入保护交接缺失                                                                                               | Windows真实512MiB/超时/关闭杀进程/子进程限制                                 | 超出纯文字链，完整发布仍BLOCKED          |

@@ -298,8 +298,11 @@ fn part_and_vault_states_are_typed_wire_values() {
     for value in ["not_created", "locked", "unlocking", "unlocked"] {
         roundtrip::<VaultStatus>(json!(value));
     }
-    for value in ["manual", "timeout", "session_lock", "suspend", "exit"] {
+    for value in ["manual", "timeout", "exit"] {
         roundtrip::<LockReason>(json!(value));
+    }
+    for removed in ["session_lock", "suspend"] {
+        assert!(serde_json::from_value::<LockReason>(json!(removed)).is_err());
     }
     assert!(serde_json::from_value::<PartStatus>(json!("pretend_success")).is_err());
 }

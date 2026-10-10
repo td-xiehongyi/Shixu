@@ -139,7 +139,7 @@ fn close_to_tray_vs_exit() {
 #[test]
 fn locked_vault_keeps_collection_running() {
     let (db, c, v, _, l) = fixture();
-    l.handle_lifecycle(LifecycleEvent::SessionLock, 10).unwrap();
+    l.vault.lock(LockReason::Manual).unwrap();
     receive(&l, &c);
     assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Locked);
     assert_eq!(
@@ -163,16 +163,6 @@ fn calendar_activity_does_not_refresh_vault_timer() {
     assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Locked);
 }
 #[test]
-fn resume_requires_vault_unlock_and_records_gap() {
-    let (_, _, v, _, l) = fixture();
-    l.handle_lifecycle(LifecycleEvent::Suspend, 20).unwrap();
-    assert!(!l.supervisor.status().running);
-    l.handle_lifecycle(LifecycleEvent::Resume, 30).unwrap();
-    assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Locked);
-    assert!(l.supervisor.status().running);
-    assert!(!l.supervisor.status().sources[0].1.gaps.is_empty());
-}
-#[test]
 fn second_instance_only_focuses_existing() {
     let (_, _, _, d, l) = fixture();
     l.handle_lifecycle(LifecycleEvent::SecondInstance, 10)
@@ -180,7 +170,7 @@ fn second_instance_only_focuses_existing() {
     assert_eq!(*d.0.lock().unwrap(), vec!["focus"]);
 }
 #[test]
-#[ignore = "requires actual Windows session/power/tray/autostart hooks and engine"]
+#[ignore = "requires actual Windows tray/autostart integration and engine"]
 fn actual_windows_lifecycle_acceptance() {
     panic!(
         "BLOCKED: real Windows lifecycle hooks, vault engine, QQ/parser/provider and OS acceptance not available; portable ports do not satisfy this gate"

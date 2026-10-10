@@ -15,9 +15,9 @@ $evidence = Join-Path '.superpowers/sdd/shixu-v0.1' ('task-windows-vault-lifecyc
 $mode = '--vault-lifecycle-observe'
 $artifact = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $process = Start-Process -FilePath $exe -ArgumentList $mode -PassThru -RedirectStandardOutput (Join-Path $evidence 'desktop.stdout.log') -RedirectStandardError (Join-Path $evidence 'desktop.stderr.log')
-Write-Output 'Open the unavailable vault window. Manually close main to tray, lock/unlock Windows, then suspend/resume once using Windows UI. Do not enter credentials. Exit via tray after observing vault stays locked.'
+Write-Output 'Open the unavailable vault window. Close main to tray, reopen it through the tray, and close the vault window. Do not enter credentials. Exit via tray after observing vault stays locked.'
 $process.WaitForExit()
-$result = @{ artifact_sha256=$artifact; mode=$mode; store='fresh process-owned synthetic root; unavailable vault; production calendar/config/QQ initialization skipped'; artifact_unchanged=((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -eq $artifact); exit=$process.ExitCode; production='Unsupported'; release='BLOCKED'; observation='User manual actions; logs show dispatcher receipt, not production engine or OS protection acceptance' }
+$result = @{ artifact_sha256=$artifact; mode=$mode; store='fresh process-owned synthetic root; unavailable vault; production calendar/config/QQ initialization skipped'; artifact_unchanged=((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -eq $artifact); exit=$process.ExitCode; production='Unsupported'; release='BLOCKED'; session_power_scope='REMOVED_BY_USER'; observation='User window/tray actions; dispatcher logs do not prove production engine or OS protection acceptance' }
 $path = Join-Path $evidence 'result.json'
 $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
 try { $writer = New-Object IO.StreamWriter($stream, [Text.UTF8Encoding]::new($false)); $writer.Write(($result | ConvertTo-Json) + "`n"); $writer.Flush() } finally { $stream.Dispose() }

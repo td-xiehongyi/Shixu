@@ -203,7 +203,9 @@ fn socket_calendar_for_groups(groups: Vec<&str>) {
         Err(AppError::Unsupported)
     );
     assert_eq!(
-        lifecycle.handle_lifecycle(shixu_desktop::lifecycle::LifecycleEvent::SessionLock, 0),
+        lifecycle
+            .vault
+            .lock(shixu_core::contracts::vault::LockReason::Manual),
         Err(AppError::Unsupported)
     );
     assert!(runtime.status().running);

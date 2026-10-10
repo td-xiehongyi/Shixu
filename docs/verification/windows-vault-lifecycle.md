@@ -1,44 +1,33 @@
-# Windows minimum desktop and vault lifecycle
+# Windows 最小桌面与密码库生命周期
 
-Stage C implements notification wiring and engineering build inputs. Windows production vault remains `Unsupported`; Q1 stays OPEN and all twelve release gates stay BLOCKED. Cloud type checks and injected tests do not accept Windows behavior or enable production.
+2026-10-10 用户明确要求删除锁屏、睡眠及唤醒相关逻辑和验收。已移除 WTS/电源通知注册、HWND subclass、对应事件与后台暂停/恢复分支，不再要求手工锁屏/睡眠。这是范围取消，不能记为测试 PASS。
 
-Local update, 2026-10-10: the unchanged minimum workflow passed on committed source `c638668`, including actual MSVC build, the synthetic native vault/OS boundary and the three controller regressions below. The observation desktop reported registration ready; the user confirmed opening the vault and tray exit, and the process exited 0. Manual lock/suspend remain unverified; a WebView window-class unregister error 1412 on exit remains unexplained. See [the local evidence report](windows-local-2026-10-10.md). These results do not enable production or upgrade a release gate.
+保留手动锁库、关闭主窗口到托盘时锁库、关闭密码窗口锁库、退出撤销、五分钟密码库闲置锁库、十五秒显示遮罩及临时秘密清理。日历/QQ 活动不刷新密码库计时；锁库不停止接收。复制内容保留至用户覆盖或手动清除，没有定时、锁库或退出自动清理。
 
-Use an installed standard-user x64 Visual Studio Developer PowerShell with C++ compiler, linker and Windows SDK resource compiler; installed Rust 1.99.0 MSVC host/target and locked offline Cargo cache; Python; frontend Node24.19.0/pnpm11.19.0 with frozen dependencies already prepared; and installed WebView2 for observation. The scripts install none of these prerequisites. Missing components produce a specific BLOCKED result. Prepare prerequisites separately; no credentials, QQ login or production KDBX are needed.
+公开 Windows 密码构造器仍 `Unsupported`，Q1 OPEN、全部十二项发布门槛 BLOCKED。`windows_shell` 仍要求真实构建/安装、WebView IPC 权限、托盘退出、自启注册与第二进程聚焦。
 
-Explicit public runtime preparation remains:
+## 固定最小工作流
 
-```powershell
-python scripts/prepare-vault-runtime.py --platform win-x64
-python scripts/prepare-vault-runtime.py --platform win-x64 --verify-only
-```
-
-This fixed pinned preparation fills the user-temp archive/npm cache and verifies the 198-file reviewed manifest. It is never run at startup. The minimum workflow uses the same preparation with `--offline`, verifies the engineering ICO, builds the frontend, runs the exact Windows trusted-path constructor regression, invokes the existing actual synthetic native boundary runner (exact one parent test plus production gate), performs the real MSVC desktop build with custom protocol, and runs three exact synthetic controller regressions (blocked reveal, serialized reply and blocked startup):
+使用已安装的标准用户 x64 VS Developer PowerShell、C++/Windows SDK、Rust 1.99.0 MSVC、Python、Node24.19.0/pnpm11.19.0，以及已准备的锁定离线依赖和固定 Windows 密码资源。脚本不会安装组件；缺项明确 BLOCKED。观察窗口另需 WebView2。
 
 ```powershell
 .\scripts\test-windows-vault-minimum.ps1
 ```
 
-Each direct external exit and safe full output is recorded under a unique ignored evidence directory. The final result includes committed source hashes, executable hash and all 198 copied resource hashes. Native boundary evidence retains its separate exact test/case counts. Build success is not installer or full release acceptance. Bundle remains inactive. The ICO is a deterministic engineering asset, not final branding; regenerate/check with the two checked-in Python icon scripts.
+脚本要求干净审核提交：验证原 198 文件清单及工程 ICO、构建前端，运行精确路径构造器与完整合成原生隔离探针，实际 MSVC 构建桌面，执行三个关窗撤销控制器回归（阻塞显示、序列化后投递、阻塞启动）。每条外部命令的直接退出码和输出、源码/EXE/资源哈希写入唯一忽略证据目录。只使用虚构密码及独立测试目录；不打开真实库、不连接 QQ、不启用生产密码库。成功构建不等于安装验收。
 
-For interactive observation, use the fixed built unavailable-vault desktop:
+需要检查基本窗口/托盘时，可使用：
 
 ```powershell
 .\scripts\observe-windows-vault-lifecycle.ps1
 ```
 
-The script accepts no arguments and launches only `--vault-lifecycle-observe`, recording that mode and the pre-launch executable hash. Startup atomically creates a fresh process-owned synthetic temp root; it never opens normal application data, DPAPI calendar/config, QQ controller or queued workers. Both main and vault WebView profiles use the synthetic root rather than the normal application profile. The unavailable controller still receives the same native lifecycle hooks. Synthetic browser files may remain in that temp root after exit; cleanup refuses recursive deletion.
+固定观察模式不接收参数或凭据，创建独立临时根与 WebView 配置，不初始化正常日历、DPAPI 配置、QQ 或后台任务。打开密码窗口，关闭主窗口到托盘并重开，关闭密码窗口，最后托盘退出。日志 `dispatcher=ready` 只表示内部处理器就绪；WindowClosed/Revoked 表示事件处理，不是生产引擎可用证明。不进行系统锁屏或睡眠观察。
 
-Open the dedicated vault window, leave it locked, close main to tray, manually lock/unlock Windows, then manually suspend/resume through Windows UI. Exit through the tray. The script never forces a lock/suspend or accepts credentials, vault paths, programs or capabilities. Review `SHIXU_VAULT_LIFECYCLE` lines alongside a manual action record: registration readiness, deferred revocation, actual session lock/unlock, suspend/automatic resume and window-close events. Pending events can coalesce; these are dispatcher receipt logs, not callback latency or production-engine proof. A SendMessage test alone is not proof that Windows emitted the event. Production stays unavailable during this observation.
+## 保留的撤销与投递边界
 
-Actual hooks register the retained top-level main HWND on its owning UI thread with `SetWindowSubclass` and this-session WTS registration. The callback only updates same-controller atomic generation/block/pending state and tries a capacity-one wake. A full wake queue retains event bits; disconnected/panicking consumer fails closed. Unhandled messages forward through Tauri's subclass chain. Registration failure blocks optional vault availability. Exit/WM_NCDESTROY unregister and remove on the owning thread, with failure retained as blocked availability. Calendar/QQ availability is independent of the optional vault controller.
+关窗通知只更新同一控制器的原子代际与 pending 位，并尝试容量一的唤醒，不等待引擎锁。队列满仍保留撤销；消费者断开或异常后拒绝请求。延后处理先向可信密码 WebView 发固定空 `vault_locked`，再清理会话。旧请求、阻塞启动、迟到秘密回复均保留原代际并被拒绝，随后须重新手动解锁。
 
-A bounded dispatcher emits fixed empty `vault_locked` only to the trusted vault WebView before waiting for authority/cancellation cleanup, then handles supervisor power transitions. Unlock/resume invalidates existing sessions and allows only a fresh manual unlock when all reasons permit it; duplicate automatic resume does not restart twice. Main close-to-tray and vault close invalidate through this same owner. This stage adds no focus-loss policy.
+实际 Tauri 回复在序列化后、消耗 resolver 前复核；剪贴板在 OpenClipboard/准备后、EmptyClipboard 前复核。前端仍须成功订阅原生锁库事件后才能操作密码，清理输入/显示和过期监听。订阅与系统会话/电源注册是不同机制，前者保留。已在线性化边界前送出的内容无法追溯撤回；不可保证 JS/系统内存所有副本彻底擦除。
 
-Native requests, worker acceptance and pending replies retain their original lifecycle generation, authority epoch and internal service session. The clipboard writer rechecks the native predicate after buffers and OpenClipboard are prepared, immediately before EmptyClipboard. Actual Tauri delivery rechecks after IpcResponse serialization immediately before consuming the resolver. The UI admits authentication and secret actions only after its owned native subscription succeeds. Pending or failed registration keeps controls unavailable; reopening permits a deliberate new subscription. The UI subscribes only to native lock events, clears owned input/reveal bytes and rows, and retires listeners on StrictMode/unmount/late registration. Frontend event emission has no granted capability.
-
-A publication already linearized before notification cannot be retroactively withdrawn from WebView or clipboard. Atomic checks do not make OS/IPC delivery transactional. Physical helper termination/wiping waits for deferred cleanup; immutable JS/serialization/library copies and OS memory cannot be guaranteed erased. Fifteen-second reveal masking, five-minute idle and persistent clipboard semantics remain. Clipboard is never automatically cleared or rolled back.
-
-Trusted native resource, Node and helper paths now join individual components; the strict policy still rejects slash-containing external paths. The constructor regression is Windows-only and must run on Windows.
-
-Remaining native proof includes real WTS/power receipt and callback timing under blocked work, Tauri/WebView subclass coexistence, MSVC resource/link success, Job/AppContainer/token/ACL/reparse/network/handle/storage protections, native clipboard history/cloud and OS-damage boundaries. The unavailable desktop observation cannot establish a real-engine publication race; a separate authorized native synthetic controller probe must do that before production enablement. No gate is upgraded by this workflow.
+历史提交 `c638668` 的最小链及基础打开/托盘退出已通过；它包含后来取消的钩子，不能代表新构建验收。退出时 WebView 类注销错误 1412 仍是未定位诊断，不因删除钩子推断已修复。当前证据见 [本机报告](windows-local-2026-10-10.md)。生产存储准入、真实桌面引擎/回复/剪贴板、其他身份、物理断电/磁盘满、reparse 夹具权限、真实 QQ、安装仍按各自门槛处理。

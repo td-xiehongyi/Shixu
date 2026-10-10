@@ -20,6 +20,34 @@ fn absent_reports_block_all_required_gates() {
     assert_eq!(r.verdict, Verdict::Blocked);
 }
 #[test]
+fn shell_scope_excludes_session_power_but_keeps_remaining_native_gates() {
+    let policy = policies()
+        .into_iter()
+        .find(|p| p.id == "windows_shell")
+        .unwrap();
+    assert!(!policy.coverage.contains(&"session_lock_suspend_resume"));
+    for required in [
+        "windows_build_installer",
+        "webview_ipc_authorization",
+        "tray_exit",
+        "autostart_registration",
+        "second_process_focus",
+    ] {
+        assert!(policy.coverage.contains(&required));
+    }
+    let report = check(&evidence());
+    assert_eq!(report.gates.len(), 12);
+    assert_eq!(
+        report
+            .gates
+            .iter()
+            .find(|g| g.id == "windows_shell")
+            .unwrap()
+            .verdict,
+        Verdict::Blocked
+    );
+}
+#[test]
 fn started_is_not_verified() {
     let mut v = evidence();
     let mut g = gate("quality_text");

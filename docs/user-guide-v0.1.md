@@ -11,10 +11,10 @@
 | 未实现/未接通，返回 Unsupported | Windows真实 VaultEngine隔离验收/本机秘密清理保证、十份KDBX备份与恢复、剪贴板真实Windows验收，QQ下载/登录重连，真实隔离parser进程/原生引擎/Windows保护缓存与输入交接；可选模型provider也未选定/未接通 |
 | QQ配置与纯文字生产接线已实现，仅合成验证 | 设置只写保护令牌、literal loopback地址、显式连接/断开与runtime receiver；同一保存/连接入口合成socket到Calendar已验证；单活动来源，保存/重启不自动连接，实际Windows/G2仍BLOCKED |
 | Windows cfg 已写但编译/运行未验收 | Tauri窗口/能力/命令注册、QQ配置/receiver实际Windows运行、运行时DPAPI目录/SQLite/备份协调、托盘和关闭/退出、owner文件实例排他 |
-| 会话/电源钩子源码已实现，native cfg 类型检查通过 | retained-main WTS/电源 subclass、同一vault owner的原子代际屏障/有界dispatcher、原生锁库事件UI清理、工程ICO及198文件资源映射；真实Windows/完整桌面构建仍未验收 |
+| 密码库生命周期已精简 | 用户取消系统锁屏/睡眠/唤醒处理；保留关窗/退出、手动/闲置锁库、原子代际屏障、有界dispatcher及原生锁库UI清理；实际MSVC合成链通过不代表生产密码库可用 |
 | 实际钩子尚未实现 | 自启注册、第二进程通知首进程并聚焦；owner文件锁不等于已有跨进程聚焦 |
 
-最小 MSVC 构建、固定合成 probe 与手动不可用密码库的会话/电源观察步骤见 [Windows最小工作流](verification/windows-vault-lifecycle.md)。生产密码库保持Unsupported、Q1 OPEN、全部12门槛BLOCKED。
+最小 MSVC 构建、固定合成 probe 与手动不可用密码库的窗口/托盘观察步骤见 [Windows最小工作流](verification/windows-vault-lifecycle.md)。生产密码库保持Unsupported、Q1 OPEN、全部12门槛BLOCKED。
 
 部分算法有真实受控本地fixture引擎试验，但生产 host 仍 Unsupported，也没有通过Windows资源隔离。默认bundle关闭，尚无安装包。浏览器仅演示页面；本地数据库和功能必须通过真实Windows IPC/runtime运行才算产品集成。当前生产密码操作不可用，不要输入真实密码以“试一试”。
 
@@ -30,7 +30,7 @@
 
 表单业务字段只有**渠道、账号、密码**；同渠道可多个账号，同名条目有内部UUID，不按渠道覆盖。主密码必须真正参与成熟KDBX引擎解密，错误密码不能解锁；当前实现阶段选择 KdbxWeb 独立进程；Linux合成后端测试不等于Windows生产验收，原生 actor/命令及独立 UI 已接通，Linux 仅以虚构数据验证实际创建/解锁/读写；Windows构造器仍返回Unsupported，生产操作不可用。主密码（含当前/新密码/确认）与存储密码禁止 CR/LF/NEL/LS/PS 换行，不裁剪空格或替换字符；账号与渠道允许换行。引擎支持合法 UTF-8 文本，明确拒绝非法 UTF-8；protected value 保持渠道换行。剪贴板仍有独立NUL限制。
 
-设计及portable策略为密码默认掩码、显示15秒后恢复、5分钟无密码库交互自动锁库；日历/QQ后台不能刷新计时。复制账号/密码成功后提示：内容不会自动清除，将保留至你覆盖或手动清除，可能留有密码；计时、锁库、休眠和退出不清空系统剪贴板。手动锁定、会话锁定、休眠、退出仍应销毁会话、清零瞬时秘密内存并丢弃迟到结果；关闭主窗口应入托盘并锁库。当前已有新的write-only Win32 writer及历史/云同步排除源码，能力仅written_untested；暂停的所有权草稿仍归档。只支持≤65536字节的UTF-8文本且不能含内嵌NUL，不支持任意秘密字节。EmptyClipboard成功之后的失败可能丢失旧内容，清理失败也可能已留下新内容，不能保证失败时保留旧剪贴板。真实引擎/dispatcher已完成Linux合成接线；Windows系统钩子和复制接线仍未实测，复制已接入原生SystemClipboard；Windows引擎仍Unsupported，真实复制尚不可达，非Windows写入返回Unsupported。
+设计及portable策略为密码默认掩码、显示15秒后恢复、5分钟无密码库交互自动锁库；日历/QQ后台不能刷新计时。复制账号/密码成功后提示：内容不会自动清除，将保留至你覆盖或手动清除，可能留有密码；计时、锁库和退出不清空系统剪贴板。手动锁定、闲置锁库、关闭窗口与退出仍应销毁会话、清零瞬时秘密内存并丢弃迟到结果；关闭主窗口应入托盘并锁库。当前已有新的write-only Win32 writer及历史/云同步排除源码，能力仅written_untested；暂停的所有权草稿仍归档。只支持≤65536字节的UTF-8文本且不能含内嵌NUL，不支持任意秘密字节。EmptyClipboard成功之后的失败可能丢失旧内容，清理失败也可能已留下新内容，不能保证失败时保留旧剪贴板。真实引擎/dispatcher已完成Linux合成接线；系统锁屏/睡眠/唤醒处理已取消；Windows实际复制仍未实测，复制已接入原生SystemClipboard；Windows引擎仍Unsupported，真实复制尚不可达，非Windows写入返回Unsupported。
 
 主密码只锁密码库，日历/QQ应独立运行。没有主密码找回后门；忘记不能重置解密。更改主密码需要旧密码与新密码确认并经引擎重新打开验证；**旧备份仍使用旧主密码**。JS字符串、换页、截图、剪贴板历史和同用户恶意程序也不能承诺彻底清除。真实密码使用必须等G1/V2/V3及Windows发布门槛通过。
 

@@ -91,8 +91,7 @@ export type VaultMutation =
       password: Uint8Array;
     }
   | { operation: "delete"; id: string; expected_revision: Revision };
-export type LockReason =
-  "manual" | "timeout" | "session_lock" | "suspend" | "exit";
+export type LockReason = "manual" | "timeout" | "exit";
 export type VaultStatus = "not_created" | "locked" | "unlocking" | "unlocked";
 export type SourceCapability =
   | "live_messages"

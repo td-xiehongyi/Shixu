@@ -118,8 +118,6 @@ pub enum VaultMutation {
 pub enum LockReason {
     Manual,
     Timeout,
-    SessionLock,
-    Suspend,
     Exit,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
