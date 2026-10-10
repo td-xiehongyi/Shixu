@@ -82,7 +82,7 @@ async function operation(r) {
     } else {
       const bytes=readActive();try {db=await load(bytes,cred);}finally{bytes.fill(0);}
       if(db.groups.length!==1 || db.getDefaultGroup().groups.length || db.binaries.getAll().length) fail('UNSUPPORTED');
-      entries().forEach(e=>{summary(e);validateText(field(e,'Title'));validateText(field(e,'UserName'),true);validateText(field(e,'Password'),true);});
+      entries().forEach(e=>{summary(e);validateText(field(e,'Title'));validateText(field(e,'UserName'));validateText(field(e,'Password'),true);});
       assertListBudget();
     }
     return r.op==='open'?{type:'unit'}:{type:'unit',staged_digest:stagedDigest};
@@ -112,7 +112,7 @@ async function operation(r) {
     if(!Number.isSafeInteger(r.expected_revision)||r.expected_revision!==summary(entry).revision) fail('CONFLICT');
   }
   if(r.op==='delete') { const value=summary(entry);db.getDefaultGroup().entries.splice(entries().indexOf(entry),1);await stage();return {type:'summary',value,staged_digest:stagedDigest}; }
-  validateText(r.channel);validateText(r.account,true);validateText(r.password,true);if(!r.channel.trim()||!r.account.trim())fail('INVALID_INPUT');
+  validateText(r.channel);validateText(r.account);validateText(r.password,true);if(!r.channel.trim()||!r.account.trim())fail('INVALID_INPUT');
   if(r.op==='create_entry') {
     if(entries().length>=1000)fail('UNSUPPORTED');
     entry=db.createEntry(db.getDefaultGroup());

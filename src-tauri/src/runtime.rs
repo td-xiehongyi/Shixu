@@ -173,6 +173,7 @@ pub fn run() {
             tauri::async_runtime::spawn_blocking(move || {
                 let view = invoke.message.webview();
                 let command = invoke.message.command();
+                let mut resolver = Some(invoke.resolver);
                 let result = (|| {
                     let url = view.url().map_err(|_| AppError::AuthFailed)?;
                     let origin = url.origin().ascii_serialization();
@@ -187,29 +188,46 @@ pub fn run() {
                     // Boundary size check is structural, avoiding extra plaintext serialization.
                     crate::commands::validate_command_size(command, payload)?;
                     let state = view.state::<AppState>();
-                    let result = commands::dispatch(&context, command, payload.clone(), &state)?;
-                    if command == "show_vault_window" {
-                        if let Some(window) = view.app_handle().get_webview_window("vault") {
-                            window.show().map_err(|_| AppError::Unsupported)?;
-                            window.set_focus().map_err(|_| AppError::Unsupported)?;
-                        } else {
-                            WebviewWindowBuilder::new(
-                                view.app_handle(),
-                                "vault",
-                                WebviewUrl::App("index.html?window=vault".into()),
-                            )
-                            .title("拾序 · 密码库")
-                            .inner_size(640.0, 620.0)
-                            .on_navigation(local_url)
-                            .build()
-                            .map_err(|_| AppError::Unsupported)?;
-                        }
-                    }
-                    Ok(result)
+                    commands::dispatch_published(
+                        &context,
+                        command,
+                        payload.clone(),
+                        &state,
+                        |value| {
+                            if command == "show_vault_window" {
+                                if let Some(window) = view.app_handle().get_webview_window("vault")
+                                {
+                                    window.show().map_err(|_| AppError::Unsupported)?;
+                                    window.set_focus().map_err(|_| AppError::Unsupported)?;
+                                } else {
+                                    WebviewWindowBuilder::new(
+                                        view.app_handle(),
+                                        "vault",
+                                        WebviewUrl::App("index.html?window=vault".into()),
+                                    )
+                                    .title("拾序 · 密码库")
+                                    .inner_size(640.0, 620.0)
+                                    .on_navigation(local_url)
+                                    .build()
+                                    .map_err(|_| AppError::Unsupported)?;
+                                }
+                            }
+                            // Catch serialization failure before consuming the resolver;
+                            // this remains inside the original vault publication guard.
+                            let body = tauri::ipc::IpcResponse::body(value)
+                                .map_err(|_| AppError::Unsupported)?;
+                            resolver
+                                .take()
+                                .ok_or(AppError::Disconnected)?
+                                .resolve(tauri::ipc::Response::new(body));
+                            Ok(())
+                        },
+                    )
                 })();
-                match result {
-                    Ok(value) => invoke.resolver.resolve(value),
-                    Err(error) => invoke.resolver.reject(error.code()),
+                if let Err(error) = result
+                    && let Some(resolver) = resolver.take()
+                {
+                    resolver.reject(error.code());
                 }
             });
             true

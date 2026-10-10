@@ -142,16 +142,6 @@ fn rejects_newlines_wrong_master_tamper_and_external_edit() {
             e.apply(VaultMutation::Create {
                 channel: "c".into(),
                 account: format!("a{nl}z"),
-                password: secret("p")
-            }),
-            Err(AppError::InvalidInput)
-        );
-        assert_eq!(std::fs::read(work.join("vault.kdbx")).unwrap(), before);
-        e.open(secret("synthetic-master")).unwrap();
-        assert_eq!(
-            e.apply(VaultMutation::Create {
-                channel: "c".into(),
-                account: "a".into(),
                 password: secret(&format!("p{nl}z"))
             }),
             Err(AppError::InvalidInput)

@@ -57,7 +57,7 @@ test('synthetic secrets stay out argv env errors work files; list excludes passw
   for(const proc of ['cmdline','environ'])for(const canary of canaries)assert.equal(fs.readFileSync('/proc/'+child.pid+'/'+proc).includes(Buffer.from(canary)),false);
   assert.equal(fs.readFileSync('/proc/'+child.pid+'/environ').length,0);
   for(const file of fs.readdirSync(work))for(const canary of canaries)assert.equal(fs.readFileSync(path.join(work,file)).includes(Buffer.from(canary)),false);
-  const rejected=await rpc(child,{v:1,id:6,op:'create_entry',channel:'public',account:canaries[1]+'\n',password:canaries[2]});assert.equal(rejected.value,'INVALID_INPUT');for(const canary of canaries)assert.equal(JSON.stringify(rejected).includes(canary),false);
+  const rejected=await rpc(child,{v:1,id:6,op:'create_entry',channel:'public',account:canaries[1],password:canaries[2]+'\n'});assert.equal(rejected.value,'INVALID_INPUT');for(const canary of canaries)assert.equal(JSON.stringify(rejected).includes(canary),false);
   assert.equal(error.length,0);
  }finally{if(child.exitCode===null){const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}fs.rmSync(work,{recursive:true,force:true});}
 });

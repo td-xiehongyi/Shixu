@@ -1,5 +1,5 @@
 export const newline = /[\r\n\u0085\u2028\u2029]/u;
-export const newlineMessage = "主密码、账号和密码不允许换行。";
+export const newlineMessage = "主密码和密码不允许换行。";
 /** Inspect the original paste/drop/insertion payload before input normalization. */
 export function guardForm(
   form: HTMLFormElement,

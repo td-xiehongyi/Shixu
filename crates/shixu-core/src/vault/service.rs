@@ -216,10 +216,7 @@ fn validate_secret(secret: &SecretBytes) -> AppResult<()> {
 }
 
 fn validate_fields(channel: &str, account: &str, password: &SecretBytes) -> AppResult<()> {
-    if channel.trim().is_empty()
-        || account.trim().is_empty()
-        || account.contains(['\r', '\n', '\u{85}', '\u{2028}', '\u{2029}'])
-    {
+    if channel.trim().is_empty() || account.trim().is_empty() {
         return Err(AppError::InvalidInput);
     }
     // Reject requested encoded newline characters without normalization/copies.

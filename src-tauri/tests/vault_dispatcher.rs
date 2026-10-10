@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use shixu_core::contracts::error::AppError;
 use shixu_desktop::{
     app_state::AppState,
-    commands::{CallingContext, dispatch},
+    commands::{CallingContext, dispatch, dispatch_published},
 };
 const VAULT: CallingContext<'static> = CallingContext {
     label: "vault",
@@ -16,7 +16,7 @@ fn real_dispatcher_create_crud_reopen_change_master_wrong_master_tamper() {
         .canonicalize()
         .unwrap();
     let work = repo.join(format!(
-        ".superpowers/sdd/shixu-v0.1/task-kdbxweb-ui-dispatch-work-{}",
+        ".superpowers/sdd/shixu-v0.1/task-windows-vault-wiring-dispatch-work-{}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&work);
@@ -27,7 +27,11 @@ fn real_dispatcher_create_crud_reopen_change_master_wrong_master_tamper() {
     let master = json!({"master":" synthetic master 密码 ".as_bytes()});
     assert_eq!(call("vault_create", master.clone()), Ok(Value::Null));
     assert_eq!(call("vault_list", json!({})), Ok(json!([])));
-    let row = call("vault_apply",json!({"mutation":{"operation":"create","channel":" Channel\n含换行\u{0000} ","account":" 用户/\"\u{0000} ","password":" pass/\"密钥\u{0000} ".as_bytes()}})).unwrap();
+    let row = call("vault_apply",json!({"mutation":{"operation":"create","channel":" Channel\n含换行\u{0000} ","account":" 用户\r单独\r\n行\n\u{85}\u{2028}\u{2029}/\"\u{0000} ","password":" pass/\"密钥\u{0000} ".as_bytes()}})).unwrap();
+    assert_eq!(
+        row["account"],
+        " 用户\r单独\r\n行\n\u{85}\u{2028}\u{2029}/\"\u{0000} "
+    );
     assert_eq!(row["revision"], "1");
     assert_eq!(row.as_object().unwrap().len(), 6);
     assert!(row.get("password").is_none());
@@ -40,12 +44,31 @@ fn real_dispatcher_create_crud_reopen_change_master_wrong_master_tamper() {
         assert_eq!(
             call(
                 "vault_apply",
-                json!({"mutation":{"operation":"create","channel":"ch","account":bad,"password":b"pw"}})
+                json!({"mutation":{"operation":"create","channel":"ch","account":" account\r\n ","password":bad.as_bytes()}})
             ),
             Err(AppError::InvalidInput)
         );
     }
     assert_eq!(std::fs::read(work.join("vault.kdbx")).unwrap(), before);
+    let mut submitted = 0;
+    assert_eq!(
+        dispatch_published(
+            &VAULT,
+            "vault_reveal",
+            json!({"id":row["entry_id"]}),
+            &state,
+            |value| {
+                submitted += 1;
+                assert_eq!(value, json!(" pass/\"密钥\u{0000} ".as_bytes()));
+                Err::<(), _>(AppError::Disconnected)
+            }
+        ),
+        Err(AppError::Disconnected)
+    );
+    assert_eq!(submitted, 1);
+    assert_eq!(call("vault_list", json!({})), Err(AppError::Locked));
+    assert_eq!(call("vault_unlock", master.clone()), Ok(Value::Null));
+
     assert_eq!(call("vault_activity", json!({})), Ok(Value::Null));
     assert_eq!(
         call(
@@ -56,6 +79,7 @@ fn real_dispatcher_create_crud_reopen_change_master_wrong_master_tamper() {
     );
     assert_eq!(call("vault_list", json!({})), Err(AppError::Locked));
     assert_eq!(call("vault_unlock", master.clone()), Ok(Value::Null));
+    assert_eq!(call("vault_list", json!({})).unwrap(), json!([row]));
     let updated = call("vault_apply",json!({"mutation":{"operation":"update","id":row["entry_id"],"expected_revision":"1","channel":"new","account":" duplicate ","password":b"new secret"}})).unwrap();
     assert_eq!(updated["revision"], "2");
     let second = call("vault_apply",json!({"mutation":{"operation":"create","channel":"other","account":" duplicate ","password":b"other secret"}})).unwrap();

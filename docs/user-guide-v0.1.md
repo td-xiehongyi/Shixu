@@ -8,7 +8,7 @@
 | 状态 | 当前内容 |
 |---|---|
 | 已实现并经 portable 测试 | 有类型/权限的命令边界、日历事件事务与来源/历史/撤销/防重放、消息及逐附件状态、白名单/时区/授权设置、确定性文字规则、有限图片/PDF/OOXML算法、注入工作端口的后台协调、保护端口下的SQLite持久化、日历快照/JSON迁移/确认恢复、界面及关闭时清理策略 |
-| 未实现/未接通，返回 Unsupported | Windows真实 VaultEngine隔离验收/本机秘密清理保证、十份KDBX备份与恢复、剪贴板命令接通与真实验收，QQ下载/登录重连，真实隔离parser进程/原生引擎/Windows保护缓存与输入交接；可选模型provider也未选定/未接通 |
+| 未实现/未接通，返回 Unsupported | Windows真实 VaultEngine隔离验收/本机秘密清理保证、十份KDBX备份与恢复、剪贴板真实Windows验收，QQ下载/登录重连，真实隔离parser进程/原生引擎/Windows保护缓存与输入交接；可选模型provider也未选定/未接通 |
 | QQ配置与纯文字生产接线已实现，仅合成验证 | 设置只写保护令牌、literal loopback地址、显式连接/断开与runtime receiver；同一保存/连接入口合成socket到Calendar已验证；单活动来源，保存/重启不自动连接，实际Windows/G2仍BLOCKED |
 | Windows cfg 已写但编译/运行未验收 | Tauri窗口/能力/命令注册、QQ配置/receiver实际Windows运行、运行时DPAPI目录/SQLite/备份协调、托盘和关闭/退出、owner文件实例排他 |
 | 实际钩子尚未实现 | Windows会话锁定/电源事件、自启注册、第二进程通知首进程并聚焦；owner文件锁不等于已有跨进程聚焦 |
@@ -25,9 +25,9 @@
 
 ## 密码库规则（目前阻断）
 
-表单业务字段只有**渠道、账号、密码**；同渠道可多个账号，同名条目有内部UUID，不按渠道覆盖。主密码必须真正参与成熟KDBX引擎解密，错误密码不能解锁；当前实现阶段选择 KdbxWeb 独立进程；Linux合成后端测试不等于Windows生产验收，原生 actor/命令及独立 UI 已接通，Linux 仅以虚构数据验证实际创建/解锁/读写；Windows构造器仍返回Unsupported，生产操作不可用。主密码、账号、密码禁止 CR/LF/NEL/LS/PS 换行，不裁剪空格或替换字符；渠道未新增换行禁令。引擎支持合法 UTF-8 文本，明确拒绝非法 UTF-8；protected value 保持渠道换行。剪贴板仍有独立NUL限制。
+表单业务字段只有**渠道、账号、密码**；同渠道可多个账号，同名条目有内部UUID，不按渠道覆盖。主密码必须真正参与成熟KDBX引擎解密，错误密码不能解锁；当前实现阶段选择 KdbxWeb 独立进程；Linux合成后端测试不等于Windows生产验收，原生 actor/命令及独立 UI 已接通，Linux 仅以虚构数据验证实际创建/解锁/读写；Windows构造器仍返回Unsupported，生产操作不可用。主密码（含当前/新密码/确认）与存储密码禁止 CR/LF/NEL/LS/PS 换行，不裁剪空格或替换字符；账号与渠道允许换行。引擎支持合法 UTF-8 文本，明确拒绝非法 UTF-8；protected value 保持渠道换行。剪贴板仍有独立NUL限制。
 
-设计及portable策略为密码默认掩码、显示15秒后恢复、5分钟无密码库交互自动锁库；日历/QQ后台不能刷新计时。复制账号/密码成功后提示：内容不会自动清除，将保留至你覆盖或手动清除，可能留有密码；计时、锁库、休眠和退出不清空系统剪贴板。手动锁定、会话锁定、休眠、退出仍应销毁会话、清零瞬时秘密内存并丢弃迟到结果；关闭主窗口应入托盘并锁库。当前已有新的write-only Win32 writer及历史/云同步排除源码，能力仅written_untested；暂停的所有权草稿仍归档。只支持≤65536字节的UTF-8文本且不能含内嵌NUL，不支持任意秘密字节。EmptyClipboard成功之后的失败可能丢失旧内容，清理失败也可能已留下新内容，不能保证失败时保留旧剪贴板。真实引擎/dispatcher已完成Linux合成接线；Windows系统钩子和复制接线仍未实测，复制UI继续Unsupported。
+设计及portable策略为密码默认掩码、显示15秒后恢复、5分钟无密码库交互自动锁库；日历/QQ后台不能刷新计时。复制账号/密码成功后提示：内容不会自动清除，将保留至你覆盖或手动清除，可能留有密码；计时、锁库、休眠和退出不清空系统剪贴板。手动锁定、会话锁定、休眠、退出仍应销毁会话、清零瞬时秘密内存并丢弃迟到结果；关闭主窗口应入托盘并锁库。当前已有新的write-only Win32 writer及历史/云同步排除源码，能力仅written_untested；暂停的所有权草稿仍归档。只支持≤65536字节的UTF-8文本且不能含内嵌NUL，不支持任意秘密字节。EmptyClipboard成功之后的失败可能丢失旧内容，清理失败也可能已留下新内容，不能保证失败时保留旧剪贴板。真实引擎/dispatcher已完成Linux合成接线；Windows系统钩子和复制接线仍未实测，复制已接入原生SystemClipboard；Windows引擎仍Unsupported，真实复制尚不可达，非Windows写入返回Unsupported。
 
 主密码只锁密码库，日历/QQ应独立运行。没有主密码找回后门；忘记不能重置解密。更改主密码需要旧密码与新密码确认并经引擎重新打开验证；**旧备份仍使用旧主密码**。JS字符串、换页、截图、剪贴板历史和同用户恶意程序也不能承诺彻底清除。真实密码使用必须等G1/V2/V3及Windows发布门槛通过。
 
@@ -55,7 +55,7 @@
 
 QQ需要自己选择/配置许可合适的适配器、专用测试账号和获准测试群、白名单/时区，在本机登录。**通用OneBot11纯文字wire已实现并通过本机合成socket测试；Windows安全令牌/保护配置与runtime receiver已接线；单活动来源、显式连接，保存或重启不自动连接，实际Windows/真实组件G2仍待验收。接通真实组件后**才可做100条合成消息、各类型附件原件、8小时和P95证据。无需发送任何访问令牌、真实密码或聊天秘密到对话中。
 
-开发还需补齐Windows引擎隔离与存储验收、复制命令接通及原生验收、真实Windows/QQ配置流程验收、重连和下载、parser sandbox/Windows cache、会话电源钩子/自启/跨进程聚焦/打包，并修复完整附件质量。真实Windows构建/WebView权限、同/不同身份DPAPI/ACL、文件占用/磁盘满/崩溃恢复/剪贴板/Job Object等测试必须独立验收。精度≥95%/召回≥90%按每类型全部冻结数据报告，含糊猜测0；目前纯文字157/132 gold TP123 FP3 FN9达标，DOCX入历P75% R35.29%、XLSX P57.14% R30.77%、中文OCR每例1/2区域和6/10定位未达标。完整字符/标题/gold分母见Windows门槛说明，不会移除unsupported正例以“通过”。
+开发还需补齐Windows引擎隔离与存储验收、复制原生验收、真实Windows/QQ配置流程验收、重连和下载、parser sandbox/Windows cache、会话电源钩子/自启/跨进程聚焦/打包，并修复完整附件质量。真实Windows构建/WebView权限、同/不同身份DPAPI/ACL、文件占用/磁盘满/崩溃恢复/剪贴板/Job Object等测试必须独立验收。精度≥95%/召回≥90%按每类型全部冻结数据报告，含糊猜测0；目前纯文字157/132 gold TP123 FP3 FN9达标，DOCX入历P75% R35.29%、XLSX P57.14% R30.77%、中文OCR每例1/2区域和6/10定位未达标。完整字符/标题/gold分母见Windows门槛说明，不会移除unsupported正例以“通过”。
 
 发布校验器只生成诚实的PASS/FAIL/BLOCKED报告；当前构建即使收到自称全通过的JSON也保持native BLOCKED。安装、程序启动、mock通过和ignored零失败均不等于全产品完成。
 
@@ -72,6 +72,6 @@ QQ需要自己选择/配置许可合适的适配器、专用测试账号和获�
 2026-10-10 backend审阅修正：除外层 gzip 外，XML Binary 元素及 Compressed 属性在返回上游对象加载前拒绝，避免附件解压。自有库额外要求完整列表 JSON 响应（含协议外壳、最长请求ID及转义）≤1MiB；open及保存前检查，超限返回 Unsupported，不写入当前库。每字段64KiB/条目1000/文件8MiB仍非单独可接受保证。UI接线已有Linux合成证据；Windows/发布门槛仍阻断。
 
 
-2026-10-10 UI接线：原生独立有界actor持有VaultService和内部session，命令不返回session；lock先撤销代际并取消启动/在途helper，再清理。原生后台每100ms观察五分钟闲置，隐藏窗口亦执行；只有成功的vault命令或独立窗口显式activity刷新，日历/QQ和后台tick不能刷新。paste/drop/beforeinput在单行浏览器规范化之前拒绝主密码/确认/账号/密码的完整换行载荷；渠道使用textarea保留原换行。存储字段不额外拒绝NUL；IPC渠道/账号各4096 UTF-8字节，秘密64KiB且结构载荷预算64KiB（数字数组按保守成本计算），故有效载荷可能受更紧的总预算限制。任何原生操作错误保守锁定UI并清空条目/显示；本地提交前输入校验不调用引擎。JS不可变字符串、Tauri/库/allocator/swap副本无法保证抹除；拥有的字节数组与原生SecretBytes仅尽力清零。无剪贴板自动清空；复制和十份备份/恢复仍Unsupported。
+2026-10-10 UI接线：原生独立有界actor持有VaultService和内部session，命令不返回session；lock先撤销代际并取消启动/在途helper，再清理。原生后台每100ms观察五分钟闲置，隐藏窗口亦执行；只有成功的vault命令或独立窗口显式activity刷新，日历/QQ和后台tick不能刷新。paste/drop/beforeinput在单行浏览器规范化之前拒绝主密码/确认/密码的完整换行载荷；账号与渠道使用textarea，编辑未变字段保留原始CR/CRLF。存储字段不额外拒绝NUL；IPC渠道/账号各4096 UTF-8字节，秘密64KiB且结构载荷预算64KiB（数字数组按保守成本计算），故有效载荷可能受更紧的总预算限制。任何原生操作错误保守锁定UI并清空条目/显示；本地提交前输入校验不调用引擎。JS不可变字符串、Tauri/库/allocator/swap副本无法保证抹除；拥有的字节数组与原生SecretBytes仅尽力清零。无剪贴板自动清空；复制已接入原生写入，Windows运行仍阻断；十份备份/恢复仍Unsupported。
 
-Windows启用前仍需完成实际IPC发布边界：现有原始session/epoch保护止于portable dispatch返回，后续Tauri resolver发布之前的锁库间隙尚未覆盖。必须在实际resolver提交时验证原始session/epoch并测试该间隙的锁库，再取得真实WebView/生命周期证据；当前Windows构造器Unsupported，不存在可达的真实秘密成功回复，不能凭Linux或UI迟到回复测试声称此门槛通过。
+2026-10-10 Windows最小接线stageA：原先账号换行禁令是额外假设，已移除；只有主密码/密码禁止换行。账号/渠道保持合法UTF-8（含NUL、换行、空白），不trim。原生PendingDelivery绑定原始session/epoch，DTO转换和Tauri resolver实际提交在同一权限门内，锁库后未提交的旧回复丢弃。复制只接收UUID和字段，服务读取选定值并在同一原始session/epoch门内写SystemClipboard，复制密码不返回WebView。Linux真实KDBX和受控publication/clipboard测试不代表Windows验收：生产构造器继续Unsupported，仍需真实WebView/生命周期、剪贴板、隔离与存储证据。Tauri/JS不可变副本无法保证抹除；复制无自动清除。

@@ -8,7 +8,11 @@ use shixu_core::{
     },
     vault::VaultService,
 };
-use shixu_native::vault::{VaultCancellation, engine::KdbxWebEngine};
+use shixu_native::vault::{
+    VaultCancellation,
+    clipboard::{ClipboardPort, SystemClipboard},
+    engine::KdbxWebEngine,
+};
 use std::{
     sync::{
         Arc, Mutex,
@@ -20,6 +24,12 @@ use std::{
 };
 const DEADLINE: Duration = Duration::from_secs(35);
 const IDLE: Duration = Duration::from_secs(300);
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CopyField {
+    Account,
+    Password,
+}
 pub enum Operation {
     Create(SecretBytes),
     Unlock(SecretBytes),
@@ -27,6 +37,7 @@ pub enum Operation {
     List,
     Apply(VaultMutation),
     Reveal(String),
+    Copy(String, CopyField),
     Change(SecretBytes, SecretBytes),
     Lock(LockReason),
 }
@@ -35,16 +46,18 @@ pub enum Reply {
     List(Vec<VaultSummary>),
     Summary(VaultSummary),
     Secret(SecretBytes),
+    Copy(SecretBytes),
 }
 struct Request {
     epoch: u64,
     op: Operation,
     cancel: VaultCancellation,
-    reply: SyncSender<AppResult<Reply>>,
+    reply: SyncSender<(AppResult<Reply>, Option<SessionId>)>,
 }
 struct Authority {
     epoch: u64,
     unlocked: bool,
+    session: Option<SessionId>,
     activity: Option<Instant>,
     cancel: VaultCancellation,
 }
@@ -52,6 +65,7 @@ impl Authority {
     fn revoke(&mut self) {
         self.epoch += 1;
         self.unlocked = false;
+        self.session = None;
         self.activity = None;
         self.cancel.cancel();
     }
@@ -61,11 +75,51 @@ impl Authority {
         }
     }
 }
+/// Owned reply bound to its original native admission and service session.
+/// No serialization or publication occurs until publish holds the authority gate.
+pub struct PendingDelivery<'a> {
+    controller: &'a VaultController,
+    epoch: u64,
+    session: Option<SessionId>,
+    reply: Reply,
+}
+impl PendingDelivery<'_> {
+    pub fn publish<T>(self, publish: impl FnOnce(Reply) -> AppResult<T>) -> AppResult<T> {
+        let mut a = self
+            .controller
+            .authority
+            .lock()
+            .map_err(|_| AppError::Locked)?;
+        a.expire();
+        if a.epoch != self.epoch || a.session != self.session {
+            return Err(AppError::Locked);
+        }
+        let result = (|| {
+            let reply = match self.reply {
+                Reply::Copy(secret) => {
+                    self.controller
+                        .clipboard
+                        .lock()
+                        .map_err(|_| AppError::Unsupported)?
+                        .write(secret)?;
+                    Reply::Unit
+                }
+                reply => reply,
+            };
+            publish(reply)
+        })();
+        if result.is_err() {
+            a.revoke();
+        }
+        result
+    }
+}
 pub struct VaultController {
     queue: SyncSender<Request>,
     authority: Arc<Mutex<Authority>>,
     stop: Arc<AtomicBool>,
     threads: Mutex<Vec<JoinHandle<()>>>,
+    clipboard: Mutex<Box<dyn ClipboardPort + Send>>,
 }
 impl VaultController {
     /// Missing or unsupported resources produce a locked unavailable controller;
@@ -90,10 +144,18 @@ impl VaultController {
         engine: Option<E>,
         arm: Arc<Mutex<VaultCancellation>>,
     ) -> Arc<Self> {
+        Self::new_with_port(engine, arm, SystemClipboard)
+    }
+    fn new_with_port<E: shixu_core::vault::ports::VaultEngine + Send + 'static>(
+        engine: Option<E>,
+        arm: Arc<Mutex<VaultCancellation>>,
+        clipboard: impl ClipboardPort + Send + 'static,
+    ) -> Arc<Self> {
         let (queue, rx) = mpsc::sync_channel::<Request>(1);
         let authority = Arc::new(Mutex::new(Authority {
             epoch: 0,
             unlocked: false,
+            session: None,
             activity: None,
             cancel: VaultCancellation::default(),
         }));
@@ -129,7 +191,7 @@ impl VaultController {
                 };
                 let admitted = gate.lock().is_ok_and(|a| a.epoch == request.epoch);
                 if !admitted {
-                    let _ = request.reply.send(Err(AppError::Locked));
+                    let _ = request.reply.send((Err(AppError::Locked), None));
                     continue;
                 }
                 if owned_epoch != request.epoch {
@@ -177,6 +239,19 @@ impl VaultController {
                                     Operation::Reveal(id) => {
                                         s.reveal(&original, &id, now()).map(Reply::Secret)
                                     }
+                                    Operation::Copy(id, CopyField::Password) => {
+                                        s.reveal(&original, &id, now()).map(Reply::Copy)
+                                    }
+                                    Operation::Copy(id, CopyField::Account) => {
+                                        let rows = s.list(&original, now())?;
+                                        let row = rows
+                                            .into_iter()
+                                            .find(|row| {
+                                                row.entry_id.to_string() == id.to_ascii_lowercase()
+                                            })
+                                            .ok_or(AppError::InvalidInput)?;
+                                        Ok(Reply::Copy(SecretBytes::new(row.account.into_bytes())))
+                                    }
                                     Operation::Change(current, next) => s
                                         .change_master(&original, current, next)
                                         .and_then(|_| s.activity(&original, now()))
@@ -212,6 +287,7 @@ impl VaultController {
                 };
                 if result.is_ok() && interaction {
                     a.unlocked = true;
+                    a.session = session;
                     a.activity = Some(Instant::now());
                 }
                 let failed = result.is_err();
@@ -226,7 +302,7 @@ impl VaultController {
                     }
                 }
                 // Bounded one-shot sender: an abandoned caller cannot strand worker.
-                let _ = request.reply.try_send(result);
+                let _ = request.reply.try_send((result, session));
             }
             if let Some(mut s) = service {
                 let _ = s.lock(LockReason::Exit);
@@ -244,6 +320,7 @@ impl VaultController {
         });
         Arc::new(Self {
             queue,
+            clipboard: Mutex::new(Box::new(clipboard)),
             authority,
             stop,
             threads: Mutex::new(vec![worker, ticker]),
@@ -257,6 +334,9 @@ impl VaultController {
         op: Operation,
         deliver: impl FnOnce(Reply) -> AppResult<T>,
     ) -> AppResult<T> {
+        self.prepare(op)?.publish(deliver)
+    }
+    pub fn prepare(&self, op: Operation) -> AppResult<PendingDelivery<'_>> {
         let (reply, rx) = mpsc::sync_channel(1);
         let mut a = self.authority.lock().map_err(|_| AppError::Locked)?;
         a.expire();
@@ -279,23 +359,22 @@ impl VaultController {
             })
             .map_err(|_| AppError::Conflict)?;
         drop(a);
-        let result = rx
+        let response = rx
             .recv_timeout(DEADLINE)
             .map_err(|_| AppError::Disconnected);
-        let mut a = self.authority.lock().map_err(|_| AppError::Locked)?;
-        a.expire();
-        if result.is_err() && a.epoch == epoch {
-            a.revoke();
+        if response.is_err() {
+            let mut a = self.authority.lock().map_err(|_| AppError::Locked)?;
+            if a.epoch == epoch {
+                a.revoke();
+            }
         }
-        let result = result?;
-        if result.is_ok() && a.epoch != epoch && !locking {
-            return Err(AppError::Locked);
-        }
-        let delivered = deliver(result?);
-        if delivered.is_err() && a.epoch == epoch {
-            a.revoke();
-        }
-        delivered
+        let (result, session) = response?;
+        Ok(PendingDelivery {
+            controller: self,
+            epoch,
+            session,
+            reply: result?,
+        })
     }
     pub fn lock(&self, reason: LockReason) -> AppResult<()> {
         self.execute(Operation::Lock(reason)).map(|_| ())
@@ -520,6 +599,158 @@ mod tests {
             c.deliver(Operation::List, |_| Err::<(), _>(AppError::InvalidInput)),
             Err(AppError::InvalidInput)
         );
+        assert!(matches!(c.execute(Operation::List), Err(AppError::Locked)));
+    }
+    #[test]
+    fn completed_reply_lock_before_submission_is_dropped_and_fresh_reopen_submits() {
+        let c = controller(Controlled {
+            fail_startup: false,
+            startup: None,
+            reveal: None,
+        });
+        c.execute(Operation::Unlock(master())).unwrap();
+        let pending = c
+            .prepare(Operation::Reveal(
+                "11111111-1111-4111-8111-111111111111".into(),
+            ))
+            .unwrap();
+        c.lock(LockReason::Manual).unwrap();
+        let mut submitted = 0;
+        assert_eq!(
+            pending.publish(|_| {
+                submitted += 1;
+                Ok(())
+            }),
+            Err(AppError::Locked)
+        );
+        assert_eq!(submitted, 0);
+        c.execute(Operation::Unlock(master())).unwrap();
+        c.prepare(Operation::List)
+            .unwrap()
+            .publish(|_| {
+                submitted += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(submitted, 1);
+    }
+
+    const SELECTED: &str = "11111111-1111-4111-8111-111111111111";
+    struct CopyEngine;
+    impl VaultEngine for CopyEngine {
+        fn create(&mut self, _: SecretBytes) -> AppResult<()> {
+            Ok(())
+        }
+        fn open(&mut self, _: SecretBytes) -> AppResult<()> {
+            Ok(())
+        }
+        fn close(&mut self) -> AppResult<()> {
+            Ok(())
+        }
+        fn list(&mut self) -> AppResult<Vec<VaultSummary>> {
+            Ok([
+                ("22222222-2222-4222-8222-222222222222", "other account"),
+                (SELECTED, " selected\r\n账号 "),
+            ]
+            .into_iter()
+            .map(|(id, account)| VaultSummary {
+                entry_id: id.parse().unwrap(),
+                channel: "c".into(),
+                account: account.into(),
+                revision: 1,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .collect())
+        }
+        fn apply(&mut self, _: VaultMutation) -> AppResult<VaultSummary> {
+            Err(AppError::Unsupported)
+        }
+        fn read_secret(&mut self, id: &str) -> AppResult<SecretBytes> {
+            assert_eq!(id, SELECTED);
+            Ok(SecretBytes::new(b"selected password".to_vec()))
+        }
+        fn change_master(&mut self, _: SecretBytes, _: SecretBytes) -> AppResult<()> {
+            Ok(())
+        }
+    }
+    struct CaptureClipboard {
+        content: Arc<Mutex<Vec<u8>>>,
+        fail: bool,
+    }
+    impl ClipboardPort for CaptureClipboard {
+        fn write(&mut self, value: SecretBytes) -> AppResult<()> {
+            if self.fail {
+                return Err(AppError::Unsupported);
+            }
+            *self.content.lock().unwrap() = value.expose().to_vec();
+            Ok(())
+        }
+    }
+    fn copy_controller(fail: bool) -> (Arc<VaultController>, Arc<Mutex<Vec<u8>>>) {
+        let content = Arc::new(Mutex::new(Vec::new()));
+        (
+            VaultController::new_with_port(
+                Some(CopyEngine),
+                Arc::new(Mutex::new(VaultCancellation::default())),
+                CaptureClipboard {
+                    content: content.clone(),
+                    fail,
+                },
+            ),
+            content,
+        )
+    }
+    #[test]
+    fn selected_copy_is_native_only_and_persists_across_lock_and_drop() {
+        let (c, content) = copy_controller(false);
+        c.execute(Operation::Unlock(master())).unwrap();
+        assert!(matches!(
+            c.execute(Operation::Copy(SELECTED.into(), CopyField::Account)),
+            Ok(Reply::Unit)
+        ));
+        assert_eq!(*content.lock().unwrap(), " selected\r\n账号 ".as_bytes());
+        assert!(matches!(
+            c.execute(Operation::Copy(SELECTED.into(), CopyField::Password)),
+            Ok(Reply::Unit)
+        ));
+        c.lock(LockReason::Manual).unwrap();
+        drop(c);
+        assert_eq!(*content.lock().unwrap(), b"selected password");
+    }
+    #[test]
+    fn completed_copy_cannot_write_after_lock_or_into_reopened_session() {
+        let (c, content) = copy_controller(false);
+        c.execute(Operation::Unlock(master())).unwrap();
+        let pending = c
+            .prepare(Operation::Copy(SELECTED.into(), CopyField::Password))
+            .unwrap();
+        c.lock(LockReason::Manual).unwrap();
+        c.execute(Operation::Unlock(master())).unwrap();
+        assert!(matches!(pending.publish(Ok), Err(AppError::Locked)));
+        assert!(content.lock().unwrap().is_empty());
+        assert!(matches!(
+            c.execute(Operation::Copy(SELECTED.into(), CopyField::Password)),
+            Ok(Reply::Unit)
+        ));
+    }
+    #[test]
+    fn clipboard_error_never_submits_success_and_revokes_session() {
+        let (c, content) = copy_controller(true);
+        c.execute(Operation::Unlock(master())).unwrap();
+        let mut submitted = false;
+        assert_eq!(
+            c.deliver(
+                Operation::Copy(SELECTED.into(), CopyField::Password),
+                |_| {
+                    submitted = true;
+                    Ok(())
+                }
+            ),
+            Err(AppError::Unsupported)
+        );
+        assert!(!submitted);
+        assert!(content.lock().unwrap().is_empty());
         assert!(matches!(c.execute(Operation::List), Err(AppError::Locked)));
     }
 }

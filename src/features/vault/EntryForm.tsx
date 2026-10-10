@@ -13,6 +13,7 @@ export interface EntryFormProps {
 }
 export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
   const form = useRef<HTMLFormElement>(null);
+  const mountedAccount = useRef<string | null>(null);
   const mountedChannel = useRef<string | null>(null);
   const owned = useRef<Uint8Array | null>(null);
   const alive = useRef(true);
@@ -27,8 +28,11 @@ export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
     mountedChannel.current =
       (element?.elements.namedItem("channel") as HTMLTextAreaElement | null)
         ?.value ?? null;
+    mountedAccount.current =
+      (element?.elements.namedItem("account") as HTMLTextAreaElement | null)
+        ?.value ?? null;
     const removeGuard = element
-      ? guardForm(element, ["account", "password"], setError)
+      ? guardForm(element, ["password"], setError)
       : () => {};
     return () => {
       removeGuard();
@@ -40,6 +44,7 @@ export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
       >("input, textarea") ?? [])
         input.value = "";
       mountedChannel.current = null;
+      mountedAccount.current = null;
     };
   }, []);
   async function submit(e: React.FormEvent) {
@@ -53,13 +58,18 @@ export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
       initial && channelInput.value === mountedChannel.current
         ? initial.channel
         : channelInput.value;
-    const account = (element.elements.namedItem("account") as HTMLInputElement)
-      .value;
+    const accountInput = element.elements.namedItem(
+      "account",
+    ) as HTMLTextAreaElement;
+    const account =
+      initial && accountInput.value === mountedAccount.current
+        ? initial.account
+        : accountInput.value;
     const input = element.elements.namedItem("password") as HTMLInputElement;
-    if (newline.test(account) || newline.test(input.value)) {
+    if (newline.test(input.value)) {
       setError(newlineMessage);
       element.reset();
-      (element.elements.namedItem("account") as HTMLInputElement).value = "";
+      (element.elements.namedItem("account") as HTMLTextAreaElement).value = "";
       input.value = "";
       return;
     }
@@ -97,7 +107,7 @@ export function EntryForm({ initial, onSave, onCancel }: EntryFormProps) {
       </label>
       <label>
         账号
-        <input
+        <textarea
           aria-label="账号"
           name="account"
           defaultValue={initial?.account ?? ""}

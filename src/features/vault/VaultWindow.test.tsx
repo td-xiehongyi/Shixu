@@ -590,7 +590,7 @@ it("all_sensitive_fields_reject_original_paste_drop_and_beforeinput", async () =
   await click("更改主密码");
   await rejectEvents(["master", "next", "confirm"]);
   await act(async () => root.render(<EntryForm onSave={async () => {}} />));
-  await rejectEvents(["account", "password"]);
+  await rejectEvents(["password"]);
 });
 it("entry_form_preserves_channel_newlines_whitespace_unicode_and_nul", async () => {
   let saved: { channel: string; account: string; password: string } | undefined;
@@ -638,7 +638,7 @@ it("bridge_secret_validation_is_structural_and_rejects_all_secret_newline_paths"
           operation: "create",
           channel: "ch",
           account: `a${newline}b`,
-          password: encode("ok"),
+          password: bad,
         }),
       ).rejects.toMatchObject({ code: "INVALID_INPUT" });
       await expect(
@@ -721,4 +721,52 @@ it("strictmode_replay_restores_defaults_preserves_exact_edit_and_clears_detached
   ];
   await act(async () => root.render(<div>closed</div>));
   expect(controls.map((input) => input.value)).toEqual(["", "", ""]);
+});
+it("account_all_newlines_are_preserved_on_strictmode_password_only_edit_and_bridge", async () => {
+  const account = ' 用户\r单独\r\n行\n\u0085\u2028\u2029/"\0 🗝️ ';
+  let savedAccount = "";
+  await act(async () =>
+    root.render(
+      <StrictMode>
+        <EntryForm
+          initial={{ ...rows[0], account }}
+          onSave={async (value) => {
+            savedAccount = value.account;
+          }}
+        />
+      </StrictMode>,
+    ),
+  );
+  const accountInput =
+    host.querySelector<HTMLTextAreaElement>('[name="account"]')!;
+  expect(accountInput.value).toBe(account.replace(/\r\n?/g, "\n"));
+  for (const type of ["paste", "drop", "beforeinput"]) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(
+      event,
+      type === "paste"
+        ? "clipboardData"
+        : type === "drop"
+          ? "dataTransfer"
+          : "data",
+      { value: type === "beforeinput" ? account : { getData: () => account } },
+    );
+    await act(async () => accountInput.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+  }
+  await fill("密码", "new password");
+  await click("保存条目");
+  expect(savedAccount).toBe(account);
+  const invoke = vi.fn(async () => ({ ...rows[0], account }));
+  const bridge = createVaultBridge(invoke);
+  const result = await bridge.vaultApply({
+    operation: "create",
+    channel: "ch",
+    account,
+    password: Uint8Array.from(new TextEncoder().encode("pw")),
+  });
+  expect(result.account).toBe(account);
+  expect(invoke).toHaveBeenCalledTimes(1);
+  await act(async () => root.render(<div>closed</div>));
+  expect(accountInput.value).toBe("");
 });

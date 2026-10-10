@@ -1,4 +1,4 @@
-// Write-only native boundary; the production vault dispatcher remains unavailable.
+// Write-only native boundary; Windows production engine enablement remains blocked.
 use shixu_core::contracts::{AppResult, error::AppError, vault::SecretBytes};
 /// Consumes transient secret memory. Clipboard content remains until the user
 /// overwrites or manually clears it; no timer, lock, exit or drop cleanup exists.

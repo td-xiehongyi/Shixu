@@ -388,7 +388,7 @@ impl VaultEngine for KdbxWebEngine {
                     password,
                 } => {
                     validate(&channel, false)?;
-                    validate(&account, true)?;
+                    validate(&account, false)?;
                     self.request(RequestOp::CreateEntry {
                         channel: &channel,
                         account: &account,
@@ -403,7 +403,7 @@ impl VaultEngine for KdbxWebEngine {
                     password,
                 } => {
                     validate(&channel, false)?;
-                    validate(&account, true)?;
+                    validate(&account, false)?;
                     self.request(RequestOp::Update {
                         entry_id: &id.to_string(),
                         expected_revision,

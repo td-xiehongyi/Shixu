@@ -168,7 +168,7 @@ export function decodeSummary(value: unknown): VaultSummary {
   ]);
   id(d.entry_id);
   vaultText(d.channel, 65536);
-  vaultText(d.account, 65536, true);
+  vaultText(d.account, 65536);
   canonicalRevision(d.revision);
   millis(d.created_at);
   millis(d.updated_at);
@@ -287,7 +287,7 @@ function mutation(value: VaultMutation): Record<string, unknown> {
   }
   if (d.operation !== "delete") {
     vaultText(d.channel);
-    vaultText(d.account, 4096, true);
+    vaultText(d.account, 4096);
     return { ...d, password: Array.from(bytes(d.password)) };
   }
   return d;

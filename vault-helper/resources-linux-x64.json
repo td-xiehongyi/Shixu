@@ -8,7 +8,7 @@
   "files": {
     "helper/KdbxWeb-LICENSE": "5328cd70623b0154a3d13ce41d57d6d4e9fda5b6db2e8ed994d29c3598c374a8",
     "helper/crypto.mjs": "025daf8865e09efd6815f2b78676eb55e07c9bbfe1e9cb4c330ec12c481614da",
-    "helper/helper.mjs": "d60e0b7fa285c3e4698d883f4b78965757f0179cad13a580b8de16a171ba7373",
+    "helper/helper.mjs": "10cadea00500dd40f403c1fb81d5c6cb1b5f5147db9edb3bb758817458378ac5",
     "helper/kdbx-lib/crypto/chacha20.js": "cb66da208a45380ccc8aeda23f050753c6ab45465278d502c754971149157a90",
     "helper/kdbx-lib/crypto/crypto-engine.js": "0f4dfd60a3f332bcf5db4ab36b32f39e454483ef68474c8219d7bf990b382fc4",
     "helper/kdbx-lib/crypto/hashed-block-transform.js": "3955acb98f278470ecfc63811d521f33a3b57fbf9824f285bdb48bd67da827e5",

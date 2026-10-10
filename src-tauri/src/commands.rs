@@ -190,13 +190,28 @@ pub fn dispatch(
     payload: serde_json::Value,
     state: &AppState,
 ) -> AppResult<serde_json::Value> {
+    dispatch_published(context, command, payload, state, Ok)
+}
+/// The callback includes actual IPC submission, inside the vault authority guard.
+pub fn dispatch_published<T>(
+    context: &CallingContext<'_>,
+    command: &str,
+    payload: serde_json::Value,
+    state: &AppState,
+    publish: impl FnOnce(serde_json::Value) -> AppResult<T>,
+) -> AppResult<T> {
     authorize(context, command)?;
     validate_command_size(command, &payload)?;
-    // Do not serialize secret-bearing vault payloads into temporary strings.
     if command.starts_with("vault_") {
-        return dispatch_vault(command, payload, state);
+        return dispatch_vault(command, payload, state, publish);
     }
-
+    publish(dispatch_other(command, payload, state)?)
+}
+fn dispatch_other(
+    command: &str,
+    payload: serde_json::Value,
+    state: &AppState,
+) -> AppResult<serde_json::Value> {
     match command {
         "backup_previous" => {
             let _: EmptyArgs = decode(payload)?;
@@ -450,7 +465,7 @@ pub fn dispatch(
         _ => Err(AppError::AuthFailed),
     }
 }
-// Deserialize secret arrays into zeroizing ownership; no Debug, logs, sessions or real engine.
+// Deserialize secret arrays into zeroizing ownership; no Debug, logs or IPC sessions.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UnlockArgs {
@@ -466,13 +481,7 @@ struct ChangeMasterArgs {
 #[serde(deny_unknown_fields)]
 struct CopyArgs {
     id: String,
-    field: CopyField,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum CopyField {
-    Account,
-    Password,
+    field: crate::vault::CopyField,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -515,11 +524,12 @@ fn secret(value: &[u8]) -> AppResult<()> {
         Ok(())
     }
 }
-fn dispatch_vault(
+fn dispatch_vault<T>(
     command: &str,
     payload: serde_json::Value,
     state: &AppState,
-) -> AppResult<serde_json::Value> {
+    publish: impl FnOnce(serde_json::Value) -> AppResult<T>,
+) -> AppResult<T> {
     use crate::vault::{Operation, Reply};
     use shixu_core::contracts::vault::{LockReason, SecretBytes, VaultMutation};
     let take =
@@ -534,8 +544,7 @@ fn dispatch_vault(
         "vault_copy" => {
             let a: CopyArgs = decode(payload)?;
             validate_id(&a.id)?;
-            let _ = a.field;
-            return Err(AppError::Unsupported);
+            Operation::Copy(a.id, a.field)
         }
         "vault_unlock" | "vault_create" => {
             let a: UnlockArgs = decode(payload)?;
@@ -560,7 +569,7 @@ fn dispatch_vault(
                     password,
                 } => {
                     vault_text(&channel, false)?;
-                    vault_text(&account, true)?;
+                    vault_text(&account, false)?;
                     secret(&password)?;
                     VaultMutation::Create {
                         channel,
@@ -577,7 +586,7 @@ fn dispatch_vault(
                 } => {
                     validate_id(&id)?;
                     vault_text(&channel, false)?;
-                    vault_text(&account, true)?;
+                    vault_text(&account, false)?;
                     secret(&password)?;
                     VaultMutation::Update {
                         id: id.parse()?,
@@ -614,15 +623,19 @@ fn dispatch_vault(
         }
         _ => return Err(AppError::AuthFailed),
     };
-    state.vault().deliver(op, |reply| match reply {
-        Reply::Unit => Ok(serde_json::Value::Null),
-        Reply::List(rows) => serialized(
-            rows.into_iter()
-                .map(wire::summary)
-                .collect::<AppResult<Vec<_>>>()?,
-        ),
-        Reply::Summary(row) => serialized(wire::summary(row)?),
-        Reply::Secret(secret) => serialized(secret.expose()),
+    state.vault().deliver(op, |reply| {
+        let value = match reply {
+            Reply::Unit => Ok(serde_json::Value::Null),
+            Reply::List(rows) => serialized(
+                rows.into_iter()
+                    .map(wire::summary)
+                    .collect::<AppResult<Vec<_>>>()?,
+            ),
+            Reply::Summary(row) => serialized(wire::summary(row)?),
+            Reply::Secret(secret) => serialized(secret.expose()),
+            Reply::Copy(_) => Err(AppError::Locked),
+        }?;
+        publish(value)
     })
 }
 fn vault_text(value: &str, no_newline: bool) -> AppResult<()> {

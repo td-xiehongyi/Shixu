@@ -540,7 +540,7 @@ fn timeout_close_error_still_revokes_authority() {
 }
 
 #[test]
-fn requested_newlines_rejected_in_master_account_password_without_trimming() {
+fn newlines_allowed_in_account_but_rejected_in_master_password_without_trimming() {
     for nl in ["\r", "\n", "\u{85}", "\u{2028}", "\u{2029}"] {
         let mut service = VaultService::new(FakeVaultEngine::default());
         assert_error(
@@ -548,18 +548,6 @@ fn requested_newlines_rejected_in_master_account_password_without_trimming() {
             AppError::InvalidInput,
         );
         let session = service.create(master(), 0).unwrap();
-        assert_eq!(
-            service.apply(
-                &session,
-                VaultMutation::Create {
-                    channel: "channel\nallowed".into(),
-                    account: format!("a{nl}x"),
-                    password: secret(b"p")
-                },
-                1
-            ),
-            Err(AppError::InvalidInput)
-        );
         assert_eq!(
             service.apply(
                 &session,
@@ -582,14 +570,14 @@ fn requested_newlines_rejected_in_master_account_password_without_trimming() {
                 &session,
                 VaultMutation::Create {
                     channel: "channel\nallowed".into(),
-                    account: " account ".into(),
+                    account: format!(" account{nl}x "),
                     password: secret(b" password "),
                 },
                 3,
             )
             .unwrap();
         assert_eq!(row.channel, "channel\nallowed");
-        assert_eq!(row.account, " account ");
+        assert_eq!(row.account, format!(" account{nl}x "));
         assert!(
             service
                 .reveal(&session, &row.entry_id.to_string(), 4)
