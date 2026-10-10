@@ -38,6 +38,8 @@ impl MessageStore {
         mut envelope: MessageEnvelope,
         cursor: Option<&str>,
     ) -> AppResult<AppendOutcome> {
+        let canonical = super::settings::canonical(config.clone());
+        let config = &canonical;
         // Authorization MUST precede identity derivation, protection and all writes.
         if !config.enabled
             || envelope.source_id != config.source_id
@@ -236,7 +238,7 @@ impl MessageStore {
         }
         let groups_json = serde_json::to_string(&groups).map_err(|_| AppError::InvalidInput)?;
         self.db.transaction(|tx|{
-            if let Some((_,current))=super::settings::current(&self.db,tx,config.source_id)? { if current==*config{return Ok(true);}return Err(AppError::Conflict); }
+            if let Some((_,current))=super::settings::current(&self.db,tx,config.source_id)? { if current==super::settings::canonical(config.clone()){return Ok(true);}return Err(AppError::Conflict); }
             let old:Option<(String,String,String,String)>=tx.query_row("SELECT adapter_type,account_id,groups_json,timezone FROM source_bindings WHERE source_id=?1",[config.source_id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage_error)?;
             if let Some(old)=old {
                 if old!=(config.adapter_type.clone(),config.account_id.clone(),groups_json,config.timezone.clone()){return Err(AppError::InvalidInput);}
@@ -263,6 +265,37 @@ impl MessageStore {
             for group in &config.allowed_group_ids {
                 let cursor:Option<String>=tx.query_row("SELECT NULLIF(cursor,'') FROM sources WHERE namespace=?1",[namespace(config,group)],|r|r.get(0)).optional().map_err(storage_error)?.flatten();
                 tx.execute("INSERT INTO source_recovery VALUES (?1,?2,?3,?4,?5,?5,0) ON CONFLICT(source_id,group_id) DO UPDATE SET epoch=excluded.epoch,since=CASE WHEN source_recovery.complete=0 THEN source_recovery.since ELSE excluded.since END,anchor=CASE WHEN source_recovery.complete=0 THEN source_recovery.anchor ELSE excluded.anchor END,recovery_cursor=CASE WHEN source_recovery.complete=0 THEN source_recovery.recovery_cursor ELSE excluded.recovery_cursor END,complete=0",params![config.source_id.to_string(),group,epoch,since,cursor]).map_err(storage_error)?;
+            }
+            Ok(())
+        })
+    }
+    /// Record retirement of an already bound identity without granting receive authority.
+    /// Current groups and historical recovery rows receive a fresh proof epoch,
+    /// even when current settings are disabled or restored. No stale config is bound.
+    pub fn record_disconnection(&self, identity: &SourceConfig, since: UtcMillis) -> AppResult<()> {
+        self.db.transaction(|tx| {
+            let binding: Option<(String, String, String, i64)> = tx.query_row(
+                "SELECT adapter_type,account_id,groups_json,recovery_epoch FROM source_bindings WHERE source_id=?1",
+                [identity.source_id.to_string()], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))
+            ).optional().map_err(storage_error)?;
+            let (adapter,account,historical_groups,epoch) = binding.ok_or(AppError::Conflict)?;
+            if adapter != identity.adapter_type || account != identity.account_id {return Err(AppError::Conflict);}
+            let mut groups: std::collections::BTreeSet<String> = serde_json::from_str::<Vec<String>>(&historical_groups)
+                .map_err(|_| AppError::ParseFailed)?.into_iter().collect();
+            if let Some((_,current)) = super::settings::current(&self.db,tx,identity.source_id)? {
+                if current.adapter_type != adapter || current.account_id != account {return Err(AppError::Conflict);}
+                groups.extend(current.allowed_group_ids);
+            }
+            {
+                let mut stmt = tx.prepare("SELECT group_id FROM source_recovery WHERE source_id=?1").map_err(storage_error)?;
+                let rows = stmt.query_map([identity.source_id.to_string()],|r|r.get::<_,String>(0)).map_err(storage_error)?;
+                for row in rows {groups.insert(row.map_err(storage_error)?);}
+            }
+            let epoch = epoch.checked_add(1).ok_or(AppError::Conflict)?;
+            tx.execute("UPDATE source_bindings SET recovery_epoch=?2 WHERE source_id=?1",params![identity.source_id.to_string(),epoch]).map_err(storage_error)?;
+            for group in groups {
+                let cursor: Option<String> = tx.query_row("SELECT NULLIF(cursor,'') FROM sources WHERE namespace=?1",[namespace(identity,&group)],|r|r.get(0)).optional().map_err(storage_error)?.flatten();
+                tx.execute("INSERT INTO source_recovery VALUES (?1,?2,?3,?4,?5,?5,0) ON CONFLICT(source_id,group_id) DO UPDATE SET epoch=excluded.epoch,since=CASE WHEN source_recovery.complete=0 THEN source_recovery.since ELSE excluded.since END,anchor=CASE WHEN source_recovery.complete=0 THEN source_recovery.anchor ELSE excluded.anchor END,recovery_cursor=CASE WHEN source_recovery.complete=0 THEN source_recovery.recovery_cursor ELSE excluded.recovery_cursor END,complete=0",params![identity.source_id.to_string(),group,epoch,since,cursor]).map_err(storage_error)?;
             }
             Ok(())
         })

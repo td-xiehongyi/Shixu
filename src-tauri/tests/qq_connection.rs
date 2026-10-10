@@ -115,8 +115,26 @@ fn protected_saved_connection_is_write_only_main_only_and_not_auto_connected() {
 #[allow(clippy::result_large_err)]
 #[test]
 fn production_saved_socket_connect_persists_calendar_and_explicit_disconnect() {
+    socket_calendar_for_groups(vec!["7"]);
+}
+#[test]
+fn production_socket_accepts_descending_and_duplicate_saved_whitelists() {
+    socket_calendar_for_groups(vec!["9", "7"]);
+    socket_calendar_for_groups(vec!["7", "7"]);
+}
+#[allow(clippy::result_large_err)]
+fn socket_calendar_for_groups(groups: Vec<&str>) {
     let s = state();
     source(&s);
+    let mut config = s.settings().unwrap().sources().unwrap()[0].config.clone();
+    config.allowed_group_ids = groups.iter().map(|g| (*g).to_owned()).collect();
+    dispatch(
+        &main_context(),
+        "save_source_config",
+        serde_json::json!({"config":config}),
+        &s,
+    )
+    .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = listener.local_addr().unwrap().to_string();
     let (send_notice, notice) = std::sync::mpsc::channel();
@@ -135,6 +153,9 @@ fn production_saved_socket_connect_persists_calendar_and_explicit_disconnect() {
         .unwrap();
         ws.send(tungstenite::Message::Text(serde_json::json!({"self_id":42,"post_type":"meta_event","meta_event_type":"lifecycle"}).to_string().into())).unwrap();
         notice.recv_timeout(Duration::from_secs(3)).unwrap();
+        for group in [8, 9] {
+            ws.send(tungstenite::Message::Text(serde_json::json!({"self_id":42,"post_type":"message","message_type":"group","group_id":group,"message_id":group,"user_id":88,"time":1791504000i64,"message":[{"type":"text","data":{"text":"普通说明"}}]}).to_string().into())).unwrap();
+        }
         ws.send(tungstenite::Message::Text(serde_json::json!({"self_id":42,"post_type":"message","message_type":"group","group_id":7,"message_id":123,"user_id":88,"time":1791504000i64,"message":[{"type":"text","data":{"text":"2026年10月12日9:00高数考试"}}]}).to_string().into())).unwrap();
         while ws.read().is_ok() {}
     });
@@ -199,6 +220,20 @@ fn production_saved_socket_connect_persists_calendar_and_explicit_disconnect() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+    let messages = s.messages().unwrap().list(None, 100).unwrap();
+    let mut received: Vec<_> = messages.iter().map(|m| m.group_id.as_str()).collect();
+    received.sort();
+    received.dedup();
+    let mut expected = groups.clone();
+    expected.sort();
+    expected.dedup();
+    assert_eq!(received, expected, "only exact authorized groups persist");
+    assert_eq!(
+        s.settings().unwrap().sources().unwrap()[0]
+            .config
+            .allowed_group_ids,
+        expected
+    );
     dispatch(
         &main_context(),
         "qq_disconnect",

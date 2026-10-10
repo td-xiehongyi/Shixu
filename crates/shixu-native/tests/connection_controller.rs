@@ -336,3 +336,286 @@ fn expired_conflicting_request_does_not_disconnect_an_existing_active_source() {
     port.disconnect().unwrap();
     server_thread.join().unwrap();
 }
+#[test]
+fn legacy_noncanonical_protected_settings_connect_real_socket_and_calendar() {
+    use shixu_core::{
+        calendar::EventService,
+        contracts::calendar::EventQuery,
+        notifications::consent::{ConsentStore, ModelConsent},
+        runtime::{Supervisor, workers::WorkerPorts},
+    };
+    let root = std::env::temp_dir().join(format!("shixu-legacy-groups-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let db = Arc::new(Database::open(&root.join("calendar.sqlite"), Arc::new(Synthetic)).unwrap());
+    let (_, mut c, _, _) = setup();
+    SettingsStore::new(db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    c.allowed_group_ids = vec!["9".into(), "7".into(), "7".into()];
+    // Simulate an existing protected noncanonical setting without any resave/epoch advance.
+    let raw = rusqlite::Connection::open(root.join("calendar.sqlite")).unwrap();
+    let payload: Vec<u8> = serde_json::to_vec(&c)
+        .unwrap()
+        .iter()
+        .map(|b| b ^ 0xa5)
+        .collect();
+    raw.execute("UPDATE source_settings SET payload=?1", [payload])
+        .unwrap();
+    let (ctrl, port) = ConnectionController::new(db.clone());
+    let (endpoint, server_thread) = server();
+    ctrl.save(c.source_id, &endpoint, SecretBytes::new(vec![65]))
+        .unwrap();
+    let runtime = Arc::new(Supervisor::new(
+        db.clone(),
+        Arc::new(ConsentStore::new(ModelConsent::default())),
+    ));
+    runtime.resume().unwrap();
+    let workers = runtime
+        .spawn_workers(WorkerPorts {
+            receiver: Some(port),
+            ..Default::default()
+        })
+        .unwrap();
+    ctrl.connect(c.source_id).unwrap();
+    let until = Instant::now() + Duration::from_secs(3);
+    loop {
+        if EventService::new(db.clone())
+            .query(EventQuery {
+                from_date: None,
+                through_date: None,
+                statuses: vec![shixu_core::contracts::calendar::EventStatus::Active],
+                include_pending: true,
+            })
+            .unwrap()
+            .len()
+            == 1
+        {
+            break;
+        }
+        assert!(Instant::now() < until);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let setting = SettingsStore::new(db.clone()).sources().unwrap().remove(0);
+    assert_eq!(setting.config.allowed_group_ids, ["7", "9"]);
+    assert_eq!(setting.epoch, 1, "legacy read does not rewrite epoch");
+    workers.stop().unwrap();
+    server_thread.join().unwrap();
+    drop(runtime);
+    drop(ctrl);
+    drop(raw);
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn retirement_persists_current_authority_gaps_across_whitelist_disable_restore_and_reopen() {
+    use shixu_core::{
+        backup::CalendarBackup,
+        notifications::consent::{ConsentStore, ModelConsent},
+    };
+    for mode in ["whitelist", "disable", "restore"] {
+        for durable in [false, true] {
+            let root =
+                std::env::temp_dir().join(format!("shixu-retire-{mode}-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let path = root.join("calendar.sqlite");
+            let db = Arc::new(Database::open(&path, Arc::new(Synthetic)).unwrap());
+            let (_, c, _, _) = setup();
+            SettingsStore::new(db.clone())
+                .save_source(c.clone())
+                .unwrap();
+            let prior_message = MessageEnvelope {
+                message_key: MessageKey::from_uuid(uuid::Uuid::nil()),
+                source_id: c.source_id,
+                account_id: c.account_id.clone(),
+                group_id: "7".into(),
+                native_message_id: "122".into(),
+                sent_at: 1791504000000,
+                received_at: 1791504000000,
+                sender_id: "88".into(),
+                text: "此前普通说明".into(),
+                reply_to: None,
+                revision: 1,
+                revoked: false,
+                processing_state: ProcessingState::Persisted,
+                parts: vec![],
+            };
+            MessageStore::new(db.clone())
+                .append_with_cursor(&c, prior_message, "122")
+                .unwrap();
+            let (ctrl, mut port) = ConnectionController::new(db.clone());
+            let (endpoint, server_thread) = server();
+            ctrl.save(c.source_id, &endpoint, SecretBytes::new(vec![65]))
+                .unwrap();
+            connect(ctrl.clone(), port.as_mut(), c.source_id);
+            let delivery = port.poll().unwrap().unwrap();
+            if durable {
+                MessageStore::new(db.clone())
+                    .append_with_cursor(&c, delivery.message, &delivery.cursor)
+                    .unwrap();
+            }
+            let backup = CalendarBackup::new(
+                db.clone(),
+                Arc::new(ConsentStore::new(ModelConsent::default())),
+                &root.join("backups"),
+            )
+            .unwrap();
+            if mode == "restore" {
+                backup.automatic_snapshot(0).unwrap();
+                let preview = backup.preview(0, 0).unwrap();
+                let pause = db.pause_writes().unwrap();
+                backup.restore(preview.preview_id, true, 0, &pause).unwrap();
+                drop(pause);
+            } else {
+                let mut current = c.clone();
+                if mode == "disable" {
+                    current.enabled = false;
+                } else {
+                    current.allowed_group_ids = vec!["9".into()];
+                }
+                SettingsStore::new(db.clone()).save_source(current).unwrap();
+            }
+            let raw = rusqlite::Connection::open(&path).unwrap();
+            let before: (i64, i64, Option<String>) = raw
+                .query_row(
+                    "SELECT epoch,since,anchor FROM source_recovery WHERE group_id='7'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            port.service_controls().unwrap();
+            assert!(!ctrl.read(c.source_id).unwrap().active);
+            assert_eq!(
+                ctrl.read(c.source_id).unwrap().last_error,
+                Some(AppError::Conflict)
+            );
+            let after: (i64, i64, Option<String>, bool) = raw
+                .query_row(
+                    "SELECT epoch,since,anchor,complete FROM source_recovery WHERE group_id='7'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .unwrap();
+            assert!(
+                after.0 > before.0,
+                "{mode}/{durable}: retirement must durably invalidate old recovery handles"
+            );
+            assert_eq!(before.2.as_deref(), Some("122"));
+            assert_eq!(after.1, before.1);
+            assert_eq!(after.2, before.2);
+            assert!(!after.3);
+            if mode == "whitelist" {
+                assert_eq!(
+                    raw.query_row(
+                        "SELECT epoch FROM source_recovery WHERE group_id='9'",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                    after.0
+                );
+            }
+            assert_eq!(
+                raw.query_row("SELECT count(*) FROM messages", [], |r| r.get::<_, u32>(0))
+                    .unwrap(),
+                1 + u32::from(durable)
+            );
+            assert_eq!(
+                raw.query_row("SELECT count(*) FROM runtime_work", [], |r| r
+                    .get::<_, u32>(0))
+                    .unwrap(),
+                1 + u32::from(durable)
+            );
+            let recovery_cursor: Option<String> = raw
+                .query_row(
+                    "SELECT recovery_cursor FROM source_recovery WHERE group_id='7'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                recovery_cursor.as_deref(),
+                Some("122"),
+                "unresolved proof cursor retains original anchor"
+            );
+            let live_cursor: String = raw
+                .query_row("SELECT cursor FROM sources WHERE group_id='7'", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(live_cursor, if durable { "123" } else { "122" });
+            let current = SettingsStore::new(db.clone()).sources().unwrap().remove(0);
+            assert_eq!(current.config.enabled, mode == "whitelist");
+            if mode == "whitelist" {
+                assert_eq!(current.config.allowed_group_ids, ["9"]);
+            }
+            port.disconnect().unwrap();
+            server_thread.join().unwrap();
+            drop(port);
+            drop(ctrl);
+            drop(raw);
+            drop(backup);
+            drop(db);
+            let reopened = Arc::new(Database::open(&path, Arc::new(Synthetic)).unwrap());
+            let raw = rusqlite::Connection::open(&path).unwrap();
+            assert_eq!(
+                raw.query_row(
+                    "SELECT epoch FROM source_recovery WHERE group_id='7'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                after.0
+            );
+            assert_eq!(
+                MessageStore::new(reopened.clone())
+                    .list(Some(c.source_id), 100)
+                    .unwrap()
+                    .len(),
+                1 + usize::from(durable)
+            );
+            drop(raw);
+            drop(reopened);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+#[test]
+fn retirement_gap_persistence_failure_is_returned_and_socket_still_stops() {
+    let root = std::env::temp_dir().join(format!("shixu-retire-fail-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("calendar.sqlite");
+    let db = Arc::new(Database::open(&path, Arc::new(Synthetic)).unwrap());
+    let (_, c, _, _) = setup();
+    SettingsStore::new(db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    let (ctrl, mut port) = ConnectionController::new(db.clone());
+    let (endpoint, server_thread) = server();
+    ctrl.save(c.source_id, &endpoint, SecretBytes::new(vec![65]))
+        .unwrap();
+    connect(ctrl.clone(), port.as_mut(), c.source_id);
+    let mut disabled = c.clone();
+    disabled.enabled = false;
+    SettingsStore::new(db.clone())
+        .save_source(disabled)
+        .unwrap();
+    let raw = rusqlite::Connection::open(&path).unwrap();
+    raw.execute_batch("CREATE TRIGGER deny_retirement BEFORE UPDATE OF recovery_epoch ON source_bindings BEGIN SELECT RAISE(ABORT,'synthetic storage failure'); END;").unwrap();
+    assert_eq!(
+        port.service_controls(),
+        Err(AppError::Conflict),
+        "failed durable gap write must propagate"
+    );
+    assert!(!ctrl.read(c.source_id).unwrap().active);
+    assert_eq!(
+        ctrl.read(c.source_id).unwrap().last_error,
+        Some(AppError::Conflict)
+    );
+    port.disconnect().unwrap();
+    server_thread.join().unwrap();
+    drop(port);
+    drop(ctrl);
+    drop(raw);
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
+}

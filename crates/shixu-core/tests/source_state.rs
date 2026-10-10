@@ -289,3 +289,72 @@ fn legacy_unbound_identity_requires_explicit_new_source() {
     next.source_id = SourceId::from_uuid(Uuid::from_u128(11));
     assert_eq!(s.bind_source(&next), Ok(false));
 }
+#[test]
+fn disconnection_invalidates_completed_and_unresolved_proofs_without_reauthorizing_history() {
+    use shixu_core::notifications::settings::SettingsStore;
+    let db = Arc::new(
+        Database::open(
+            std::path::Path::new(":memory:"),
+            Arc::new(SyntheticProtector(AtomicBool::new(false))),
+        )
+        .unwrap(),
+    );
+    let store = MessageStore::new(db.clone());
+    let mut c = config();
+    c.allowed_group_ids = vec!["g".into(), "h".into()];
+    SettingsStore::new(db.clone())
+        .save_source(c.clone())
+        .unwrap();
+    store.append_with_cursor(&c, message(&c), "c1").unwrap();
+    let mut h = message(&c);
+    h.group_id = "h".into();
+    h.native_message_id = "h1".into();
+    store.append_with_cursor(&c, h, "h1").unwrap();
+    store.begin_recovery(&c, 100).unwrap();
+    let prior = store.recoveries(&c).unwrap();
+    let g = prior.iter().find(|r| r.group_id == "g").unwrap();
+    store
+        .advance_recovery(&c, "g", g.epoch, "c1", "c2", true)
+        .unwrap();
+    let mut current = c.clone();
+    current.allowed_group_ids = vec!["h".into()];
+    current.enabled = false;
+    SettingsStore::new(db.clone())
+        .save_source(current.clone())
+        .unwrap();
+    store.record_disconnection(&c, 200).unwrap();
+    let states = store.recoveries(&current).unwrap();
+    let reopened = states.iter().find(|r| r.group_id == "g").unwrap();
+    let unresolved = states.iter().find(|r| r.group_id == "h").unwrap();
+    assert!(reopened.epoch > g.epoch);
+    assert_eq!(reopened.epoch, unresolved.epoch);
+    assert!(!reopened.complete);
+    assert_eq!(reopened.anchor.as_deref(), Some("c1"));
+    assert_eq!(reopened.since, 200);
+    assert_eq!(unresolved.anchor.as_deref(), Some("h1"));
+    assert_eq!(unresolved.recovery_cursor.as_deref(), Some("h1"));
+    assert_eq!(unresolved.since, 100);
+    assert!(!unresolved.complete);
+    assert!(!SettingsStore::new(db).sources().unwrap()[0].config.enabled);
+    assert_eq!(
+        store.append(&current, message(&c)).unwrap(),
+        AppendOutcome::Filtered
+    );
+    let mut wrong = c.clone();
+    wrong.account_id = "other-account".into();
+    assert_eq!(
+        store.record_disconnection(&wrong, 300),
+        Err(AppError::Conflict)
+    );
+    wrong = c.clone();
+    wrong.source_id = SourceId::from_uuid(Uuid::new_v4());
+    assert_eq!(
+        store.record_disconnection(&wrong, 300),
+        Err(AppError::Conflict)
+    );
+    assert_eq!(
+        store.recoveries(&current).unwrap(),
+        states,
+        "identity failures cannot mutate recovery"
+    );
+}

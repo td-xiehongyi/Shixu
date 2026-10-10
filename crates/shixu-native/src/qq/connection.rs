@@ -218,13 +218,15 @@ impl ManagedReceiver {
             }
             let result = receiver.disconnect();
             self.pending = false;
-            if let Err(e) = MessageStore::new(self.db.clone()).begin_recovery(&s.config, now()) {
+            let recovery =
+                MessageStore::new(self.db.clone()).record_disconnection(&s.config, now());
+            if let Err(e) = recovery {
                 error = Some(e);
             }
             let mut status = self.status.lock().map_err(|_| AppError::Disconnected)?;
             status.active = None;
             status.last_error = error;
-            result
+            result.and(recovery)
         } else {
             Ok(())
         }

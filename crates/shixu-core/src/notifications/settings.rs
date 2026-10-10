@@ -29,7 +29,7 @@ impl SettingsStore {
             .map(|r| {
                 let (epoch, payload) = r.map_err(storage_error)?;
                 Ok(SourceSetting {
-                    config: self.db.unprotect(&payload)?,
+                    config: canonical(self.db.unprotect(&payload)?),
                     epoch,
                 })
             })
@@ -38,6 +38,7 @@ impl SettingsStore {
     }
     pub fn save_source(&self, config: SourceConfig) -> AppResult<()> {
         validate(&config)?;
+        let config = canonical(config);
         self.db.transaction(|tx|{
  let prior:Option<(String,String)>=tx.query_row("SELECT adapter_type,account_id FROM source_bindings WHERE source_id=?1",[config.source_id.to_string()],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage_error)?;
  if let Some((adapter,account))=prior {if adapter!=config.adapter_type||account!=config.account_id{return Err(AppError::Conflict);}}
@@ -67,6 +68,13 @@ impl SettingsStore {
         self.db.transaction(|tx|{tx.execute("INSERT INTO desktop_settings VALUES (1,?1) ON CONFLICT(id) DO UPDATE SET autostart=excluded.autostart",[value]).map_err(storage_error)?;Ok(())})
     }
 }
+/// Canonical group-set representation for new writes and legacy current reads.
+/// Historical message proofs/bindings and configuration epochs are not rewritten.
+pub(crate) fn canonical(mut config: SourceConfig) -> SourceConfig {
+    config.allowed_group_ids.sort();
+    config.allowed_group_ids.dedup();
+    config
+}
 pub fn validate(c: &SourceConfig) -> AppResult<()> {
     let valid = |s: &str, max| !s.is_empty() && s.len() <= max && !s.chars().any(char::is_control);
     if !valid(&c.adapter_type, 128)
@@ -94,7 +102,7 @@ pub(crate) fn current(
         )
         .optional()
         .map_err(storage_error)?;
-    row.map(|(epoch, payload)| Ok((epoch, db.unprotect(&payload)?)))
+    row.map(|(epoch, payload)| Ok((epoch, canonical(db.unprotect(&payload)?))))
         .transpose()
 }
 pub(crate) fn proof(
