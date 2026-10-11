@@ -25,7 +25,6 @@ use std::{
 };
 type LifecycleHandler = Arc<dyn Fn(NativeVaultEvent) + Send + Sync>;
 const DEADLINE: Duration = Duration::from_secs(35);
-const IDLE: Duration = Duration::from_secs(300);
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CopyField {
@@ -80,11 +79,6 @@ impl Authority {
         self.activity = None;
         self.cancel.cancel();
     }
-    fn expire(&mut self) {
-        if self.activity.is_some_and(|t| t.elapsed() >= IDLE) {
-            self.revoke();
-        }
-    }
 }
 /// Owned reply bound to its original native admission and service session.
 /// No serialization or publication occurs until publish holds the authority gate.
@@ -108,7 +102,6 @@ impl PendingDelivery<'_> {
             .authority
             .lock()
             .map_err(|_| AppError::Locked)?;
-        a.expire();
         let check = || self.controller.signal.check(self.generation);
         check()?;
         if a.epoch != self.epoch || a.session != self.session {
@@ -152,6 +145,14 @@ impl VaultController {
     }
     pub fn unavailable() -> Arc<Self> {
         Self::new(None)
+    }
+    #[cfg(windows)]
+    pub fn fictional(resources: std::path::PathBuf, work: std::path::PathBuf) -> Arc<Self> {
+        let engine = KdbxWebEngine::prepared_fictional(resources, work);
+        if let Err(error) = &engine {
+            eprintln!("SHIXU_VAULT_FICTIONAL_ADMISSION error={}", error.code());
+        }
+        Self::new(engine.ok())
     }
     fn new(engine: Option<KdbxWebEngine>) -> Arc<Self> {
         let arm = Arc::new(Mutex::new(VaultCancellation::default()));
@@ -200,7 +201,6 @@ impl VaultController {
                 let current = match gate.lock() {
                     Ok(mut a) => {
                         a.synchronize(&worker_signal);
-                        a.expire();
                         a.epoch
                     }
                     Err(_) => break,
@@ -309,7 +309,6 @@ impl VaultController {
                     Err(_) => break,
                 };
                 a.synchronize(&worker_signal);
-                a.expire();
                 let result = if a.epoch != request.epoch
                     || worker_signal.check(request.generation).is_err()
                 {
@@ -338,16 +337,6 @@ impl VaultController {
             }
             if let Some(mut s) = service {
                 let _ = s.lock(LockReason::Exit);
-            }
-        });
-        let gate = authority.clone();
-        let stopping = stop.clone();
-        let ticker = thread::spawn(move || {
-            while !stopping.load(Ordering::Acquire) {
-                if let Ok(mut a) = gate.lock() {
-                    a.expire();
-                }
-                thread::sleep(Duration::from_millis(100));
             }
         });
         let lifecycle_handler = Arc::new(Mutex::new(None::<LifecycleHandler>));
@@ -396,7 +385,7 @@ impl VaultController {
             clipboard: Mutex::new(Box::new(clipboard)),
             authority,
             stop,
-            threads: Mutex::new(vec![worker, ticker, dispatcher]),
+            threads: Mutex::new(vec![worker, dispatcher]),
         })
     }
     pub fn set_lifecycle_handler(
@@ -433,7 +422,6 @@ impl VaultController {
         let (reply, rx) = mpsc::sync_channel(1);
         let mut a = self.authority.lock().map_err(|_| AppError::Locked)?;
         a.synchronize(&self.signal);
-        a.expire();
         let generation = self.signal.generation();
         self.signal.check(generation)?;
         let startup = matches!(op, Operation::Create(_) | Operation::Unlock(_));
@@ -494,12 +482,14 @@ impl VaultController {
             }
         }
     }
+    pub fn is_unlocked(&self) -> AppResult<bool> {
+        let mut a = self.authority.lock().map_err(|_| AppError::Locked)?;
+        a.synchronize(&self.signal);
+        self.signal.check(a.generation)?;
+        Ok(a.unlocked && a.session.is_some())
+    }
     pub fn tick(&self) -> AppResult<()> {
-        self.authority
-            .lock()
-            .map_err(|_| AppError::Locked)?
-            .expire();
-        Ok(())
+        self.is_unlocked().map(|_| ())
     }
 }
 impl Drop for VaultController {
@@ -657,7 +647,21 @@ mod tests {
         assert!(c.execute(Operation::List).is_ok());
     }
     #[test]
-    fn native_idle_ticker_revokes_without_ui_and_only_explicit_activity_refreshes() {
+    fn native_session_survives_idle_without_activity() {
+        let c = controller(Controlled {
+            fail_startup: false,
+            startup: None,
+            reveal: None,
+        });
+        assert!(c.execute(Operation::Unlock(master())).is_ok());
+        c.authority.lock().unwrap().activity = Some(Instant::now() - Duration::from_secs(86400));
+        c.tick().unwrap();
+        assert!(c.execute(Operation::List).is_ok());
+        c.lock(LockReason::Manual).unwrap();
+        assert!(matches!(c.execute(Operation::List), Err(AppError::Locked)));
+    }
+    #[test]
+    fn native_activity_is_authorized_without_idle_expiry() {
         let c = controller(Controlled {
             fail_startup: false,
             startup: None,
@@ -670,13 +674,13 @@ mod tests {
         c.authority.lock().unwrap().activity = Some(Instant::now() - Duration::from_secs(299));
         assert!(c.execute(Operation::Activity).is_ok());
         assert!(c.authority.lock().unwrap().activity.unwrap().elapsed() < Duration::from_secs(1));
-        c.authority.lock().unwrap().activity = Some(Instant::now() - IDLE);
+        c.authority.lock().unwrap().activity = Some(Instant::now() - Duration::from_secs(300));
         thread::sleep(Duration::from_millis(200));
-        assert!(!c.authority.lock().unwrap().unlocked);
-        assert!(matches!(c.execute(Operation::List), Err(AppError::Locked)));
+        assert!(c.is_unlocked().unwrap());
+        assert!(c.execute(Operation::List).is_ok());
     }
     #[test]
-    fn startup_completion_after_idle_expiry_cannot_activate_authority() {
+    fn startup_completion_after_explicit_revocation_cannot_activate_authority() {
         let (started, ready) = mpsc::channel();
         let (release, wait) = mpsc::channel();
         let c = controller(Controlled {
@@ -687,7 +691,7 @@ mod tests {
         let old = c.clone();
         let old = thread::spawn(move || old.execute(Operation::Unlock(master())));
         ready.recv_timeout(Duration::from_secs(2)).unwrap();
-        c.authority.lock().unwrap().activity = Some(Instant::now() - IDLE);
+        c.signal().notify(NativeVaultEvent::Revoked);
         wait_epoch(&c, 2);
         release.send(()).unwrap();
         assert!(matches!(old.join().unwrap(), Err(AppError::Locked)));
@@ -840,6 +844,7 @@ mod tests {
                 entry_id: id.parse().unwrap(),
                 channel: "c".into(),
                 account: account.into(),
+                description: String::new(),
                 revision: 1,
                 created_at: 0,
                 updated_at: 0,

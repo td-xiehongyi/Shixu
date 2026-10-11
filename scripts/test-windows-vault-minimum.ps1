@@ -1,4 +1,4 @@
-# Fixed Windows minimum workflow; synthetic probe only, never enables production.
+# Fixed Windows minimum workflow; probes use only test-owned vault storage.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -91,5 +91,5 @@ if ($LASTEXITCODE -ne 0) { throw 'FAIL: source identity unavailable' }
 foreach ($name in $sourceNames) { $sourceHashes[$name] = (Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash.ToLowerInvariant() }
 $exe = 'target/x86_64-pc-windows-msvc/debug/shixu-desktop.exe'
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'FAIL: desktop artifact missing after successful build' }
-Write-NewText 'result.json' ((@{ head=$head.Trim(); source_sha256=$sourceHashes; artifact_sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant(); resource_sha256=$resourceHashes; production='Unsupported'; Q1='OPEN'; release_gates=@(1..12 | ForEach-Object { 'BLOCKED' }); trusted_path_constructor_count=1; synthetic_controller_count=3; session_power_scope='REMOVED_BY_USER'; manual_window_tray='NOT EXECUTED BY THIS SCRIPT' } | ConvertTo-Json -Depth 8) + "`n")
-Write-Output "Minimum MSVC build/native synthetic evidence=$evidence. Production Unsupported; Q1 OPEN; all12 gates BLOCKED. Optional window/tray observation: scripts/observe-windows-vault-lifecycle.ps1"
+Write-NewText 'result.json' ((@{ head=$head.Trim(); source_sha256=$sourceHashes; artifact_sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant(); resource_sha256=$resourceHashes; production='local_use_enabled'; Q1='OPEN'; release_gates=@(1..12 | ForEach-Object { 'BLOCKED' }); trusted_path_constructor_count=1; synthetic_controller_count=3; session_power_scope='REMOVED_BY_USER'; manual_window_tray='NOT EXECUTED BY THIS SCRIPT' } | ConvertTo-Json -Depth 8) + "`n")
+Write-Output "Minimum MSVC build/native synthetic evidence=$evidence. Local vault constructor enabled; Q1 OPEN; all12 gates BLOCKED. Optional window/tray observation: scripts/observe-windows-vault-lifecycle.ps1"

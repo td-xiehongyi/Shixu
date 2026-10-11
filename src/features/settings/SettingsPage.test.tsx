@@ -10,7 +10,7 @@ it("model_and_autostart_default_off", async () => {
   expect(controls.length).toBeGreaterThanOrEqual(3);
   expect(controls.every((c) => !c.checked)).toBe(true);
   expect(r.host.textContent).toContain("尚未接通");
-  expect(r.host.textContent).toContain("5 分钟");
+  expect(r.host.textContent).toContain("本次运行解锁后保持可访问");
   await r.close();
 });
 import { act } from "react";
@@ -70,6 +70,6 @@ it("clipboard_policy_explains_persistence_without_automatic_clear", async () => 
   expect(r.host.textContent).toContain("不会自动清除");
   expect(r.host.textContent).toContain("覆盖或手动清除");
   expect(r.host.textContent).toContain("15 秒");
-  expect(r.host.textContent).toContain("5 分钟");
+  expect(r.host.textContent).toContain("本次运行解锁后保持可访问");
   await r.close();
 });

@@ -1,8 +1,7 @@
 {
   "identifier": "vault",
-  "description": "Dedicated vault window only; KdbxWeb dispatcher; Windows isolation remains unavailable",
+  "description": "Dedicated vault window only; KdbxWeb dispatcher; production Windows admission remains blocked",
   "local": true,
-  "windows": ["vault"],
   "permissions": [
     "allow-vault-create",
     "allow-vault-change-master",
@@ -14,6 +13,10 @@
     "allow-vault-reveal",
     "allow-vault-lock",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "allow-ack-vault-view"
+  ],
+  "webviews": [
+    "vault"
   ]
 }

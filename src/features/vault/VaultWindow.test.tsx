@@ -10,6 +10,7 @@ const rows: VaultSummary[] = [1, 2].map((n) => ({
   entry_id: `11111111-1111-4111-8111-11111111111${n}`,
   channel: "测试渠道",
   account: `虚构账号${n}`,
+  description: `虚构描述${n}\n第二行`,
   revision: "9007199254740993",
   created_at: 0,
   updated_at: 0,
@@ -44,6 +45,55 @@ function port(extra: Partial<VaultPort> = {}): VaultPort {
   } as VaultPort;
 }
 const readySubscription = async () => () => {};
+it("pointer_reveal_stays_unlocked_when_an_obsolete_idle_request_would_conflict", async () => {
+  const lock = vi.fn(async () => {});
+  await render(
+    port({
+      vaultActivity: async () => {
+        throw new BridgeError("CONFLICT");
+      },
+      vaultLock: lock,
+    }),
+  );
+  await unlock();
+  lock.mockClear();
+  await act(async () => {
+    const reveal = button("显示密码");
+    reveal.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    reveal.click();
+  });
+  expect(host.querySelector(".vault-state")?.textContent).toBe("已解锁");
+  expect(host.querySelector(".vault-details code")?.textContent).toBe(
+    "synthetic-reveal",
+  );
+  expect(lock).not.toHaveBeenCalled();
+});
+it("entry_form_preserves_optional_multiline_description", async () => {
+  let saved: unknown;
+  await act(async () =>
+    root.render(
+      <EntryForm
+        onSave={async (value) => {
+          saved = {
+            ...value,
+            password: new TextDecoder().decode(value.password),
+          };
+        }}
+      />,
+    ),
+  );
+  await fill("渠道", "虚构渠道");
+  await fill("账号", "fictional@example.invalid");
+  await fill("密码", "fictional-only-password");
+  await fill("描述", "  用途说明\n第二行  ");
+  await click("保存条目");
+  expect(saved).toEqual({
+    channel: "虚构渠道",
+    account: "fictional@example.invalid",
+    password: "fictional-only-password",
+    description: "  用途说明\n第二行  ",
+  });
+});
 async function render(p: VaultPort) {
   await act(async () =>
     root.render(<VaultWindow port={p} subscribeLocked={readySubscription} />),
@@ -84,19 +134,21 @@ function deferred<T>() {
   const promise = new Promise<T>((r) => (resolve = r));
   return { promise, resolve };
 }
-it("only_three_business_fields", async () => {
+it("entry_fields_include_optional_description", async () => {
   await act(async () => root.render(<EntryForm onSave={async () => {}} />));
   expect(
     [...host.querySelectorAll("label")].map((l) => l.firstChild?.textContent),
-  ).toEqual(["渠道", "账号", "密码"]);
+  ).toEqual(["渠道", "账号", "密码", "描述"]);
 });
 it("locked_hides_accounts", async () => {
   await render(port());
   expect(host.textContent).not.toContain("虚构账号");
   await unlock();
   expect(host.textContent).toContain("虚构账号1");
+  expect(host.textContent).toContain("虚构描述1\n第二行");
   await click("锁定密码库");
   expect(host.textContent).not.toContain("虚构账号");
+  expect(host.textContent).not.toContain("虚构描述");
 });
 it("duplicate_account_does_not_overwrite_and_revision_is_exact", async () => {
   let sent: VaultMutation | undefined;
@@ -111,15 +163,21 @@ it("duplicate_account_does_not_overwrite_and_revision_is_exact", async () => {
   await unlock();
   expect(host.querySelectorAll("[data-entry-id]").length).toBe(2);
   await act(async () =>
-    host.querySelectorAll<HTMLButtonElement>("button[data-edit]")[1].click(),
+    host
+      .querySelectorAll<HTMLButtonElement>("button[data-entry-id]")[1]
+      .click(),
   );
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>("button[data-edit]")!.click(),
+  );
+  await click("修改密码");
   await fill("密码", "  synthetic-password  ");
   await click("保存条目");
   expect(sent?.operation).toBe("update");
   if (sent?.operation === "update") {
     expect(sent.id).toBe(rows[1].entry_id);
     expect(sent.expected_revision).toBe(rows[1].revision);
-    expect(sent.password.every((b) => b === 0)).toBe(true);
+    expect(sent.password?.every((b) => b === 0)).toBe(true);
   }
 });
 it("password_bytes_preserved_at_port_and_wiped_after_settlement", async () => {
@@ -176,14 +234,15 @@ it("late_list_after_lock_and_new_unlock_is_discarded", async () => {
   await act(async () => d.resolve(rows));
   expect(host.textContent).not.toContain("虚构账号");
 });
-it("inactivity_locks_at_five_minutes_without_background_refresh", async () => {
+it("inactivity_keeps_vault_accessible_until_manual_lock", async () => {
   await render(port());
   await unlock();
   await act(async () => vi.advanceTimersByTime(299999));
   expect(host.textContent).toContain("虚构账号");
-  await act(async () => vi.advanceTimersByTime(1));
+  await act(async () => vi.advanceTimersByTime(86400000));
+  expect(host.textContent).toContain("虚构账号");
+  await click("锁定密码库");
   expect(host.textContent).not.toContain("虚构账号");
-  expect(host.textContent).toContain("密码库已锁定");
 });
 it("failed_unlock_stays_locked_with_fixed_error", async () => {
   await render(
@@ -212,9 +271,9 @@ it("create_requires_two_equal_passwords_and_forget_is_honest", async () => {
   await click("创建密码库");
   expect(n).toBe(0);
   expect(host.textContent).toContain("两次主密码不一致");
-  await click("返回解锁");
-  await click("忘记主密码");
   expect(host.textContent).toContain("无法找回");
+  await click("返回解锁");
+  expect(host.textContent).not.toContain("忘记主密码");
 });
 it("save_only_reports_success_after_persistence_and_delete_requires_confirmation", async () => {
   const d = deferred<VaultSummary>();
@@ -233,10 +292,10 @@ it("save_only_reports_success_after_persistence_and_delete_requires_confirmation
   await fill("账号", "虚构");
   await fill("密码", "synthetic");
   await click("保存条目");
-  expect(host.textContent).not.toContain("条目已保存");
+  expect(host.textContent).not.toContain("已保存");
   await act(async () => d.resolve(rows[0]));
-  expect(host.textContent).toContain("条目已保存");
-  await click("删除");
+  expect(host.textContent).toContain("已保存");
+  await click("删除条目");
   expect(n).toBe(1);
   expect(host.textContent).toContain("确认删除");
 });
@@ -339,7 +398,7 @@ it("failed_save_never_reports_success_or_raw_error", async () => {
   await fill("账号", "虚构");
   await fill("密码", "synthetic");
   await click("保存条目");
-  expect(host.textContent).not.toContain("条目已保存");
+  expect(host.textContent).not.toContain("已保存");
   expect(host.textContent).not.toContain("synthetic-private-provider-error");
   expect(host.textContent).toContain("暂不可用");
 });
@@ -452,7 +511,7 @@ it("cancel_detaches_and_resets_current_change_master_form", async () => {
 });
 
 it.each(["account", "password"] as const)(
-  "copy_%s_warns_content_persists_without_automatic_cleanup",
+  "copy_%s_shows_concise_notice_without_automatic_cleanup",
   async (field) => {
     const requests: Array<[string, "account" | "password"]> = [];
     let clipboard = "";
@@ -467,8 +526,9 @@ it.each(["account", "password"] as const)(
     await unlock();
     await click(field === "password" ? "复制密码" : "复制账号");
     expect(requests).toEqual([[rows[0].entry_id, field]]);
-    expect(host.textContent).toContain("不会自动清除");
-    expect(host.textContent).toContain("覆盖或手动清除");
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(
+      field === "password" ? "已复制密码" : "已复制账号",
+    );
     expect(host.textContent).not.toContain("synthetic-clipboard");
     await act(async () => vi.advanceTimersByTime(30000));
     expect(clipboard).toBe("synthetic-clipboard");
@@ -522,7 +582,7 @@ it("direct_bridge_rejects_newlines_without_invoking", async () => {
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
   expect(invoke).not.toHaveBeenCalled();
 });
-it("explicit_vault_activity_calls_native_authority_and_background_does_not", async () => {
+it("pointer_and_keyboard_do_not_queue_idle_heartbeats_for_process_lifetime_unlock", async () => {
   const activity = vi.fn(async () => {});
   await render(port({ vaultActivity: activity } as Partial<VaultPort>));
   await unlock();
@@ -536,7 +596,12 @@ it("explicit_vault_activity_calls_native_authority_and_background_does_not", asy
       .querySelector("main")!
       .dispatchEvent(new Event("pointerdown", { bubbles: true })),
   );
-  expect(activity).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    host
+      .querySelector("main")!
+      .dispatchEvent(new Event("keydown", { bubbles: true })),
+  );
+  expect(activity).not.toHaveBeenCalled();
 });
 it("list_decode_failure_revokes_native_session_after_authentication", async () => {
   const lockNative = vi.fn(async () => {});
@@ -613,9 +678,15 @@ it("entry_form_preserves_channel_newlines_whitespace_unicode_and_nul", async () 
       />,
     ),
   );
+  await click("修改密码");
   await fill("密码", password);
   await click("保存条目");
-  expect(saved).toEqual({ channel, account, password });
+  expect(saved).toEqual({
+    channel,
+    account,
+    description: rows[0].description,
+    password,
+  });
 });
 it("bridge_secret_validation_is_structural_and_rejects_all_secret_newline_paths", async () => {
   const invoke = vi.fn(async () => null),
@@ -671,6 +742,7 @@ it("unchanged_existing_channel_preserves_cr_and_crlf_when_editing_password", asy
       />,
     ),
   );
+  await click("修改密码");
   await fill("密码", "changed password");
   await click("保存条目");
   expect(savedChannel).toBe(channel);
@@ -692,12 +764,13 @@ it("strictmode_replay_restores_defaults_preserves_exact_edit_and_clears_detached
   const channel = ' 渠道\r单独\r\n换行/"\u0000 🗝️ ';
   const account = ' 用户/"\u0000 🗝️ ';
   const password = ' 新密码/"\u0000 🗝️ ';
+  const description = " 保留描述\r\n第二行 ";
   let saved: { channel: string; account: string; password: string } | undefined;
   await act(async () =>
     root.render(
       <StrictMode>
         <EntryForm
-          initial={{ ...rows[0], channel, account }}
+          initial={{ ...rows[0], channel, account, description }}
           onSave={async (value) => {
             saved = {
               ...value,
@@ -714,16 +787,22 @@ it("strictmode_replay_restores_defaults_preserves_exact_edit_and_clears_detached
     host.querySelector<HTMLInputElement>('[name="account"]')!;
   expect(channelInput.value).toBe(channel.replace(/\r\n?/g, "\n"));
   expect(accountInput.value).toBe(account);
+  await click("修改密码");
   await fill("密码", password);
   await click("保存条目");
-  expect(saved).toEqual({ channel, account, password });
+  expect(saved).toEqual({ channel, account, description, password });
+  const descriptionInput = host.querySelector<HTMLTextAreaElement>(
+    '[name="description"]',
+  )!;
   const controls = [
     ...host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
       "input, textarea",
     ),
   ];
   await act(async () => root.render(<div>closed</div>));
-  expect(controls.map((input) => input.value)).toEqual(["", "", ""]);
+  expect(controls.map((input) => input.value)).toEqual(["", "", "", ""]);
+  expect(descriptionInput.defaultValue).toBe("");
+  expect(descriptionInput.textContent).toBe("");
 });
 it("account_all_newlines_are_preserved_on_strictmode_password_only_edit_and_bridge", async () => {
   const account = ' 用户\r单独\r\n行\n\u0085\u2028\u2029/"\0 🗝️ ';
@@ -757,6 +836,7 @@ it("account_all_newlines_are_preserved_on_strictmode_password_only_edit_and_brid
     await act(async () => accountInput.dispatchEvent(event));
     expect(event.defaultPrevented).toBe(false);
   }
+  await click("修改密码");
   await fill("密码", "new password");
   await click("保存条目");
   expect(savedAccount).toBe(account);
@@ -922,4 +1002,235 @@ it("failed_subscription_stays_unavailable_until_deliberate_successful_registrati
   );
   await unlock();
   expect(p.vaultUnlock).toHaveBeenCalledTimes(1);
+});
+
+it("selected_details_hide_other_descriptions_and_switch_hides_password", async () => {
+  await render(port());
+  await unlock();
+  expect(host.querySelector(".vault-details")?.textContent).toContain(
+    "虚构描述1",
+  );
+  expect(host.querySelector(".vault-details")?.textContent).not.toContain(
+    "虚构描述2",
+  );
+  await click("显示密码");
+  await act(async () =>
+    host.querySelectorAll<HTMLButtonElement>("[data-entry-id]")[1].click(),
+  );
+  expect(host.querySelector(".vault-details")?.textContent).toContain(
+    "虚构描述2",
+  );
+  expect(host.textContent).not.toContain("synthetic-reveal");
+});
+it("visibility_redacts_without_revoking_and_late_reveal_is_wiped", async () => {
+  let visibility!: (visible: boolean) => void;
+  const d = deferred<Uint8Array>();
+  const unlockSpy = vi.fn(async () => {}),
+    lockSpy = vi.fn(async () => {});
+  await act(async () =>
+    root.render(
+      <VaultWindow
+        port={port({
+          vaultReveal: () => d.promise,
+          vaultUnlock: unlockSpy,
+          vaultLock: lockSpy,
+        })}
+        subscribeLocked={readySubscription}
+        subscribeVisibility={async (callback) => {
+          visibility = callback;
+          return () => {};
+        }}
+      />,
+    ),
+  );
+  await unlock();
+  await click("显示密码");
+  await act(async () => visibility(false));
+  const bytes = new TextEncoder().encode("hidden-late-secret");
+  await act(async () => d.resolve(bytes));
+  expect(bytes.every((b) => b === 0)).toBe(true);
+  await act(async () => visibility(true));
+  expect(host.textContent).toContain("虚构账号1");
+  expect(host.textContent).not.toContain("hidden-late-secret");
+  expect(unlockSpy).toHaveBeenCalledTimes(1);
+  expect(lockSpy).not.toHaveBeenCalled();
+});
+
+it("search_replaces_selection_and_clears_password_and_old_description", async () => {
+  await render(port());
+  await unlock();
+  await click("显示密码");
+  await fill("搜索渠道或账号", "虚构账号2");
+  const detail = () => host.querySelector(".vault-details")!.textContent;
+  expect(detail()).toContain("虚构描述2");
+  expect(detail()).not.toContain("虚构描述1");
+  expect(detail()).not.toContain("synthetic-reveal");
+  await fill("搜索渠道或账号", "no matches");
+  expect(detail()).not.toContain("虚构描述");
+  expect(detail()).toContain("选择或新增");
+});
+it("hidden_editor_wipes_unsaved_input_and_pending_save_only_updates_rows", async () => {
+  let visibility!: (visible: boolean) => void;
+  const d = deferred<VaultSummary>();
+  await act(async () =>
+    root.render(
+      <VaultWindow
+        port={port({ vaultApply: () => d.promise })}
+        subscribeLocked={readySubscription}
+        subscribeVisibility={async (cb) => {
+          visibility = cb;
+          return () => {};
+        }}
+      />,
+    ),
+  );
+  await unlock();
+  await click("新增条目");
+  await fill("渠道", "新的虚构渠道");
+  await fill("账号", "pending@example.invalid");
+  await fill("密码", "unsaved-password");
+  await fill("描述", "unsaved-description");
+  const password = host.querySelector<HTMLInputElement>('[aria-label="密码"]')!;
+  await click("保存条目");
+  await act(async () => visibility(false));
+  expect(password.value).toBe("");
+  expect(host.querySelector(".vault-editor")).toBeNull();
+  await act(async () =>
+    d.resolve({
+      ...rows[0],
+      entry_id: "22222222-2222-4222-8222-222222222222",
+      channel: "新的虚构渠道",
+      account: "pending@example.invalid",
+    }),
+  );
+  expect(host.querySelector(".vault-editor")).toBeNull();
+  expect(host.textContent).toContain("pending@example.invalid");
+  await act(async () => visibility(true));
+  expect(host.querySelector(".vault-state")?.textContent).toBe("已解锁");
+});
+it("partial_visibility_registration_failure_removes_locked_listener", async () => {
+  const removed = vi.fn();
+  await act(async () =>
+    root.render(
+      <VaultWindow
+        port={port()}
+        subscribeLocked={async () => removed}
+        subscribeVisibility={async () => {
+          throw Error("listener failed");
+        }}
+      />,
+    ),
+  );
+  expect(removed).toHaveBeenCalledTimes(1);
+  expect(button("解锁密码库").disabled).toBe(true);
+});
+
+it("failed_registration_can_be_retried_in_place", async () => {
+  let attempts = 0;
+  const subscribe = async () => {
+    if (++attempts === 1) throw Error("transient failure");
+    return () => {};
+  };
+  await act(async () =>
+    root.render(<VaultWindow port={port()} subscribeLocked={subscribe} />),
+  );
+  await click("重试密码库");
+  await unlock();
+  expect(host.textContent).toContain("虚构账号1");
+  expect(attempts).toBe(2);
+});
+it("editing_metadata_keeps_password_inside_engine", async () => {
+  const reveal = vi.fn(async () => new Uint8Array([1]));
+  let mutation: VaultMutation | undefined;
+  await render(
+    port({
+      vaultReveal: reveal,
+      vaultApply: async (m) => {
+        mutation = m;
+        return rows[0];
+      },
+    }),
+  );
+  await unlock();
+  await click("编辑");
+  expect(host.querySelector('[name="password"]')).toBeNull();
+  await fill("描述", "只更新描述");
+  await click("保存条目");
+  expect(mutation).toMatchObject({
+    operation: "update",
+    description: "只更新描述",
+  });
+  expect(mutation).not.toHaveProperty("password");
+  expect(reveal).not.toHaveBeenCalled();
+  expect(host.querySelector(".vault-state")?.textContent).toBe("已解锁");
+});
+it("explicit_password_change_requires_value_and_cancel_preserves_original", async () => {
+  const saved = vi.fn(async (_value: { password?: Uint8Array }) => {});
+  await act(async () =>
+    root.render(<EntryForm initial={rows[0]} onSave={saved} />),
+  );
+  await click("修改密码");
+  await click("保存条目");
+  expect(saved).not.toHaveBeenCalled();
+  await fill("密码", "temporary-password");
+  const detached = host.querySelector<HTMLInputElement>('[name="password"]')!;
+  await click("取消修改密码");
+  expect(detached.value).toBe("");
+  await click("保存条目");
+  expect(saved.mock.calls[0]?.[0]).not.toHaveProperty("password");
+});
+it("concise_feedback_expires_but_does_not_lock_or_clear_clipboard", async () => {
+  const lock = vi.fn(async () => {});
+  await render(port({ vaultLock: lock }));
+  await unlock();
+  await click("复制密码");
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("已复制密码");
+  const calls = lock.mock.calls.length;
+  await act(async () => vi.advanceTimersByTime(3000));
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("");
+  expect(lock.mock.calls.length).toBe(calls);
+  expect(host.querySelector(".vault-state")?.textContent).toBe("已解锁");
+});
+it("recovery_warning_only_on_creation_and_no_repeated_footer", async () => {
+  await render(port());
+  expect(host.textContent).not.toContain("忘记主密码");
+  expect(host.querySelector(".vault-footer")).toBeNull();
+  expect(host.textContent).not.toContain("主密码无法找回");
+  await click("新建密码库");
+  expect(host.textContent).toContain("主密码无法找回，请妥善保管。");
+});
+
+it("update_omits_password_without_reveal_and_empty_replacement_is_rejected", async () => {
+  const invoke = vi.fn(async () => rows[0]);
+  const bridge = createVaultBridge(invoke);
+  const update = {
+    operation: "update" as const,
+    id: rows[0].entry_id,
+    expected_revision: rows[0].revision,
+    channel: "changed",
+    account: "account",
+    description: "new",
+  };
+  await bridge.vaultApply(update);
+  expect(invoke.mock.calls[0]).toEqual(["vault_apply", { mutation: update }]);
+  await expect(
+    bridge.vaultApply({ ...update, password: new Uint8Array() }),
+  ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  expect(invoke).toHaveBeenCalledTimes(1);
+});
+it("new_error_is_not_erased_by_previous_success_notice_timer", async () => {
+  await render(
+    port({
+      vaultCopy: async (_id, field) => {
+        if (field === "account") throw new BridgeError("DISCONNECTED");
+      },
+    }),
+  );
+  await unlock();
+  await click("复制密码");
+  await click("复制账号");
+  await act(async () => vi.advanceTimersByTime(3000));
+  expect(host.querySelector('[role="status"]')?.textContent).toContain(
+    "服务未连接",
+  );
 });

@@ -4,11 +4,8 @@ use crate::contracts::{
     vault::{SessionId, VaultStatus},
 };
 
-const IDLE_TIMEOUT_MS: UtcMillis = 300_000;
-
 struct ActiveSession {
     id: SessionId,
-    last_activity: UtcMillis,
     last_observed: UtcMillis,
 }
 
@@ -40,7 +37,6 @@ impl SessionPolicy {
         let id = SessionId::from_uuid(uuid::Uuid::new_v4());
         self.active = Some(ActiveSession {
             id,
-            last_activity: now,
             last_observed: now,
         });
         self.status = VaultStatus::Unlocked;
@@ -66,20 +62,14 @@ impl SessionPolicy {
 
     /// Timer observations never refresh vault activity. Caller-supplied clocks
     /// must be nondecreasing, including observations by background ticks.
-    pub fn observe_time(&mut self, now: UtcMillis) -> AppResult<bool> {
+    pub fn observe_time(&mut self, now: UtcMillis) -> AppResult<()> {
         let Some(active) = &mut self.active else {
-            return Ok(false);
+            return Ok(());
         };
         if now < active.last_observed {
             return Err(AppError::InvalidInput);
         }
         active.last_observed = now;
-        Ok(now.saturating_sub(active.last_activity) >= IDLE_TIMEOUT_MS)
-    }
-
-    pub fn refresh(&mut self, now: UtcMillis) {
-        if let Some(active) = &mut self.active {
-            active.last_activity = now;
-        }
+        Ok(())
     }
 }

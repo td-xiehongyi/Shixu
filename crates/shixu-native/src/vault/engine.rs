@@ -35,6 +35,23 @@ struct ResourceManifest {
 const MANIFEST: &str = include_str!("../../../../vault-helper/resources-linux-x64.json");
 #[cfg(windows)]
 const MANIFEST: &str = include_str!("../../../../vault-helper/resources-win-x64.json");
+#[cfg(windows)]
+pub(super) fn resource_version() -> String {
+    Sha256::digest(MANIFEST.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+/// Only for a resource directory returned by trusted native bootstrap. The
+/// desktop framework can return a verbatim disk prefix; public storage inputs
+/// still go through the unchanged strict Win32 admission below.
+#[cfg(windows)]
+pub fn bundled_resources_directory(directory: &Path) -> AppResult<PathBuf> {
+    let value = directory.to_str().ok_or(AppError::Unsupported)?;
+    let value = value.strip_prefix(r"\\?\").unwrap_or(value);
+    super::windows_policy::local_path(value)?;
+    Ok(Path::new(value).join("vault-win-x64"))
+}
 pub(super) fn verify_resources(root: &Path) -> AppResult<()> {
     let manifest: ResourceManifest =
         serde_json::from_str(MANIFEST).map_err(|_| AppError::Unsupported)?;
@@ -156,6 +173,7 @@ enum RequestOp<'a> {
     CreateEntry {
         channel: &'a str,
         account: &'a str,
+        description: &'a str,
         password: &'a str,
     },
     Update {
@@ -163,7 +181,9 @@ enum RequestOp<'a> {
         expected_revision: u64,
         channel: &'a str,
         account: &'a str,
-        password: &'a str,
+        description: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        password: Option<&'a str>,
     },
     Delete {
         entry_id: &'a str,
@@ -251,8 +271,26 @@ pub struct KdbxWebEngine {
 }
 impl KdbxWebEngine {
     /// Inputs come from trusted native configuration, never WebView arguments.
-    /// Windows refuses bootstrap until native isolation/file gates are verified.
+    /// Windows uses the private native store and the same resource/ACL admission
+    /// as the isolated fictional path; the caller owns the fixed storage root.
     pub fn prepared(resources: PathBuf, work: PathBuf) -> AppResult<Self> {
+        #[cfg(windows)]
+        {
+            let store = super::windows::Store::prepared(&work, &resources)?;
+            Ok(Self::windows_store(store))
+        }
+        #[cfg(not(windows))]
+        Self::prepared_portable(resources, work)
+    }
+    /// Native-only fictional acceptance path. Never selected by normal startup.
+    /// The desktop supplies its fixed dedicated root, not WebView/CLI path input.
+    #[cfg(windows)]
+    pub fn prepared_fictional(resources: PathBuf, work: PathBuf) -> AppResult<Self> {
+        let store = super::windows::Store::prepared(&work, &resources)?;
+        Ok(Self::windows_store(store))
+    }
+    #[cfg(not(windows))]
+    fn prepared_portable(resources: PathBuf, work: PathBuf) -> AppResult<Self> {
         if !cfg!(target_os = "linux") {
             return Err(AppError::Unsupported);
         }
@@ -281,6 +319,10 @@ impl KdbxWebEngine {
     }
     #[cfg(all(test, windows))]
     pub(super) fn synthetic_windows(store: super::windows::Store) -> Self {
+        Self::windows_store(store)
+    }
+    #[cfg(windows)]
+    fn windows_store(store: super::windows::Store) -> Self {
         Self {
             resources: store.resources.clone(),
             work: store.inbox.clone(),
@@ -470,13 +512,18 @@ impl VaultEngine for KdbxWebEngine {
                 VaultMutation::Create {
                     channel,
                     account,
+                    description,
                     password,
                 } => {
                     validate(&channel, false)?;
                     validate(&account, false)?;
+                    if description.len() > 4096 {
+                        return Err(AppError::InvalidInput);
+                    }
                     self.request(RequestOp::CreateEntry {
                         channel: &channel,
                         account: &account,
+                        description: &description,
                         password: text(&password)?,
                     })?
                 }
@@ -485,16 +532,21 @@ impl VaultEngine for KdbxWebEngine {
                     expected_revision,
                     channel,
                     account,
+                    description,
                     password,
                 } => {
                     validate(&channel, false)?;
                     validate(&account, false)?;
+                    if description.len() > 4096 {
+                        return Err(AppError::InvalidInput);
+                    }
                     self.request(RequestOp::Update {
                         entry_id: &id.to_string(),
                         expected_revision,
                         channel: &channel,
                         account: &account,
-                        password: text(&password)?,
+                        description: &description,
+                        password: password.as_ref().map(text).transpose()?,
                     })?
                 }
                 VaultMutation::Delete {

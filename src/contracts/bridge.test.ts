@@ -39,7 +39,8 @@ describe("strict native bridge contract", () => {
         "calendarEdit",
         "calendarQuery",
         "calendarUndo",
-        "showVaultWindow",
+        "setVaultViewVisible",
+        "getVaultLockState",
       ].sort(),
     );
   });
@@ -89,6 +90,14 @@ describe("strict native bridge contract", () => {
       updated_at: 1,
     };
     expect(decodeSummary(summary)).not.toHaveProperty("password");
+    expect(decodeSummary(summary).description).toBe("");
+    expect(
+      decodeSummary({ ...summary, description: "  说明\n第二行  " })
+        .description,
+    ).toBe("  说明\n第二行  ");
+    expect(() => decodeSummary({ ...summary, description: null })).toThrow(
+      "INVALID_INPUT",
+    );
     expect(() =>
       decodeSummary({ ...summary, password: "synthetic-only" }),
     ).toThrow("INVALID_INPUT");
@@ -394,4 +403,21 @@ it("abort_clears_owned_ipc_array_before_native_settlement", async () => {
   expect(owned?.every((b) => b === 0)).toBe(true);
   complete();
   await saving;
+});
+
+it("embedded_visibility_bridge_validates_and_carries_navigation_revision", async () => {
+  const calls: unknown[] = [];
+  const bridge = createMainBridge(async (command, payload) => {
+    calls.push([command, payload]);
+    return command === "get_vault_lock_state" ? false : null;
+  });
+  await bridge.setVaultViewVisible(true, "9007199254740993");
+  expect(calls[0]).toEqual([
+    "set_vault_view_visible",
+    { visible: true, revision: "9007199254740993" },
+  ]);
+  expect(await bridge.getVaultLockState()).toBe(false);
+  await expect(bridge.setVaultViewVisible(true, "01")).rejects.toThrow(
+    "INVALID_INPUT",
+  );
 });

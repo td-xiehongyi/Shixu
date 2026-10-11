@@ -162,7 +162,6 @@ fn sid_text(sid: PSID) -> AppResult<String> {
     drop(allocation);
     result
 }
-#[cfg(test)]
 fn current_sid() -> AppResult<String> {
     let token = process_token(unsafe { GetCurrentProcess() })?;
     let info = token_info(&token, TokenUser)?;
@@ -174,7 +173,6 @@ pub(super) struct Profile {
     created: bool,
 }
 impl Profile {
-    #[cfg(test)]
     fn new(name: &str) -> AppResult<Self> {
         let name = wide(std::ffi::OsStr::new(name))?;
         let mut sid = null_mut();
@@ -192,17 +190,24 @@ impl Profile {
         let created = result == 0;
         if !created {
             if result != 0x800700b7u32 as i32 {
+                // Fixed stage/code only: never log profile paths or vault input.
+                eprintln!(
+                    "SHIXU_VAULT_ADMISSION stage=appcontainer_profile hresult={result:#010x}"
+                );
                 return Err(AppError::Unsupported);
             }
             if unsafe { DeriveAppContainerSidFromAppContainerName(name.as_ptr(), &mut sid) } != 0 {
+                eprintln!("SHIXU_VAULT_ADMISSION stage=derive_appcontainer_sid");
                 return Err(AppError::Unsupported);
             }
         }
         if sid.is_null() {
+            eprintln!("SHIXU_VAULT_ADMISSION stage=appcontainer_sid_null");
             return Err(AppError::Unsupported);
         }
         let length = unsafe { GetLengthSid(sid) } as usize;
         if length == 0 || length > 256 {
+            eprintln!("SHIXU_VAULT_ADMISSION stage=appcontainer_sid_length length={length}");
             unsafe {
                 FreeSid(sid);
             }
@@ -643,7 +648,6 @@ fn descriptor(owner: &str, profile: &str, access: Access, directory: bool) -> Ap
     }
     Ok(Local(raw))
 }
-#[cfg(test)]
 fn create_directory(path: &Path, security: &Local) -> AppResult<()> {
     let path = path_wide(path)?;
     let attributes = SECURITY_ATTRIBUTES {
@@ -967,6 +971,13 @@ pub(super) struct Store {
     expected_identity: Option<Identity>,
     pub(super) failure: Failure,
 }
+fn resource_path(base: &Path, synthetic: bool) -> PathBuf {
+    if synthetic {
+        base.join("resources")
+    } else {
+        base.join(format!("resources-{}", super::engine::resource_version()))
+    }
+}
 impl Store {
     fn admit(&self, path: &Path, access: Access, write: bool) -> AppResult<Admission> {
         let file = open_handle(path, false, write, FILE_SHARE_READ)?;
@@ -1158,20 +1169,54 @@ pub(super) fn finish_worker(worker: std::thread::JoinHandle<()>) {
     // A failed kernel termination must not cause an unbounded join. Detaching
     // is exceptional cleanup, never save success, and requires native evidence.
 }
-#[cfg(test)]
 impl Store {
+    pub(super) fn prepared(base: &Path, source: &Path) -> AppResult<Self> {
+        Self::initialize(base, source, false)
+    }
+    #[cfg(test)]
     fn synthetic(base: &Path, source: &Path) -> AppResult<Self> {
+        Self::initialize(base, source, true)
+    }
+    fn initialize(base: &Path, source: &Path, synthetic: bool) -> AppResult<Self> {
+        path_wide(base)?;
+        path_wide(source)?;
+        if base.starts_with(source) || source.starts_with(base) {
+            return Err(AppError::Unsupported);
+        }
+        let _source_ancestors = ancestors(source).inspect_err(|_| {
+            eprintln!("SHIXU_VAULT_ADMISSION stage=source_ancestors");
+        })?;
+        super::engine::verify_resources(source)?;
         let owner = current_sid()?;
-        let profile = Arc::new(Profile::new(&format!(
-            "shixu.synthetic.{}",
-            uuid::Uuid::new_v4()
-        ))?);
+        let profile_name = if synthetic {
+            format!("shixu.synthetic.{}", uuid::Uuid::new_v4())
+        } else {
+            // Stable SID across restarts, scoped to this Windows identity and leaf.
+            // AppContainer names are limited to 64 characters; retain 192 hash bits.
+            format!(
+                "shixu.vault.{}",
+                &hash(format!("{owner}:{}", base.display()).as_bytes())[..48]
+            )
+        };
+        let mut profile = Profile::new(&profile_name)?;
+        // Stable per-leaf profiles may be shared by competing initializers.
+        // Only UUID-scoped synthetic fixtures own profile deletion on Drop.
+        if !synthetic {
+            profile.created = false;
+        }
+        let profile = Arc::new(profile);
         let profile_sid = sid_text(profile.sid())?;
         let mut pins = ancestors(base.parent().ok_or(AppError::Unsupported)?)?;
-        create_directory(
-            base,
-            &descriptor(&owner, &profile_sid, Access::Traverse, true)?,
-        )?;
+        let fresh = !base.try_exists().map_err(|_| AppError::Unsupported)?;
+        if synthetic && !fresh {
+            return Err(AppError::Conflict);
+        }
+        if fresh {
+            create_directory(
+                base,
+                &descriptor(&owner, &profile_sid, Access::Traverse, true)?,
+            )?;
+        }
         let base_guard = open_handle(base, true, false, FILE_SHARE_READ | FILE_SHARE_WRITE)?;
         validate_security(
             &base_guard.file,
@@ -1181,15 +1226,71 @@ impl Store {
             true,
         )?;
         pins.push(base_guard);
+        let init_path = base.join("vault.initialize-lease");
+        if !init_path.try_exists().map_err(|_| AppError::Unsupported)? {
+            create_file(
+                &init_path,
+                &descriptor(&owner, &profile_sid, Access::Private, false)?,
+                b"shixu initialization lease",
+            )?;
+        }
+        let init_lease = open_handle(&init_path, false, true, 0)?;
+        validate_security(
+            &init_lease.file,
+            &owner,
+            &profile_sid,
+            Access::Private,
+            false,
+        )?;
+        let ready = base.join("vault.initialized");
+        let initializing = !ready.try_exists().map_err(|_| AppError::Unsupported)?;
+        if initializing
+            && base
+                .join("active/vault.kdbx")
+                .try_exists()
+                .map_err(|_| AppError::Unsupported)?
+        {
+            // Never repair a missing admission marker around existing user data.
+            return Err(AppError::Unsupported);
+        }
+        if !initializing {
+            let marker = open_handle(&ready, false, false, FILE_SHARE_READ)?;
+            validate_security(&marker.file, &owner, &profile_sid, Access::Private, false)?;
+            pins.push(marker);
+        }
         let root = base.join("active");
         let inbox = base.join("inbox");
-        let resources = base.join("resources");
+        // Public runtime snapshots are immutable per reviewed manifest version.
+        // Upgrades retain every older snapshot and never rewrite vault ciphertext.
+        let resources = resource_path(base, synthetic);
+        let resource_ready = base.join(format!(
+            "{}.initialized",
+            resources
+                .file_name()
+                .ok_or(AppError::Unsupported)?
+                .to_string_lossy()
+        ));
+        let resources_initializing = !resource_ready
+            .try_exists()
+            .map_err(|_| AppError::Unsupported)?;
+        if !resources_initializing {
+            let marker = open_handle(&resource_ready, false, false, FILE_SHARE_READ)?;
+            validate_security(&marker.file, &owner, &profile_sid, Access::Private, false)?;
+            pins.push(marker);
+        }
         for (path, access) in [
             (&root, Access::Private),
             (&inbox, Access::Inbox),
             (&resources, Access::Resources),
         ] {
-            create_directory(path, &descriptor(&owner, &profile_sid, access, true)?)?;
+            if (if path == &resources {
+                resources_initializing
+            } else {
+                initializing
+            }) && !path.try_exists().map_err(|_| AppError::Unsupported)?
+            {
+                create_directory(path, &descriptor(&owner, &profile_sid, access, true)?)?;
+            }
             let guard = open_handle(path, true, false, FILE_SHARE_READ | FILE_SHARE_WRITE)?;
             validate_security(&guard.file, &owner, &profile_sid, access, true)?;
             pins.push(guard);
@@ -1197,9 +1298,11 @@ impl Store {
         fn copy(
             source: &Path,
             target: &Path,
+            recovery_root: &Path,
             owner: &str,
             profile: &str,
             pins: &mut Vec<Admission>,
+            fresh: bool,
         ) -> AppResult<()> {
             for entry in std::fs::read_dir(source).map_err(|_| AppError::Unsupported)? {
                 let entry = entry.map_err(|_| AppError::Unsupported)?;
@@ -1209,22 +1312,71 @@ impl Store {
                 if meta.is_dir() {
                     let _source_guard =
                         open_handle(&path, true, false, FILE_SHARE_READ | FILE_SHARE_WRITE)?;
-                    create_directory(
-                        &target,
-                        &descriptor(owner, profile, Access::Resources, true)?,
-                    )?;
+                    if fresh && !target.try_exists().map_err(|_| AppError::Unsupported)? {
+                        create_directory(
+                            &target,
+                            &descriptor(owner, profile, Access::Resources, true)?,
+                        )?;
+                    }
                     let guard =
                         open_handle(&target, true, false, FILE_SHARE_READ | FILE_SHARE_WRITE)?;
                     validate_security(&guard.file, owner, profile, Access::Resources, true)?;
                     pins.push(guard);
-                    copy(&path, &target, owner, profile, pins)?;
+                    copy(&path, &target, recovery_root, owner, profile, pins, fresh)?;
                 } else {
                     let mut guard = open_handle(&path, false, false, FILE_SHARE_READ)?;
-                    create_file(
-                        &target,
-                        &descriptor(owner, profile, Access::Resources, false)?,
-                        &read(&mut guard, 256 * 1024 * 1024)?,
-                    )?;
+                    if fresh {
+                        let bytes = read(&mut guard, 256 * 1024 * 1024)?;
+                        if target.try_exists().map_err(|_| AppError::Unsupported)? {
+                            let mut previous = open_handle(&target, false, false, FILE_SHARE_READ)?;
+                            validate_security(
+                                &previous.file,
+                                owner,
+                                profile,
+                                Access::Resources,
+                                false,
+                            )?;
+                            let matches = read(&mut previous, 256 * 1024 * 1024)? == bytes;
+                            drop(previous);
+                            if !matches {
+                                // Only an authenticated, exclusively leased, unpublished public
+                                // resource snapshot can reach this branch. Preserve partial bytes.
+                                let recovered = recovery_root
+                                    .join(format!("recovered-resource-{}", uuid::Uuid::new_v4()));
+                                if unsafe {
+                                    MoveFileExW(
+                                        path_wide(&target)?.as_ptr(),
+                                        path_wide(&recovered)?.as_ptr(),
+                                        MOVEFILE_WRITE_THROUGH,
+                                    )
+                                } == 0
+                                {
+                                    return Err(os_error());
+                                }
+                            }
+                        }
+                        if !target.try_exists().map_err(|_| AppError::Unsupported)? {
+                            // A crash/disk-full write leaves staging outside the exact manifest.
+                            // Final resource names are published only after a complete flush.
+                            let staging = recovery_root
+                                .join(format!("resource-staging-{}", uuid::Uuid::new_v4()));
+                            create_file(
+                                &staging,
+                                &descriptor(owner, profile, Access::Resources, false)?,
+                                &bytes,
+                            )?;
+                            if unsafe {
+                                MoveFileExW(
+                                    path_wide(&staging)?.as_ptr(),
+                                    path_wide(&target)?.as_ptr(),
+                                    MOVEFILE_WRITE_THROUGH,
+                                )
+                            } == 0
+                            {
+                                return Err(os_error());
+                            }
+                        }
+                    }
                     let guard = open_handle(&target, false, false, FILE_SHARE_READ)?;
                     validate_security(&guard.file, owner, profile, Access::Resources, false)?;
                     pins.push(guard);
@@ -1232,18 +1384,41 @@ impl Store {
             }
             Ok(())
         }
-        let _source_ancestors = ancestors(source)?;
-        super::engine::verify_resources(source)?;
-        copy(source, &resources, &owner, &profile_sid, &mut pins)?;
-        super::engine::verify_resources(&resources)?;
-        let lease_path = root.join("vault.lease");
-        create_file(
-            &lease_path,
-            &descriptor(&owner, &profile_sid, Access::Private, false)?,
-            b"synthetic lease",
+        copy(
+            source,
+            &resources,
+            base,
+            &owner,
+            &profile_sid,
+            &mut pins,
+            resources_initializing,
         )?;
+        super::engine::verify_resources(&resources)?;
+        if resources_initializing {
+            create_file(
+                &resource_ready,
+                &descriptor(&owner, &profile_sid, Access::Private, false)?,
+                b"shixu resources initialized",
+            )?;
+        }
+        let lease_path = root.join("vault.lease");
+        if initializing && !lease_path.try_exists().map_err(|_| AppError::Unsupported)? {
+            create_file(
+                &lease_path,
+                &descriptor(&owner, &profile_sid, Access::Private, false)?,
+                b"shixu exclusive vault lease",
+            )?;
+        }
         let lease = open_handle(&lease_path, false, true, 0)?;
         validate_security(&lease.file, &owner, &profile_sid, Access::Private, false)?;
+        if initializing {
+            create_file(
+                &ready,
+                &descriptor(&owner, &profile_sid, Access::Private, false)?,
+                b"shixu initialized v1",
+            )?;
+        }
+        drop(init_lease);
         Ok(Self {
             root,
             inbox,
@@ -1286,6 +1461,257 @@ mod tests {
         )
         .expect("BLOCKED: fixed Windows resource/ACL fixture admission failed");
         (store, base)
+    }
+    #[test]
+    fn fictional_resource_upgrade_preserves_existing_encrypted_data() {
+        let source = fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR")));
+        let base =
+            std::env::temp_dir().join(format!("shixu resource upgrade {}", uuid::Uuid::new_v4()));
+        let mut engine = KdbxWebEngine::prepared_fictional(source.clone(), base.clone()).unwrap();
+        engine.create(secret("fictional-upgrade-master")).unwrap();
+        engine.close().unwrap();
+        drop(engine);
+        let before = std::fs::read(base.join("active/vault.kdbx")).unwrap();
+        let resource = std::fs::read_dir(&base)
+            .unwrap()
+            .map(Result::unwrap)
+            .find(|entry| {
+                entry.file_type().unwrap().is_dir()
+                    && entry.file_name().to_string_lossy().starts_with("resources")
+            })
+            .unwrap()
+            .path();
+        let marker = base.join(format!(
+            "{}.initialized",
+            resource.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::rename(&resource, base.join("resources-previous")).unwrap();
+        if marker.exists() {
+            std::fs::rename(marker, base.join("resources-previous.initialized")).unwrap();
+        }
+        let mut upgraded = KdbxWebEngine::prepared_fictional(source, base.clone())
+            .expect("new pinned resource version must coexist with old data");
+        assert_eq!(
+            std::fs::read(base.join("active/vault.kdbx")).unwrap(),
+            before
+        );
+        assert!(base.join("resources-previous").is_dir());
+        upgraded.open(secret("fictional-upgrade-master")).unwrap();
+        assert!(upgraded.list().unwrap().is_empty());
+        upgraded.close().unwrap();
+    }
+    #[test]
+    fn admitted_windows_store_reopens_encrypted_vault_and_rejects_second_owner() {
+        let bundled = fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR")));
+        let native_directory = bundled.parent().unwrap().canonicalize().unwrap();
+        let source = super::super::engine::bundled_resources_directory(&native_directory).unwrap();
+        assert_eq!(source, bundled);
+        let base =
+            std::env::temp_dir().join(format!("shixu desktop fictional {}", uuid::Uuid::new_v4()));
+        let mut engine = KdbxWebEngine::prepared_fictional(source.clone(), base.clone())
+            .expect("fresh native store must be admitted");
+        engine.create(secret("fictional-master-v1")).unwrap();
+        let row = engine
+            .apply(VaultMutation::Create {
+                channel: "虚构验收 渠道".into(),
+                account: "fictional account\n第二行".into(),
+                description: "虚构说明\r\n第二行".into(),
+                password: secret("fictional-only-password"),
+            })
+            .unwrap();
+        assert!(KdbxWebEngine::prepared_fictional(source.clone(), base.clone()).is_err());
+        engine.close().unwrap();
+        drop(engine);
+        let mut reopened = KdbxWebEngine::prepared_fictional(source.clone(), base.clone()).unwrap();
+        assert!(reopened.open(secret("wrong-fictional-master")).is_err());
+        reopened.open(secret("fictional-master-v1")).unwrap();
+        let rows = reopened.list().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].entry_id, row.entry_id);
+        assert_eq!(rows[0].account, "fictional account\n第二行");
+        assert_eq!(rows[0].description, "虚构说明\r\n第二行");
+        assert_eq!(
+            reopened
+                .read_secret(&row.entry_id.to_string())
+                .unwrap()
+                .expose(),
+            b"fictional-only-password"
+        );
+        reopened
+            .change_master(secret("fictional-master-v1"), secret("fictional-master-v2"))
+            .unwrap();
+        reopened.close().unwrap();
+        drop(reopened);
+        let mut changed = KdbxWebEngine::prepared_fictional(source.clone(), base.clone()).unwrap();
+        assert!(changed.open(secret("fictional-master-v1")).is_err());
+        changed.open(secret("fictional-master-v2")).unwrap();
+        assert_eq!(changed.list().unwrap().len(), 1);
+        let saved = changed.list().unwrap().remove(0);
+        changed
+            .apply(VaultMutation::Update {
+                id: saved.entry_id,
+                expected_revision: saved.revision,
+                channel: saved.channel,
+                account: saved.account,
+                description: "reopened before second master change".into(),
+                password: None,
+            })
+            .unwrap();
+        changed
+            .change_master(secret("fictional-master-v2"), secret("fictional-master-v1"))
+            .unwrap();
+        changed.close().unwrap();
+        drop(changed);
+        let mut restored = KdbxWebEngine::prepared_fictional(source, base.clone()).unwrap();
+        assert!(restored.open(secret("fictional-master-v2")).is_err());
+        restored.open(secret("fictional-master-v1")).unwrap();
+        assert_eq!(
+            restored.list().unwrap()[0].description,
+            "reopened before second master change"
+        );
+        assert_eq!(
+            restored
+                .read_secret(&row.entry_id.to_string())
+                .unwrap()
+                .expose(),
+            b"fictional-only-password"
+        );
+        restored.close().unwrap();
+        drop(restored);
+        let bytes = std::fs::read(base.join("active/vault.kdbx")).unwrap();
+        assert!(!bytes.windows(23).any(|w| w == b"fictional-only-password"));
+    }
+    #[test]
+    fn long_lived_helper_changes_master_after_edits_with_existing_memory_limit() {
+        let source = fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR")));
+        let base =
+            std::env::temp_dir().join(format!("shixu master memory {}", uuid::Uuid::new_v4()));
+        let mut engine = KdbxWebEngine::prepared_fictional(source.clone(), base.clone()).unwrap();
+        let first = "fictional-memory-master-A";
+        let second = "fictional-memory-master-B";
+        engine.create(secret(first)).unwrap();
+        let mut row = engine
+            .apply(VaultMutation::Create {
+                channel: "fictional memory regression".into(),
+                account: "fictional@example.invalid".into(),
+                description: String::new(),
+                password: secret("fictional-retained-password"),
+            })
+            .unwrap();
+        let mut current = first;
+        for iteration in 0..8 {
+            row = engine
+                .apply(VaultMutation::Update {
+                    id: row.entry_id,
+                    expected_revision: row.revision,
+                    channel: row.channel,
+                    account: row.account,
+                    description: format!("edit before credential change {iteration}"),
+                    password: None,
+                })
+                .unwrap();
+            let next = if current == first { second } else { first };
+            engine.change_master(secret(current), secret(next)).unwrap();
+            current = next;
+            assert_eq!(
+                engine
+                    .read_secret(&row.entry_id.to_string())
+                    .unwrap()
+                    .expose(),
+                b"fictional-retained-password"
+            );
+        }
+        engine.close().unwrap();
+        drop(engine);
+        let mut reopened = KdbxWebEngine::prepared_fictional(source, base).unwrap();
+        assert_eq!(reopened.open(secret(second)), Err(AppError::AuthFailed));
+        reopened.open(secret(first)).unwrap();
+        assert_eq!(
+            reopened.list().unwrap()[0].description,
+            "edit before credential change 7"
+        );
+        reopened.close().unwrap();
+    }
+    #[test]
+    fn fictional_store_resumes_only_authenticated_incomplete_initialization() {
+        let source = fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR")));
+        let base = std::env::temp_dir().join(format!(
+            "shixu interrupted fictional {}",
+            uuid::Uuid::new_v4()
+        ));
+        let owner = current_sid().unwrap();
+        let name = format!(
+            "shixu.vault.{}",
+            &hash(format!("{owner}:{}", base.display()).as_bytes())[..48]
+        );
+        let profile = Profile::new(&name).unwrap();
+        let sid = sid_text(profile.sid()).unwrap();
+        create_directory(
+            &base,
+            &descriptor(&owner, &sid, Access::Traverse, true).unwrap(),
+        )
+        .unwrap();
+        // Simulate interruption in an old direct resource write, before publication.
+        for path in [
+            resource_path(&base, false),
+            resource_path(&base, false).join("helper"),
+        ] {
+            create_directory(
+                &path,
+                &descriptor(&owner, &sid, Access::Resources, true).unwrap(),
+            )
+            .unwrap();
+        }
+        let interrupted = resource_path(&base, false)
+            .join("helper")
+            .join("helper.mjs");
+        create_file(
+            &interrupted,
+            &descriptor(&owner, &sid, Access::Resources, false).unwrap(),
+            b"truncated fictional resource",
+        )
+        .unwrap();
+        let mut engine = KdbxWebEngine::prepared_fictional(source, base.clone())
+            .expect("owned incomplete initialization must resume");
+        assert!(
+            std::fs::read_dir(&base)
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("recovered-resource-")
+                        && std::fs::read(entry.path()).ok().as_deref()
+                            == Some(b"truncated fictional resource")
+                }),
+            "interrupted resource must be preserved"
+        );
+        engine
+            .create(secret("fictional-interrupted-master"))
+            .unwrap();
+        engine.close().unwrap();
+        drop(engine);
+        // A persistent factory must not delete a profile shared by another owner.
+        let existing = Profile::new(&name).unwrap();
+        assert!(
+            !existing.created,
+            "persistent store deleted its shared profile"
+        );
+    }
+    #[test]
+    fn windows_store_refuses_unadmitted_existing_directory() {
+        let source = fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR")));
+        let base =
+            std::env::temp_dir().join(format!("shixu foreign fictional {}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&base).unwrap();
+        std::fs::write(base.join("keep.txt"), b"foreign data").unwrap();
+        assert!(KdbxWebEngine::prepared_fictional(source, base.clone()).is_err());
+        assert_eq!(
+            std::fs::read(base.join("keep.txt")).unwrap(),
+            b"foreign data"
+        );
+        assert!(!base.join("active").exists());
     }
     #[test]
     fn actual_trusted_constructors_pass_strict_windows_admission() {
@@ -1410,14 +1836,122 @@ mod tests {
         assert!(response["type"] == "error" && response["value"] == "LOCKED");
     }
     #[test]
-    fn production_constructor_remains_blocked() {
+    fn production_constructor_creates_saves_and_reopens_private_vault() {
+        // Exercise the public constructor using test-owned storage only.
+        let source = fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR")));
+        super::super::engine::verify_resources(&source).unwrap();
+        let parent = std::env::temp_dir().join(format!(
+            "shixu production admission {}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&parent).unwrap();
+        let work = parent.join("vault");
         assert!(matches!(
-            KdbxWebEngine::prepared(
-                PathBuf::from("C:\\nonexistent-resources"),
-                PathBuf::from("C:\\nonexistent-vault")
-            ),
+            KdbxWebEngine::prepared(source.join("missing"), work.clone()),
             Err(AppError::Unsupported)
         ));
+        assert!(!work.exists(), "invalid resources must not create storage");
+        let mut engine = KdbxWebEngine::prepared(source.clone(), work.clone())
+            .expect("public constructor must admit a fresh private store");
+        let active = work.join("active/vault.kdbx");
+        assert!(
+            !active.exists(),
+            "admission must not choose a user's master password"
+        );
+        engine
+            .create(secret("test-only-production-master"))
+            .unwrap();
+        let row = engine
+            .apply(VaultMutation::Create {
+                channel: "正式入口合成测试".into(),
+                account: "test-only@example.invalid".into(),
+                description: "保存后重新打开".into(),
+                password: secret("test-only-entry-secret"),
+            })
+            .unwrap();
+        engine.close().unwrap();
+        drop(engine);
+        let encrypted = std::fs::read(&active).unwrap();
+        for text in [
+            "test-only-production-master",
+            "test-only-entry-secret",
+            "test-only@example.invalid",
+        ] {
+            assert!(
+                !encrypted
+                    .windows(text.len())
+                    .any(|bytes| bytes == text.as_bytes())
+            );
+        }
+        let mut reopened = KdbxWebEngine::prepared(source, work).unwrap();
+        assert_eq!(std::fs::read(&active).unwrap(), encrypted);
+        assert_eq!(
+            reopened.open(secret("wrong-test-master")),
+            Err(AppError::AuthFailed)
+        );
+        reopened
+            .open(secret("test-only-production-master"))
+            .unwrap();
+        assert_eq!(reopened.list().unwrap(), vec![row.clone()]);
+        assert_eq!(
+            reopened
+                .read_secret(&row.entry_id.to_string())
+                .unwrap()
+                .expose(),
+            b"test-only-entry-secret"
+        );
+        assert_eq!(
+            reopened.create(secret("another-test-master")),
+            Err(AppError::Conflict)
+        );
+        assert_eq!(std::fs::read(&active).unwrap(), encrypted);
+        reopened.close().unwrap();
+    }
+    #[test]
+    fn actual_junction_leaf_and_ancestor_are_rejected_without_symlink_privilege() {
+        let base =
+            std::env::temp_dir().join(format!("shixu junction admission {}", uuid::Uuid::new_v4()));
+        let target = base.join("target");
+        let junction = base.join("junction");
+        std::fs::create_dir(&base).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::create_dir(target.join("child-directory")).unwrap();
+        std::fs::write(
+            target.join("keep.txt"),
+            b"synthetic target must stay unchanged",
+        )
+        .unwrap();
+        let script = format!(
+            "$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path '{}' -Target '{}' | Out-Null",
+            junction.to_str().unwrap().replace('\'', "''"),
+            target.to_str().unwrap().replace('\'', "''")
+        );
+        let powershell = PathBuf::from(native_fixed_folder(&FOLDERID_Windows).unwrap())
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        let result = std::process::Command::new(powershell)
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "actual junction fixture creation failed"
+        );
+        assert!(
+            ancestors(&target.join("child-directory")).is_ok(),
+            "positive control must admit an ordinary directory hierarchy"
+        );
+        assert!(open_handle(&junction, true, false, FILE_SHARE_READ).is_err());
+        assert!(ancestors(&junction.join("child-directory")).is_err());
+        let source = fixture_resources(Path::new(env!("CARGO_MANIFEST_DIR")));
+        assert!(Store::prepared(&junction, &source).is_err());
+        assert_eq!(
+            std::fs::read(target.join("keep.txt")).unwrap(),
+            b"synthetic target must stay unchanged"
+        );
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 2);
+        // Remove only the junction itself, never recurse through its target.
+        std::fs::remove_dir(&junction).unwrap();
+        assert!(target.join("keep.txt").is_file());
     }
     #[test]
     #[ignore = "Actual Windows only; invoked solely by fixed synthetic parent"]
@@ -2089,7 +2623,7 @@ mod tests {
     #[test]
     #[ignore = "Requires prepared actual Windows x64 synthetic-only execution"]
     fn synthetic_native_boundary() {
-        production_constructor_remains_blocked();
+        production_constructor_creates_saves_and_reopens_private_vault();
         let mut blocked = vec![
             "second_identity_owner",
             "physical_power_loss",
@@ -2116,6 +2650,7 @@ mod tests {
             .apply(VaultMutation::Create {
                 channel: "synthetic\r\n空 格".into(),
                 account: "synthetic\r\naccount".into(),
+                description: String::new(),
                 password: secret("synthetic-only-password"),
             })
             .unwrap();
@@ -2147,7 +2682,8 @@ mod tests {
                 expected_revision: 1,
                 channel: created.channel,
                 account: created.account,
-                password: secret("synthetic-only-password-v2"),
+                description: String::new(),
+                password: Some(secret("synthetic-only-password-v2")),
             })
             .unwrap();
         assert_eq!(updated.revision, 2);
@@ -2162,6 +2698,7 @@ mod tests {
                     .apply(VaultMutation::Create {
                         channel: "c".into(),
                         account: "a\r\n".into(),
+                        description: String::new(),
                         password: secret(&format!("x{newline}y"))
                     })
                     .is_err()
@@ -2198,6 +2735,7 @@ mod tests {
                     .apply(VaultMutation::Create {
                         channel: "failure".into(),
                         account: "synthetic".into(),
+                        description: String::new(),
                         password: secret("synthetic-only")
                     })
                     .is_err()
@@ -2307,7 +2845,7 @@ mod tests {
         std::fs::remove_dir_all(&base).unwrap();
         println!(
             "SHIXU_NATIVE_BOUNDARY {}",
-            serde_json::json!({"passed_cases":["production_gate","actual_create","actual_crud","reopen","revision_conflict","wrong_master","change_master","newline_guards","token_job_before_resume","private_parent_os_denial","calendar_os_denial","resource_os_write_denial","inbox_os_write","exact_handle_semantic_denial","tcp_os_denial_with_control","udp_os_denial_with_control","one_process_actual_denial","memory_actual_denial","resource_exact_set_hash","resource_pinned_write_denial","broad_acl_denial","remote_path_denial","cooperating_lease","cooperating_external_edit","hardlink_denial","checkpoint_failures_decrypt","cancel_before_start", "cancel_late_registration_before_resume","cancel_during_kdf","job_close_termination", "actual_parent_exit_termination","blocked_io_cleanup","timeout_30s_drop_bounded"],"blocked_cases":blocked,"reparse_fixture_passed":reparse_passed,"production":"Unsupported"})
+            serde_json::json!({"passed_cases":["production_gate","actual_create","actual_crud","reopen","revision_conflict","wrong_master","change_master","newline_guards","token_job_before_resume","private_parent_os_denial","calendar_os_denial","resource_os_write_denial","inbox_os_write","exact_handle_semantic_denial","tcp_os_denial_with_control","udp_os_denial_with_control","one_process_actual_denial","memory_actual_denial","resource_exact_set_hash","resource_pinned_write_denial","broad_acl_denial","remote_path_denial","cooperating_lease","cooperating_external_edit","hardlink_denial","checkpoint_failures_decrypt","cancel_before_start", "cancel_late_registration_before_resume","cancel_during_kdf","job_close_termination", "actual_parent_exit_termination","blocked_io_cleanup","timeout_30s_drop_bounded"],"blocked_cases":blocked,"reparse_fixture_passed":reparse_passed,"production":"local_use_enabled"})
         );
     }
 }

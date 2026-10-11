@@ -111,6 +111,8 @@ pub struct WireSummary {
     pub entry_id: shixu_core::contracts::vault::EntryId,
     pub channel: String,
     pub account: String,
+    #[serde(default)]
+    pub description: String,
     pub revision: Decimal,
     pub created_at: i64,
     pub updated_at: i64,
@@ -122,6 +124,7 @@ pub fn summary(value: VaultSummary) -> AppResult<WireSummary> {
         entry_id: value.entry_id,
         channel: value.channel,
         account: value.account,
+        description: value.description,
         revision: value.revision.into(),
         created_at: value.created_at,
         updated_at: value.updated_at,

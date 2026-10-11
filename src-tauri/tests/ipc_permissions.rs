@@ -18,7 +18,7 @@ fn main_window_cannot_call_vault() {
     ] {
         assert_eq!(authorize(&MAIN, command), Err(AppError::AuthFailed));
     }
-    assert_eq!(authorize(&MAIN, "show_vault_window"), Ok(()));
+    assert_eq!(authorize(&MAIN, "set_vault_view_visible"), Ok(()));
     assert_eq!(authorize(&MAIN, "shell"), Err(AppError::AuthFailed));
 }
 #[test]
@@ -127,7 +127,7 @@ fn forged_payload_identity_and_nested_revision_fail_closed() {
     assert_eq!(
         dispatch(
             &MAIN,
-            "show_vault_window",
+            "set_vault_view_visible",
             serde_json::json!({"label":"vault"}),
             &state
         ),
@@ -234,5 +234,105 @@ fn unavailable_vault_lock_succeeds_without_disabling_calendar_state() {
     assert_eq!(
         dispatch(&ctx, "vault_lock", serde_json::json!({}), &state),
         Ok(serde_json::Value::Null)
+    );
+}
+
+#[test]
+fn embedded_vault_controls_are_main_only_and_strict() {
+    use shixu_desktop::{app_state::AppState, commands::dispatch};
+    let state = AppState::default();
+    let vault = CallingContext {
+        label: "vault",
+        origin: MAIN.origin,
+    };
+    for command in ["set_vault_view_visible", "get_vault_lock_state"] {
+        assert_eq!(authorize(&MAIN, command), Ok(()));
+        assert_eq!(authorize(&vault, command), Err(AppError::AuthFailed));
+    }
+    for payload in [
+        serde_json::json!({"visible":true,"revision":"01"}),
+        serde_json::json!({"visible":true,"revision":"1","label":"vault"}),
+    ] {
+        assert_eq!(
+            dispatch(&MAIN, "set_vault_view_visible", payload, &state),
+            Err(AppError::InvalidInput)
+        );
+    }
+    assert_eq!(
+        dispatch(&MAIN, "get_vault_lock_state", serde_json::json!({}), &state),
+        Ok(serde_json::json!(false))
+    );
+    for command in ["calendar_query", "qq_connect", "settings_read"] {
+        assert_eq!(authorize(&vault, command), Err(AppError::AuthFailed));
+    }
+}
+
+#[test]
+fn vault_readiness_failure_ack_is_strict_and_vault_only() {
+    use shixu_desktop::{app_state::AppState, commands::dispatch};
+    let state = AppState::default();
+    let vault = CallingContext {
+        label: "vault",
+        origin: MAIN.origin,
+    };
+    let payload = serde_json::json!({"revision":null,"failed":true});
+    assert_eq!(
+        dispatch(&MAIN, "ack_vault_view", payload.clone(), &state),
+        Err(AppError::AuthFailed)
+    );
+    assert_eq!(
+        dispatch(&vault, "ack_vault_view", payload, &state),
+        Ok(serde_json::Value::Null)
+    );
+    for payload in [
+        serde_json::json!({"revision":null,"failed":"true"}),
+        serde_json::json!({"revision":"01"}),
+        serde_json::json!({"revision":null,"failed":true,"label":"main"}),
+    ] {
+        assert_eq!(
+            dispatch(&vault, "ack_vault_view", payload, &state),
+            Err(AppError::InvalidInput)
+        );
+    }
+}
+
+#[test]
+fn metadata_only_update_reaches_engine_but_empty_password_is_rejected() {
+    use shixu_desktop::{app_state::AppState, commands::dispatch};
+    let vault = CallingContext {
+        label: "vault",
+        origin: MAIN.origin,
+    };
+    let mutation = serde_json::json!({"operation":"update","id":"11111111-1111-4111-8111-111111111111","expected_revision":"1","channel":"edited","account":"account","description":"description only"});
+    assert_eq!(
+        dispatch(
+            &vault,
+            "vault_apply",
+            serde_json::json!({"mutation":mutation}),
+            &AppState::default()
+        ),
+        Err(AppError::Unsupported)
+    );
+    let mut null_password = mutation.clone();
+    null_password["password"] = serde_json::Value::Null;
+    assert_eq!(
+        dispatch(
+            &vault,
+            "vault_apply",
+            serde_json::json!({"mutation":null_password}),
+            &AppState::default()
+        ),
+        Err(AppError::InvalidInput)
+    );
+    let mut empty = mutation;
+    empty["password"] = serde_json::json!([]);
+    assert_eq!(
+        dispatch(
+            &vault,
+            "vault_apply",
+            serde_json::json!({"mutation":empty}),
+            &AppState::default()
+        ),
+        Err(AppError::InvalidInput)
     );
 }

@@ -21,6 +21,7 @@ fn create_entry(password: &[u8]) -> VaultMutation {
     VaultMutation::Create {
         channel: "synthetic-channel".into(),
         account: "synthetic-account".into(),
+        description: String::new(),
         password: secret(password),
     }
 }
@@ -85,13 +86,13 @@ fn password_is_not_trimmed() {
 }
 
 #[test]
-fn background_does_not_extend_timeout() {
+fn background_keeps_session_unlocked() {
     let (mut service, session) = created();
     service.tick(299_999).unwrap();
     assert_eq!(service.status(), VaultStatus::Unlocked);
     service.tick(300_000).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
-    assert_eq!(service.list(&session, 300_000), Err(AppError::Locked));
+    assert_eq!(service.status(), VaultStatus::Unlocked);
+    assert!(service.list(&session, 300_000).is_ok());
 }
 
 #[test]
@@ -192,6 +193,7 @@ fn empty_channel_and_account_are_rejected_before_engine_mutation() {
         let mutation = VaultMutation::Create {
             channel: channel.into(),
             account: account.into(),
+            description: String::new(),
             password: secret(b"SYNTHETIC-ONLY"),
         };
         assert_eq!(
@@ -213,7 +215,8 @@ fn revision_conflicts_cannot_update_or_delete_records() {
         expected_revision: 0,
         channel: "synthetic-new".into(),
         account: "synthetic-new".into(),
-        password: secret(b"SYNTHETIC-REPLACEMENT"),
+        description: String::new(),
+        password: Some(secret(b"SYNTHETIC-REPLACEMENT")),
     };
     assert_eq!(
         service.apply(&session, mutation, 1),
@@ -246,7 +249,8 @@ fn revision_conflicts_cannot_update_or_delete_records() {
                 expected_revision: row.revision,
                 channel: "synthetic-new".into(),
                 account: "synthetic-new".into(),
-                password: secret(b" SYNTHETIC-REPLACEMENT "),
+                description: String::new(),
+                password: Some(secret(b" SYNTHETIC-REPLACEMENT ")),
             },
             3,
         )
@@ -285,34 +289,36 @@ fn query_summaries_do_not_contain_password() {
 }
 
 #[test]
-fn successful_interaction_refreshes_timeout() {
+fn successful_interaction_keeps_session_active() {
     let (mut service, session) = created();
     service.list(&session, 299_999).unwrap();
-    service.tick(300_000).unwrap();
-    assert_eq!(service.status(), VaultStatus::Unlocked);
     service.tick(599_999).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
+    assert_eq!(service.status(), VaultStatus::Unlocked);
 }
 
 #[test]
-fn every_timed_operation_checks_expiry_without_a_prior_tick() {
+fn every_operation_survives_idle_without_a_prior_tick() {
     for operation in 0..3 {
         let (mut service, session) = created();
         let row = service
             .apply(&session, create_entry(b"SYNTHETIC-ONLY"), 0)
             .unwrap();
         match operation {
-            0 => assert_eq!(service.list(&session, 300_000), Err(AppError::Locked)),
-            1 => assert_eq!(
-                service.apply(&session, create_entry(b"SYNTHETIC-ONLY"), 300_000),
-                Err(AppError::Locked)
+            0 => assert!(service.list(&session, 300_001).is_ok()),
+            1 => assert!(
+                service
+                    .apply(&session, create_entry(b"SYNTHETIC-ONLY"), 300_001)
+                    .is_ok()
             ),
-            _ => assert_error(
-                service.reveal(&session, &row.entry_id.to_string(), 300_000),
-                AppError::Locked,
+            _ => assert_eq!(
+                service
+                    .reveal(&session, &row.entry_id.to_string(), 300_001)
+                    .unwrap()
+                    .expose(),
+                b"SYNTHETIC-ONLY"
             ),
         }
-        assert_eq!(service.status(), VaultStatus::Locked);
+        assert_eq!(service.status(), VaultStatus::Unlocked);
     }
 }
 
@@ -425,21 +431,21 @@ fn invalid_ids_and_missing_revisions_do_not_mutate_records() {
 }
 
 #[test]
-fn backward_and_extreme_clocks_do_not_extend_session() {
+fn backward_clock_is_rejected_and_large_forward_clock_does_not_lock() {
     let (mut service, session) = created();
     service.list(&session, 10).unwrap();
     assert_eq!(service.list(&session, 9), Err(AppError::InvalidInput));
     assert_eq!(service.tick(9), Err(AppError::InvalidInput));
     service.tick(300_010).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
+    assert_eq!(service.status(), VaultStatus::Unlocked);
     let mut service = VaultService::new(FakeVaultEngine::default());
     service.create(master(), i64::MIN).unwrap();
     service.tick(i64::MAX).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
+    assert_eq!(service.status(), VaultStatus::Unlocked);
 }
 
 #[test]
-fn unsuccessful_interactions_do_not_refresh_timeout() {
+fn invalid_interactions_do_not_create_an_idle_timeout() {
     let (mut service, session) = created();
     assert_eq!(
         service.apply(&session, create_entry(b""), 299_999),
@@ -450,7 +456,7 @@ fn unsuccessful_interactions_do_not_refresh_timeout() {
         AppError::InvalidInput,
     );
     service.tick(300_000).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
+    assert_eq!(service.status(), VaultStatus::Unlocked);
 }
 
 #[test]
@@ -479,11 +485,11 @@ fn tick_observation_cannot_be_rewound_by_vault_interaction() {
     service.tick(200_000).unwrap();
     assert_eq!(service.list(&session, 100_000), Err(AppError::InvalidInput));
     service.tick(300_000).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
+    assert_eq!(service.status(), VaultStatus::Unlocked);
 }
 
 #[test]
-fn successful_apply_and_reveal_refresh_timeout() {
+fn successful_apply_and_reveal_keep_session_active() {
     let (mut service, session) = created();
     let row = service
         .apply(&session, create_entry(b"SYNTHETIC-ONLY"), 299_999)
@@ -497,7 +503,7 @@ fn successful_apply_and_reveal_refresh_timeout() {
     service.tick(599_999).unwrap();
     assert_eq!(service.status(), VaultStatus::Unlocked);
     service.tick(899_998).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
+    assert_eq!(service.status(), VaultStatus::Unlocked);
 }
 
 #[test]
@@ -518,13 +524,16 @@ fn apply_engine_failure_cannot_publish_success_or_keep_session() {
 }
 
 #[test]
-fn timeout_close_error_still_revokes_authority() {
+fn manual_close_error_still_revokes_authority() {
     let engine = FakeVaultEngine::default();
     let faults = engine.faults.clone();
     let mut service = VaultService::new(engine);
     let session = service.create(master(), 0).unwrap();
     faults.borrow_mut().close_error = Some(AppError::Disconnected);
-    assert_eq!(service.tick(300_000), Err(AppError::Disconnected));
+    assert_eq!(
+        service.lock(LockReason::Manual),
+        Err(AppError::Disconnected)
+    );
     assert_eq!(service.status(), VaultStatus::Locked);
     assert_eq!(service.list(&session, 300_001), Err(AppError::Locked));
     assert_error(
@@ -548,6 +557,7 @@ fn newlines_allowed_in_account_but_rejected_in_master_password_without_trimming(
                 VaultMutation::Create {
                     channel: "channel\nallowed".into(),
                     account: " account ".into(),
+                    description: String::new(),
                     password: secret(format!("p{nl}x").as_bytes())
                 },
                 1
@@ -565,6 +575,7 @@ fn newlines_allowed_in_account_but_rejected_in_master_password_without_trimming(
                 VaultMutation::Create {
                     channel: "channel\nallowed".into(),
                     account: format!(" account{nl}x "),
+                    description: String::new(),
                     password: secret(b" password "),
                 },
                 3,
@@ -583,20 +594,70 @@ fn newlines_allowed_in_account_but_rejected_in_master_password_without_trimming(
 }
 
 #[test]
-fn explicit_authorized_activity_refreshes_but_background_tick_does_not() {
+fn explicit_activity_and_background_tick_keep_session_active() {
     let (mut service, session) = created();
     service.activity(&session, 299_999).unwrap();
     service.tick(300_000).unwrap();
     assert_eq!(service.status(), VaultStatus::Unlocked);
     service.tick(599_999).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
+    assert_eq!(service.status(), VaultStatus::Unlocked);
 }
 #[test]
-fn old_session_activity_cannot_refresh_reopened_session() {
+fn old_session_activity_cannot_revoke_reopened_session() {
     let (mut service, old) = created();
     service.lock(LockReason::Manual).unwrap();
     let _new = service.unlock(master(), 1).unwrap();
     assert_eq!(service.activity(&old, 299_999), Err(AppError::Locked));
     service.tick(300_001).unwrap();
-    assert_eq!(service.status(), VaultStatus::Locked);
+    assert_eq!(service.status(), VaultStatus::Unlocked);
+}
+
+#[test]
+fn session_survives_idle_until_explicit_lock() {
+    let (mut service, session) = created();
+    for now in [300_001, 86_400_000] {
+        service.tick(now).unwrap();
+        assert_eq!(service.status(), VaultStatus::Unlocked);
+        assert!(service.list(&session, now).is_ok());
+    }
+    service.lock(LockReason::Manual).unwrap();
+    assert_eq!(service.list(&session, 86_400_001), Err(AppError::Locked));
+}
+
+#[test]
+fn metadata_edit_preserves_secret_and_stale_revision_still_conflicts() {
+    let (mut service, session) = created();
+    let row = service
+        .apply(&session, create_entry(b"ORIGINAL"), 0)
+        .unwrap();
+    let update = |revision, password| VaultMutation::Update {
+        id: row.entry_id,
+        expected_revision: revision,
+        channel: "changed".into(),
+        account: "changed".into(),
+        description: "new description".into(),
+        password,
+    };
+    let edited = service
+        .apply(&session, update(row.revision, None), 1)
+        .unwrap();
+    assert_eq!(
+        service
+            .reveal(&session, &row.entry_id.to_string(), 2)
+            .unwrap()
+            .expose(),
+        b"ORIGINAL"
+    );
+    assert_eq!(
+        service.apply(&session, update(row.revision, None), 3),
+        Err(AppError::Conflict)
+    );
+    assert_eq!(
+        service.apply(&session, update(edited.revision, Some(secret(b""))), 4),
+        Err(AppError::InvalidInput)
+    );
+    assert_eq!(
+        service.list(&session, 5).unwrap()[0].revision,
+        edited.revision
+    );
 }

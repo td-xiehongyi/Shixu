@@ -68,6 +68,15 @@ impl AppState {
     pub fn vault(&self) -> Arc<crate::vault::VaultController> {
         self.vault.clone()
     }
+    #[cfg(windows)]
+    pub fn with_fictional_vault(
+        mut self,
+        resources: std::path::PathBuf,
+        work: std::path::PathBuf,
+    ) -> Self {
+        self.vault = crate::vault::VaultController::fictional(resources, work);
+        self
+    }
     pub fn with_backups(mut self, root: &std::path::Path) -> AppResult<Self> {
         self.backup = Some(Arc::new(shixu_core::backup::CalendarBackup::new(
             self.database()?,

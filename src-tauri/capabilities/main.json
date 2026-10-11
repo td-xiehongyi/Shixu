@@ -2,14 +2,10 @@
   "identifier": "main",
   "description": "Calendar main window only",
   "local": true,
-  "windows": [
-    "main"
-  ],
   "permissions": [
     "allow-calendar-query",
     "allow-calendar-edit",
     "allow-calendar-undo",
-    "allow-show-vault-window",
     "allow-calendar-create-manual",
     "allow-calendar-details",
     "allow-notification-list",
@@ -31,6 +27,13 @@
     "allow-backup-export",
     "allow-backup-import",
     "allow-backup-vault",
-    "allow-backup-previous"
+    "allow-backup-previous",
+    "allow-set-vault-view-visible",
+    "allow-get-vault-lock-state",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ],
+  "webviews": [
+    "main"
   ]
 }

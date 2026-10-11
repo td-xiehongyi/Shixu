@@ -1,4 +1,4 @@
-# Actual Windows x64, standard-user synthetic-only probes. Never enables production.
+# Actual Windows x64, standard-user probes using only test-owned storage.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -59,19 +59,19 @@ $sourceHashes = @{}; foreach ($name in $sourceNames) { $sourceHashes[$name] = (G
 Write-NewText 'identity.json' ((@{ head=$head.Trim(); scoped_source_sha256=$sourceHashes; runtime_sha256=$manifest.files.'runtime/node.exe'; windows_version=[Environment]::OSVersion.Version.ToString(); compiler=$compiler } | ConvertTo-Json -Depth 8) + "`n")
 $env:RUST_BACKTRACE = '0'
 $prefix = @('test','-p','shixu-native','--lib','--target','x86_64-pc-windows-msvc','--locked','--offline')
-$gate = Invoke-Recorded 'production-gate' 'cargo' ($prefix + @('vault::windows::tests::production_constructor_remains_blocked','--','--exact','--nocapture','--test-threads=1'))
+$gate = Invoke-Recorded 'production-gate' 'cargo' ($prefix + @('vault::windows::tests::production_constructor_creates_saves_and_reopens_private_vault','--','--exact','--nocapture','--test-threads=1'))
 if ($gate -notmatch 'running 1 test' -or $gate -notmatch '1 passed; 0 failed; 0 ignored') { throw 'FAIL: exact production gate must run once; zero/skipped matching tests are not evidence' }
 $native = Invoke-Recorded 'native-boundary' 'cargo' ($prefix + @('vault::windows::tests::synthetic_native_boundary','--','--exact','--ignored','--nocapture','--test-threads=1'))
 if ($native -notmatch 'running 1 test' -or $native -notmatch '1 passed; 0 failed; 0 ignored') { throw 'FAIL: exact native parent must run once; zero/skipped tests are not evidence' }
 $record = @($native -split "`n" | Where-Object { $_ -match 'SHIXU_NATIVE_BOUNDARY ' })
 if ($record.Count -ne 1) { throw 'FAIL: missing unique native case record' }
 $cases = $record[0].Substring($record[0].IndexOf('SHIXU_NATIVE_BOUNDARY ') + 'SHIXU_NATIVE_BOUNDARY '.Length) | ConvertFrom-Json
-if ($cases.production -ne 'Unsupported' -or $cases.passed_cases.Count -ne 33 -or @($cases.passed_cases | Sort-Object -Unique).Count -ne $cases.passed_cases.Count) { throw 'FAIL: native case accounting or production gate record mismatch' }
+if ($cases.production -ne 'local_use_enabled' -or $cases.passed_cases.Count -ne 33 -or @($cases.passed_cases | Sort-Object -Unique).Count -ne $cases.passed_cases.Count) { throw 'FAIL: native case accounting or production admission record mismatch' }
 # Preserve actual executable identity from Cargo's test binary output.
 $artifactLine = @($native -split "`n" | Where-Object { $_ -match 'Running unittests .*\((.+\.exe)\)' })
 if ($artifactLine.Count -ne 1) { throw 'FAIL: native artifact identity unavailable' }
 $artifactMatch = [regex]::Match($artifactLine[0], '\((.+\.exe)\)')
 if (-not $artifactMatch.Success) { throw 'FAIL: native artifact identity unavailable' }
 $artifact = $artifactMatch.Groups[1].Value
-Write-NewText 'result.json' ((@{ head=$head.Trim(); artifact_sha256=(Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant(); passed_count=$cases.passed_cases.Count; blocked_count=$cases.blocked_cases.Count; cases=$cases; production='Unsupported'; release='BLOCKED' } | ConvertTo-Json -Depth 8) + "`n")
-Write-Output "Synthetic Windows cases executed; evidence=$evidence; production remains Unsupported; release BLOCKED."
+Write-NewText 'result.json' ((@{ head=$head.Trim(); artifact_sha256=(Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant(); passed_count=$cases.passed_cases.Count; blocked_count=$cases.blocked_cases.Count; cases=$cases; production='local_use_enabled'; release='BLOCKED' } | ConvertTo-Json -Depth 8) + "`n")
+Write-Output "Synthetic Windows cases executed; evidence=$evidence; local vault constructor enabled; release BLOCKED."

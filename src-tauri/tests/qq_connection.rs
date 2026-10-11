@@ -200,7 +200,7 @@ fn socket_calendar_for_groups(groups: Vec<&str>) {
     };
     assert_eq!(
         lifecycle.handle_lifecycle(shixu_desktop::lifecycle::LifecycleEvent::WindowClose, 0),
-        Err(AppError::Unsupported)
+        Ok(())
     );
     assert_eq!(
         lifecycle

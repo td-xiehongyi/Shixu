@@ -42,6 +42,7 @@ fn secrets_never_enter_vault_summary() {
         entry_id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
         channel: "虚构渠道".into(),
         account: "synthetic-account".into(),
+        description: String::new(),
         password: SecretBytes::new(b"SYNTHETIC-ONLY".to_vec()),
         revision: 2,
         created_at: 1,

@@ -10,6 +10,11 @@ pub mod release;
 
 pub mod vault;
 
+#[cfg(all(test, windows))]
+mod vault_shutdown_acceptance;
+
 mod vault_signal;
 
 pub mod startup;
+
+pub mod vault_view;

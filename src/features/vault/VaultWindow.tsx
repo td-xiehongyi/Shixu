@@ -1,8 +1,10 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { flushSync } from "react-dom";
+import { VaultEntries } from "./VaultEntries";
+import { canonicalRevision } from "../../contracts/bridge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LockSimple } from "@phosphor-icons/react/dist/csr/LockSimple";
-import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import {
   createVaultBridge,
   desktopInvoke,
@@ -20,32 +22,91 @@ export type LockedSubscription = (callback: () => void) => Promise<() => void>;
 const subscribeNativeLocked: LockedSubscription = async (callback) => {
   if (!isTauri()) throw new BridgeError("UNSUPPORTED");
   const remove = await listen("vault_locked", () => callback(), {
-    target: { kind: "WebviewWindow", label: "vault" },
+    target: { kind: "Webview", label: "vault" },
   });
   return () => {
     void Promise.resolve(remove()).catch(() => {});
   };
 };
+export type VisibilitySubscription = (
+  callback: (visible: boolean) => void,
+) => Promise<() => void>;
+const noVisibility: VisibilitySubscription = async () => () => {};
+const subscribeNativeVisibility: VisibilitySubscription = async (callback) => {
+  const remove = await listen<{ visible: boolean; revision: string }>(
+    "vault_view_visibility",
+    (event) => {
+      const { visible, revision } = event.payload;
+      if (typeof visible !== "boolean") return;
+      canonicalRevision(revision);
+      flushSync(() => callback(visible));
+      void desktopInvoke("ack_vault_view", { revision }).catch(() =>
+        window.dispatchEvent(new Event("shixu-vault-view-failed")),
+      );
+    },
+    { target: { kind: "Webview", label: "vault" } },
+  );
+  let redact: (() => void) | undefined;
+  try {
+    redact = await listen(
+      "vault_view_redact",
+      () => flushSync(() => callback(false)),
+      { target: { kind: "Webview", label: "vault" } },
+    );
+    await desktopInvoke("ack_vault_view", { revision: null });
+    return () => {
+      remove();
+      redact?.();
+    };
+  } catch (error) {
+    remove();
+    redact?.();
+    throw error;
+  }
+};
 export function VaultWindow({
   port = nativePort,
   subscribeLocked = subscribeNativeLocked,
+  subscribeVisibility = port === nativePort
+    ? subscribeNativeVisibility
+    : noVisibility,
 }: {
   port?: VaultPort;
   subscribeLocked?: LockedSubscription;
+  subscribeVisibility?: VisibilitySubscription;
 }) {
   const [state, setState] = useState<"locked" | "unlocking" | "unlocked">(
     "locked",
   );
   const [mode, setMode] = useState<"unlock" | "create" | "change">("unlock");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const viewVisible = useRef(true);
   const [rows, setRows] = useState<VaultSummary[]>([]);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
-  const [forgot, setForgot] = useState(false);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeSequence = useRef(0);
+  const setNotice = useCallback((text: string, transient = false) => {
+    const sequence = ++noticeSequence.current;
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setMessage(text);
+    if (transient)
+      noticeTimer.current = setTimeout(() => {
+        if (noticeSequence.current === sequence) setMessage("");
+      }, 2500);
+  }, []);
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
   const [form, setForm] = useState<VaultSummary | "new" | null>(null);
   const [deletion, setDeletion] = useState<VaultSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState<string | null>(null);
   const registrationReady = useRef(false);
+  const [registrationAttempt, setRegistrationAttempt] = useState(0);
   const [registration, setRegistration] = useState<
     "pending" | "ready" | "failed"
   >("pending");
@@ -61,15 +122,13 @@ export function VaultWindow({
     masterForm.current?.reset();
     masterForm.current = node;
     masterGuard.current = node
-      ? guardForm(node, ["master", "next", "confirm"], setMessage)
+      ? guardForm(node, ["master", "next", "confirm"], setNotice)
       : null;
   }, []);
   const ownedMaster = useRef<Uint8Array[]>([]);
   const secret = useRef<Uint8Array | null>(null);
   const revealSequence = useRef(0);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lockRef = useRef<() => void>(() => {});
   const clearReveal = useCallback(() => {
     revealSequence.current++;
     if (revealTimer.current) clearTimeout(revealTimer.current);
@@ -81,10 +140,10 @@ export function VaultWindow({
     epoch.current++;
     unlocked.current = false;
     clearReveal();
-    if (idleTimer.current) clearTimeout(idleTimer.current);
     ownedMaster.current.forEach((b) => b.fill(0));
     masterForm.current?.reset();
     setRows([]);
+    setSelectedId(null);
     setSearch("");
     setForm(null);
     setDeletion(null);
@@ -94,40 +153,7 @@ export function VaultWindow({
   }, [clearReveal]);
   const valid = (original: number) =>
     mounted.current && registrationReady.current && epoch.current === original;
-  const touch = useCallback(() => {
-    if (!registrationReady.current || !unlocked.current) return;
-    if (idleTimer.current) clearTimeout(idleTimer.current);
-    idleTimer.current = setTimeout(() => lockRef.current(), 300000);
-  }, []);
-  const lastActivity = useRef(-Infinity);
-  const activityPending = useRef(false);
-  const interact = useCallback(() => {
-    if (
-      !registrationReady.current ||
-      !unlocked.current ||
-      activityPending.current ||
-      Date.now() - lastActivity.current < 1000
-    )
-      return;
-    lastActivity.current = Date.now();
-    activityPending.current = true;
-    const original = epoch.current;
-    void port
-      .vaultActivity()
-      .then(() => {
-        if (mounted.current && epoch.current === original) touch();
-      })
-      .catch((error) => {
-        if (mounted.current && epoch.current === original) {
-          clearLocal();
-          void port.vaultLock().catch(() => {});
-          setMessage(vaultError(error));
-        }
-      })
-      .finally(() => {
-        activityPending.current = false;
-      });
-  }, [port, touch, clearLocal]);
+  const touch = useCallback(() => {}, []);
   const lock = useCallback(() => {
     clearLocal();
     const original = epoch.current;
@@ -136,15 +162,12 @@ export function VaultWindow({
       .vaultLock()
       .catch((error) => {
         if (mounted.current && epoch.current === original)
-          setMessage(vaultError(error));
+          setNotice(vaultError(error));
       })
       .finally(() => {
         if (mounted.current && epoch.current === original) setBusy(false);
       });
   }, [clearLocal, port]);
-  useEffect(() => {
-    lockRef.current = lock;
-  }, [lock]);
   useEffect(() => {
     mounted.current = true;
     const close = () => {
@@ -161,7 +184,6 @@ export function VaultWindow({
       secret.current = null;
       ownedMaster.current.forEach((b) => b.fill(0));
       if (revealTimer.current) clearTimeout(revealTimer.current);
-      if (idleTimer.current) clearTimeout(idleTimer.current);
       window.removeEventListener("pagehide", close);
       void port.vaultLock().catch(() => {});
     };
@@ -171,31 +193,88 @@ export function VaultWindow({
     setRegistration("pending");
     clearLocal();
     let active = true;
+    const failed = () => {
+      if (!active || !mounted.current) return;
+      registrationReady.current = false;
+      flushSync(() => {
+        setRegistration("failed");
+        clearLocal();
+      });
+      void port.vaultLock().catch(() => {});
+      if (port === nativePort)
+        void desktopInvoke("ack_vault_view", {
+          revision: null,
+          failed: true,
+        }).catch(() => {});
+    };
+    window.addEventListener("shixu-vault-view-failed", failed);
     let unsubscribe: (() => void) | undefined;
-    void subscribeLocked(() => {
-      if (active && mounted.current) clearLocal();
-    })
+    const removers: (() => void)[] = [];
+    void (async () => {
+      removers.push(
+        await subscribeLocked(() => {
+          if (active && mounted.current) clearLocal();
+        }),
+      );
+      if (!active) {
+        removers.forEach((fn) => fn());
+        return;
+      }
+      removers.push(
+        await subscribeVisibility((shown) => {
+          if (!active || !mounted.current) return;
+          viewVisible.current = shown;
+          clearReveal();
+          masterForm.current?.reset();
+          ownedMaster.current.forEach((bytes) => bytes.fill(0));
+          setForm(null);
+          setDeletion(null);
+          setMode("unlock");
+          if (shown && unlocked.current) {
+            const original = epoch.current;
+            void port
+              .vaultList()
+              .then((result) => {
+                if (valid(original) && unlocked.current) setRows(result);
+              })
+              .catch((error) => {
+                if (valid(original)) {
+                  clearLocal();
+                  setNotice(vaultError(error));
+                  void port.vaultLock().catch(() => {});
+                }
+              });
+          }
+        }),
+      );
+      return removers;
+    })()
       .then((remove) => {
+        if (!remove) return;
         if (active && mounted.current) {
-          unsubscribe = remove;
+          unsubscribe = () => remove.forEach((fn) => fn());
           registrationReady.current = true;
           setRegistration("ready");
-        } else remove();
+        } else remove.forEach((fn) => fn());
       })
       .catch(() => {
-        if (active && mounted.current) {
-          registrationReady.current = false;
-          setRegistration("failed");
-          clearLocal();
-          void port.vaultLock().catch(() => {});
-        }
+        removers.forEach((fn) => fn());
+        failed();
       });
     return () => {
       active = false;
+      window.removeEventListener("shixu-vault-view-failed", failed);
       registrationReady.current = false;
       unsubscribe?.();
     };
-  }, [subscribeLocked, clearLocal, port]);
+  }, [
+    subscribeLocked,
+    subscribeVisibility,
+    clearLocal,
+    clearReveal,
+    port,
+    registrationAttempt,
+  ]);
   async function authenticate(e: React.FormEvent) {
     e.preventDefault();
     if (!registrationReady.current) {
@@ -213,12 +292,12 @@ export function VaultWindow({
         newline.test(value),
       )
     ) {
-      setMessage(newlineMessage);
+      setNotice(newlineMessage);
       element.reset();
       return;
     }
     if (mode !== "unlock" && next !== get("confirm")) {
-      setMessage("两次主密码不一致。");
+      setNotice("两次主密码不一致。");
       element.reset();
       return;
     }
@@ -230,7 +309,7 @@ export function VaultWindow({
     clearReveal();
     const original = ++epoch.current;
     setBusy(true);
-    setMessage("");
+    setNotice("");
     if (operation !== "change") {
       unlocked.current = false;
       setRows([]);
@@ -244,7 +323,7 @@ export function VaultWindow({
       if (!valid(original)) return;
       if (operation === "change") {
         setMode("unlock");
-        setMessage("主密码已更改。");
+        setNotice("主密码已更改。", true);
         return;
       }
       unlocked.current = true;
@@ -256,7 +335,7 @@ export function VaultWindow({
       if (valid(original)) {
         clearLocal();
         void port.vaultLock().catch(() => {});
-        setMessage(vaultError(error));
+        setNotice(vaultError(error));
       }
     } finally {
       currentBytes.fill(0);
@@ -273,7 +352,7 @@ export function VaultWindow({
     clearReveal();
     const original = ++epoch.current;
     setBusy(true);
-    setMessage("");
+    setNotice("");
     try {
       const saved = await port.vaultApply(value);
       if (!valid(original) || !unlocked.current) return;
@@ -284,15 +363,14 @@ export function VaultWindow({
             ? previous.map((r) => (r.entry_id === value.id ? saved : r))
             : [...previous, saved],
       );
+      if (value.operation !== "delete") setSelectedId(saved.entry_id);
       setForm(null);
       setDeletion(null);
-      setMessage(
-        value.operation === "delete" ? "条目已删除。" : "条目已保存。",
-      );
+      setNotice(value.operation === "delete" ? "已删除" : "已保存", true);
       touch();
     } catch (error) {
       if (valid(original)) {
-        setMessage(vaultError(error));
+        setNotice(vaultError(error, "save"));
         clearLocal();
         void port.vaultLock().catch(() => {});
       }
@@ -312,6 +390,7 @@ export function VaultWindow({
         !valid(original) ||
         !registrationReady.current ||
         !unlocked.current ||
+        !viewVisible.current ||
         sequence !== revealSequence.current
       ) {
         bytes.fill(0);
@@ -323,7 +402,7 @@ export function VaultWindow({
       revealTimer.current = setTimeout(clearReveal, 15000);
     } catch (error) {
       if (valid(original)) {
-        setMessage(vaultError(error));
+        setNotice(vaultError(error));
         clearLocal();
         void port.vaultLock().catch(() => {});
       }
@@ -335,14 +414,12 @@ export function VaultWindow({
     try {
       await port.vaultCopy(id, field);
       if (valid(original) && unlocked.current) {
-        setMessage(
-          "已复制，剪贴板内容不会自动清除，将保留至你覆盖或手动清除。",
-        );
+        setNotice(field === "account" ? "已复制账号" : "已复制密码", true);
         touch();
       }
     } catch (error) {
       if (valid(original)) {
-        setMessage(vaultError(error));
+        setNotice(vaultError(error));
         // Copy failures carry no trustworthy clipboard-only recovery proof.
         // Unknown transport errors are normalized to UNSUPPORTED by the bridge.
         clearLocal();
@@ -355,27 +432,154 @@ export function VaultWindow({
       .toLocaleLowerCase()
       .includes(search.toLocaleLowerCase()),
   );
+  const editing =
+    mode === "change" ? (
+      <form
+        ref={attachMasterForm}
+        className="vault-form"
+        onSubmit={authenticate}
+      >
+        <h2>更改主密码</h2>
+        <label>
+          当前主密码
+          <input
+            aria-label="主密码"
+            name="master"
+            type="password"
+            required
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          新主密码
+          <input
+            aria-label="新主密码"
+            name="next"
+            type="password"
+            required
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          再次输入主密码
+          <input
+            aria-label="再次输入主密码"
+            name="confirm"
+            type="password"
+            required
+            autoComplete="off"
+          />
+        </label>
+        <div className="vault-actions">
+          <button
+            className="primary"
+            disabled={busy || registration !== "ready"}
+          >
+            保存主密码
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              masterForm.current?.reset();
+              setMode("unlock");
+            }}
+          >
+            取消
+          </button>
+        </div>
+      </form>
+    ) : form ? (
+      <section className="vault-editor">
+        <h2>{form === "new" ? "新增条目" : "编辑条目"}</h2>
+        <EntryForm
+          key={form === "new" ? "new" : form.entry_id}
+          initial={form === "new" ? undefined : form}
+          onCancel={() => setForm(null)}
+          onSave={(value) => {
+            if (form === "new" && !value.password)
+              throw new BridgeError("INVALID_INPUT");
+            return mutate(
+              form === "new"
+                ? { ...value, operation: "create", password: value.password! }
+                : {
+                    operation: "update",
+                    id: form.entry_id,
+                    expected_revision: form.revision,
+                    ...value,
+                  },
+            );
+          }}
+        />
+      </section>
+    ) : deletion ? (
+      <section role="region" aria-label="确认删除" className="vault-confirm">
+        <h2>确认删除</h2>
+        <p>
+          删除「{deletion.channel}」的账号「{deletion.account}」？
+        </p>
+        <div className="vault-actions">
+          <button
+            disabled={busy || registration !== "ready"}
+            onClick={() =>
+              void mutate({
+                operation: "delete",
+                id: deletion.entry_id,
+                expected_revision: deletion.revision,
+              }).catch(() => {})
+            }
+          >
+            确认删除
+          </button>
+          <button
+            disabled={busy || registration !== "ready"}
+            onClick={() => setDeletion(null)}
+          >
+            取消
+          </button>
+        </div>
+      </section>
+    ) : undefined;
+  const chosen =
+    filtered.find((row) => row.entry_id === selectedId) ?? filtered[0];
   return (
-    <main className="vault-shell" onPointerDown={interact} onKeyDown={interact}>
+    <main className="vault-shell">
       <header className="vault-header">
-        <div className="vault-brand">
-          <LockSimple size={25} />
-          <span>
-            拾序 <small>密码库</small>
+        <div className="vault-title">
+          <h1>密码库</h1>
+          <span
+            className={`vault-state ${state === "unlocked" ? "unlocked" : ""}`}
+          >
+            {state === "unlocked" ? "已解锁" : "已锁定"}
           </span>
         </div>
-        <span className="vault-state">
-          {state === "unlocked" ? "已解锁" : "已锁定"}
-        </span>
+        {state === "unlocked" && (
+          <div className="vault-header-actions">
+            <button
+              disabled={busy}
+              onClick={() => {
+                clearReveal();
+                setForm(null);
+                setDeletion(null);
+                setMode("change");
+              }}
+            >
+              更改主密码
+            </button>
+            <button onClick={lock}>
+              <LockSimple size={19} />
+              锁定密码库
+            </button>
+          </div>
+        )}
       </header>
       <div className="vault-body">
         {state !== "unlocked" ? (
           <section className="vault-locked">
             <div className="vault-emblem">
-              <ShieldCheck size={42} />
+              <LockSimple size={42} />
             </div>
             <h1>{mode === "create" ? "新建密码库" : "密码库已锁定"}</h1>
-            <p>主密码只锁密码库，日历与通知独立运行。</p>
+            <p>解锁后查看账号与描述</p>
             <form
               ref={attachMasterForm}
               className="vault-form"
@@ -422,7 +626,7 @@ export function VaultWindow({
                   disabled={busy || registration !== "ready"}
                   onClick={() => {
                     setMode("unlock");
-                    setMessage("");
+                    setNotice("");
                   }}
                 >
                   返回解锁
@@ -434,254 +638,90 @@ export function VaultWindow({
                     onClick={() => {
                       masterForm.current?.reset();
                       setMode("create");
-                      setMessage("");
+                      setNotice("");
                     }}
                   >
                     新建密码库
                   </button>
-                  <button onClick={() => setForgot(!forgot)}>忘记主密码</button>
                 </>
               )}
             </div>
-            {forgot && (
-              <p className="vault-help">
-                主密码无法找回或绕过。请保留加密库和备份；没有主密码无法恢复其中的密码。
+            {mode === "create" && (
+              <p className="vault-help">主密码无法找回，请妥善保管。</p>
+            )}
+            {new URLSearchParams(location.search).get("fictional") === "1" && (
+              <p className="vault-availability">
+                当前是独立的虚构密码库，请仅使用测试账号和密码。
               </p>
             )}
-            <p className="vault-availability">
-              KdbxWeb 已接入；Windows 隔离验证尚未完成，当前 Windows
-              版本不可解锁或保存。
-            </p>
             {state === "unlocking" && (
               <button onClick={lock}>锁定密码库</button>
             )}
           </section>
         ) : (
-          <>
-            <div className="vault-toolbar">
-              <div>
-                <h1>密码库</h1>
-                <p className="muted">显示 15 秒 · 无交互 5 分钟自动锁定</p>
-              </div>
-              <button onClick={lock}>锁定密码库</button>
-            </div>
-            <div className="vault-actions">
-              <input
-                aria-label="搜索渠道或账号"
-                placeholder="搜索渠道或账号"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <button
-                className="primary"
-                disabled={busy || registration !== "ready"}
-                onClick={() => {
-                  clearReveal();
-                  setForm("new");
-                }}
-              >
-                新增条目
-              </button>
-              <button
-                disabled={busy || registration !== "ready"}
-                onClick={() => {
-                  clearReveal();
-                  setMode("change");
-                }}
-              >
-                更改主密码
-              </button>
-            </div>
-            {mode === "change" ? (
-              <form
-                ref={attachMasterForm}
-                className="vault-form"
-                onSubmit={authenticate}
-              >
-                <h2>更改主密码</h2>
-                <label>
-                  当前主密码
-                  <input
-                    aria-label="主密码"
-                    name="master"
-                    type="password"
-                    required
-                    autoComplete="off"
-                  />
-                </label>
-                <label>
-                  新主密码
-                  <input
-                    aria-label="新主密码"
-                    name="next"
-                    type="password"
-                    required
-                    autoComplete="off"
-                  />
-                </label>
-                <label>
-                  再次输入主密码
-                  <input
-                    aria-label="再次输入主密码"
-                    name="confirm"
-                    type="password"
-                    required
-                    autoComplete="off"
-                  />
-                </label>
-                <div className="vault-actions">
-                  <button
-                    className="primary"
-                    disabled={busy || registration !== "ready"}
-                  >
-                    保存主密码
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      masterForm.current?.reset();
-                      setMode("unlock");
-                    }}
-                  >
-                    取消
-                  </button>
-                </div>
-              </form>
-            ) : form ? (
-              <section className="vault-editor">
-                <h2>{form === "new" ? "新增条目" : "编辑条目"}</h2>
-                <EntryForm
-                  key={form === "new" ? "new" : form.entry_id}
-                  initial={form === "new" ? undefined : form}
-                  onCancel={() => setForm(null)}
-                  onSave={(value) =>
-                    mutate(
-                      form === "new"
-                        ? { operation: "create", ...value }
-                        : {
-                            operation: "update",
-                            id: form.entry_id,
-                            expected_revision: form.revision,
-                            ...value,
-                          },
-                    )
-                  }
-                />
-              </section>
-            ) : (
-              <div className="vault-list">
-                {filtered.map((row) => (
-                  <article data-entry-id={row.entry_id} key={row.entry_id}>
-                    <div className="vault-entry-heading">
-                      <h2>{row.channel}</h2>
-                      <button
-                        data-edit
-                        disabled={busy || registration !== "ready"}
-                        onClick={() => {
-                          clearReveal();
-                          setForm(row);
-                        }}
-                      >
-                        编辑
-                      </button>
-                      <button
-                        disabled={busy || registration !== "ready"}
-                        onClick={() => setDeletion(row)}
-                      >
-                        删除
-                      </button>
-                    </div>
-                    <div className="vault-value">
-                      <span>账号</span>
-                      <strong>{row.account}</strong>
-                      <button
-                        disabled={busy || registration !== "ready"}
-                        onClick={() => void copy(row.entry_id, "account")}
-                      >
-                        复制账号
-                      </button>
-                    </div>
-                    <div className="vault-value">
-                      <span>密码</span>
-                      <code>
-                        {visible === row.entry_id && secret.current
-                          ? new TextDecoder().decode(secret.current)
-                          : "••••••••"}
-                      </code>
-                      <button
-                        disabled={busy || registration !== "ready"}
-                        onClick={() =>
-                          visible === row.entry_id
-                            ? clearReveal()
-                            : void reveal(row.entry_id)
-                        }
-                      >
-                        {visible === row.entry_id ? "隐藏密码" : "显示密码"}
-                      </button>
-                      <button
-                        disabled={busy || registration !== "ready"}
-                        onClick={() => void copy(row.entry_id, "password")}
-                      >
-                        复制密码
-                      </button>
-                    </div>
-                  </article>
-                ))}
-                {!filtered.length && (
-                  <p className="vault-empty">
-                    {search
-                      ? "没有匹配的渠道或账号。"
-                      : "暂无条目，新增一个账号开始整理。"}
-                  </p>
-                )}
-              </div>
-            )}
-            {deletion && (
-              <section
-                role="dialog"
-                aria-label="确认删除"
-                className="vault-confirm"
-              >
-                <h2>确认删除</h2>
-                <p>
-                  删除「{deletion.channel}」的账号「{deletion.account}」？
-                </p>
-                <div className="vault-actions">
-                  <button
-                    disabled={busy || registration !== "ready"}
-                    onClick={() =>
-                      void mutate({
-                        operation: "delete",
-                        id: deletion.entry_id,
-                        expected_revision: deletion.revision,
-                      }).catch(() => {})
-                    }
-                  >
-                    确认删除
-                  </button>
-                  <button
-                    disabled={busy || registration !== "ready"}
-                    onClick={() => setDeletion(null)}
-                  >
-                    取消
-                  </button>
-                </div>
-              </section>
-            )}
-          </>
+          <VaultEntries
+            rows={filtered}
+            selectedId={selectedId}
+            search={search}
+            busy={busy || registration !== "ready"}
+            visiblePassword={
+              chosen?.entry_id === visible && secret.current
+                ? new TextDecoder().decode(secret.current)
+                : null
+            }
+            onSearch={(value) => {
+              clearReveal();
+              setSearch(value);
+              setForm(null);
+              setDeletion(null);
+            }}
+            onSelect={(row) => {
+              clearReveal();
+              setSelectedId(row.entry_id);
+              setForm(null);
+              setDeletion(null);
+              setMode("unlock");
+            }}
+            onNew={() => {
+              clearReveal();
+              setMode("unlock");
+              setDeletion(null);
+              setForm("new");
+            }}
+            onEdit={(row) => {
+              clearReveal();
+              setForm(row);
+            }}
+            onDelete={(row) => {
+              clearReveal();
+              setDeletion(row);
+            }}
+            onReveal={(row) =>
+              visible === row.entry_id
+                ? clearReveal()
+                : void reveal(row.entry_id)
+            }
+            onCopy={(row, field) => void copy(row.entry_id, field)}
+          >
+            {editing}
+          </VaultEntries>
         )}
-        <p role="status" className="vault-message">
-          {registration === "pending"
-            ? "正在准备密码库。"
-            : registration === "failed"
-              ? "密码库暂不可用，请重新打开窗口。"
-              : message}
-        </p>
       </div>
-      <footer className="vault-footer">
-        <LockSimple size={16} />
-        密码留在独立窗口 · 日历与通知继续运行
-      </footer>
+      {registration === "failed" && (
+        <button
+          className="vault-retry"
+          onClick={() => setRegistrationAttempt((value) => value + 1)}
+        >
+          重试密码库
+        </button>
+      )}
+      <p role="status" className="vault-message">
+        {registration === "pending"
+          ? "正在准备密码库。"
+          : registration === "failed"
+            ? "密码库暂不可用，请重新进入。"
+            : message}
+      </p>
     </main>
   );
 }

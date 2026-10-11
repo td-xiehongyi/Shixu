@@ -33,6 +33,7 @@ fn real_create_crud_reopen_change_master_conflict() {
         .apply(VaultMutation::Create {
             channel: " 渠道/\"\n名字 ".into(),
             account: " 用户/\" ".into(),
+            description: String::new(),
             password: secret(" 密码/\"🗝️ "),
         })
         .unwrap();
@@ -40,6 +41,7 @@ fn real_create_crud_reopen_change_master_conflict() {
         .apply(VaultMutation::Create {
             channel: a.channel.clone(),
             account: a.account.clone(),
+            description: String::new(),
             password: secret(" 密码/\"🗝️ "),
         })
         .unwrap();
@@ -71,7 +73,8 @@ fn real_create_crud_reopen_change_master_conflict() {
             expected_revision: 1,
             channel: "新渠道".into(),
             account: "新账号 ".into(),
-            password: secret("新密码 "),
+            description: String::new(),
+            password: Some(secret("新密码 ")),
         })
         .unwrap();
     assert_eq!(updated.revision, 2);
@@ -142,6 +145,7 @@ fn rejects_newlines_wrong_master_tamper_and_external_edit() {
             e.apply(VaultMutation::Create {
                 channel: "c".into(),
                 account: format!("a{nl}z"),
+                description: String::new(),
                 password: secret(&format!("p{nl}z"))
             }),
             Err(AppError::InvalidInput)
@@ -190,6 +194,7 @@ fn create_existing_wrong_current_storage_failure_and_cancellation_preserve_ciphe
         e.apply(VaultMutation::Create {
             channel: "c".into(),
             account: "a".into(),
+            description: String::new(),
             password: secret("p")
         }),
         Err(AppError::AuthFailed)
@@ -202,6 +207,7 @@ fn create_existing_wrong_current_storage_failure_and_cancellation_preserve_ciphe
         e.apply(VaultMutation::Create {
             channel: "c".into(),
             account: "a".into(),
+            description: String::new(),
             password: secret("p")
         }),
         Err(AppError::AuthFailed)
@@ -274,6 +280,7 @@ fn aggregate_list_budget_rejects_escaped_create_and_update_without_write() {
         .apply(VaultMutation::Create {
             channel: channel.clone(),
             account: account.clone(),
+            description: String::new(),
             password: secret("synthetic"),
         })
         .unwrap();
@@ -281,6 +288,7 @@ fn aggregate_list_budget_rejects_escaped_create_and_update_without_write() {
         .apply(VaultMutation::Create {
             channel: "small".into(),
             account: "small".into(),
+            description: String::new(),
             password: secret("synthetic"),
         })
         .unwrap();
@@ -293,7 +301,8 @@ fn aggregate_list_budget_rejects_escaped_create_and_update_without_write() {
             expected_revision: second.revision,
             channel: channel.clone(),
             account: account.clone(),
-            password: secret("next")
+            description: String::new(),
+            password: Some(secret("next"))
         }),
         Err(AppError::Unsupported)
     ));
@@ -305,6 +314,7 @@ fn aggregate_list_budget_rejects_escaped_create_and_update_without_write() {
         engine.apply(VaultMutation::Create {
             channel,
             account,
+            description: String::new(),
             password: secret("synthetic")
         }),
         Err(AppError::Unsupported)

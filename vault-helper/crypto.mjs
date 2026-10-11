@@ -1,4 +1,4 @@
-import { argon2id } from 'hash-wasm';
+import { argon2Sync } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 const require = createRequire(import.meta.url);
@@ -22,10 +22,12 @@ export async function argon2Adapter(password, salt, memory, iterations, length, 
       !Number.isInteger(memory) || memory < 8 || memory > 65536 ||
       !Number.isInteger(iterations) || iterations < 1 || iterations > 4 ||
       !(password instanceof ArrayBuffer) || !(salt instanceof ArrayBuffer) || salt.byteLength < 8 || salt.byteLength > 32) throw Error('UNSUPPORTED');
-  const result = await argon2id({password: new Uint8Array(password), salt: new Uint8Array(salt), memorySize: memory, iterations, parallelism, hashLength: length, outputType: 'binary'});
-  const out = result.buffer.slice(result.byteOffset,result.byteOffset+result.byteLength);
-  result.fill(0);
-  return out;
+  // The pinned Node runtime releases native Argon2 working memory per call.
+  // A fresh 64 MiB WASM instance per derivation relied on nondeterministic GC
+  // and exhausted the Windows Job's existing 512 MiB cap during credential changes.
+  const result = argon2Sync('argon2id', {message: new Uint8Array(password), nonce: new Uint8Array(salt), memory, passes: iterations, parallelism, tagLength: length});
+  try {return result.buffer.slice(result.byteOffset,result.byteOffset+result.byteLength);}
+  finally {result.fill(0);}
 }
 kdbx.CryptoEngine.setArgon2Impl(argon2Adapter);
 export const MAX_FILE = 8 * 1024 * 1024;

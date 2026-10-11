@@ -3,7 +3,7 @@ fn main() {
     let observation = match shixu_desktop::startup::observation_mode(&args) {
         Ok(mode) => mode,
         Err(_) => {
-            eprintln!("FAIL: observation accepts only --vault-lifecycle-observe");
+            eprintln!("FAIL: observation/fictional mode accepts only its exact fixed flag");
             std::process::exit(1);
         }
     };

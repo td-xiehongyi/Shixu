@@ -1,10 +1,12 @@
 //! Linux encrypted checkpoint + atomic rename. Windows enablement is blocked.
 use sha2::{Digest, Sha256};
 use shixu_core::contracts::{AppResult, error::AppError};
+#[cfg(not(windows))]
+use std::path::PathBuf;
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 pub(super) const MAX_FILE: u64 = 8 * 1024 * 1024;
 pub(super) fn read_bounded(path: &Path) -> AppResult<Vec<u8>> {
@@ -29,6 +31,7 @@ pub(super) fn digest(path: &Path) -> AppResult<String> {
         .map(|b| format!("{b:02x}"))
         .collect::<String>())
 }
+#[cfg(not(windows))]
 pub(super) fn ensure_plain_directory(path: &Path) -> AppResult<PathBuf> {
     if !path.is_absolute() {
         return Err(AppError::Unsupported);

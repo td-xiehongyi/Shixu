@@ -7,9 +7,8 @@ use crate::contracts::{
     },
 };
 
-/// Single owner of engine access and vault authorization. Only explicit,
-/// successful vault interactions refresh activity; other domains have no access
-/// to the engine or the refresh operation.
+/// Single owner of engine access and vault authorization. Sessions persist until
+/// explicit revocation; other domains have no access to the engine.
 pub struct VaultService<E: VaultEngine> {
     engine: E,
     session: SessionPolicy,
@@ -43,10 +42,7 @@ impl<E: VaultEngine> VaultService<E> {
     }
 
     pub fn tick(&mut self, now: UtcMillis) -> AppResult<()> {
-        if self.session.observe_time(now)? {
-            self.lock(LockReason::Timeout)?;
-        }
-        Ok(())
+        self.session.observe_time(now)
     }
 
     pub fn status(&self) -> VaultStatus {
@@ -56,7 +52,6 @@ impl<E: VaultEngine> VaultService<E> {
     /// Explicit trusted vault-window activity; background timers never call this.
     pub fn activity(&mut self, session: &SessionId, now: UtcMillis) -> AppResult<()> {
         self.authorize_at(session, now)?;
-        self.session.refresh(now);
         Ok(())
     }
 
@@ -64,7 +59,6 @@ impl<E: VaultEngine> VaultService<E> {
         self.authorize_at(session, now)?;
         let result = self.engine.list();
         let summaries = self.finish_operation(session, result)?;
-        self.session.refresh(now);
         Ok(summaries)
     }
 
@@ -79,15 +73,19 @@ impl<E: VaultEngine> VaultService<E> {
             VaultMutation::Create {
                 channel,
                 account,
+                description,
                 password,
+            } => {
+                validate_fields(channel, account, description, Some(password))?;
             }
-            | VaultMutation::Update {
+            VaultMutation::Update {
                 channel,
                 account,
+                description,
                 password,
                 ..
             } => {
-                validate_fields(channel, account, password)?;
+                validate_fields(channel, account, description, password.as_ref())?;
             }
             VaultMutation::Delete { .. } => {}
         }
@@ -114,7 +112,6 @@ impl<E: VaultEngine> VaultService<E> {
         // Engine must repeat the revision check atomically with its write.
         let result = self.engine.apply(mutation);
         let summary = self.finish_operation(session, result)?;
-        self.session.refresh(now);
         Ok(summary)
     }
 
@@ -128,7 +125,6 @@ impl<E: VaultEngine> VaultService<E> {
         let _: EntryId = id.parse()?;
         let result = self.engine.read_secret(id);
         let secret = self.finish_operation(session, result)?;
-        self.session.refresh(now);
         Ok(secret)
     }
 
@@ -215,12 +211,17 @@ fn validate_secret(secret: &SecretBytes) -> AppResult<()> {
     }
 }
 
-fn validate_fields(channel: &str, account: &str, password: &SecretBytes) -> AppResult<()> {
-    if channel.trim().is_empty() || account.trim().is_empty() {
+fn validate_fields(
+    channel: &str,
+    account: &str,
+    description: &str,
+    password: Option<&SecretBytes>,
+) -> AppResult<()> {
+    if channel.trim().is_empty() || account.trim().is_empty() || description.len() > 4096 {
         return Err(AppError::InvalidInput);
     }
     // Reject requested encoded newline characters without normalization/copies.
     // The real text engine separately rejects invalid UTF-8; fake policy tests
     // retain the byte-oriented port contract.
-    validate_secret(password)
+    password.map_or(Ok(()), validate_secret)
 }

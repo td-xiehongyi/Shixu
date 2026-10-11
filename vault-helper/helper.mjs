@@ -26,10 +26,12 @@ function id(entry) {
   return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 }
 function field(e,key) {const value=e.fields.get(key);return typeof value==='string'?value:value.getText();}
+function description(e) {return e.fields.has('Notes')?field(e,'Notes'):'';}
+function validateDescription(value,write=false) {if(value!=='')validateText(value);if(write&&Buffer.byteLength(value)>4096)fail('INVALID_INPUT');}
 function summary(e) {
   const revision=Number(e.customData.get('shixu.revision')?.value);
   if (!Number.isSafeInteger(revision) || revision < 1) fail('UNSUPPORTED');
-  return {entry_id:id(e),channel:field(e,'Title'),account:field(e,'UserName'),revision,created_at:e.times.creationTime.getTime(),updated_at:e.times.lastModTime.getTime()};
+  return {entry_id:id(e),channel:field(e,'Title'),account:field(e,'UserName'),description:description(e),revision,created_at:e.times.creationTime.getTime(),updated_at:e.times.lastModTime.getTime()};
 }
 function entries() {
   const result=db.getDefaultGroup().entries;
@@ -50,7 +52,7 @@ async function stage() {
     const verified=await load(saved,db.credentials);
     const expected=entries().map(summary);
     if(JSON.stringify(verified.getDefaultGroup().entries.map(summary))!==JSON.stringify(expected)) fail('AUTH_FAILED');
-    // Verify all three fields, without emitting them.
+    // Summaries include Notes; verify the password separately without emitting it.
     for(let i=0;i<entries().length;i++) {
       if(field(verified.getDefaultGroup().entries[i],'Password') !== field(entries()[i],'Password')) fail('AUTH_FAILED');
     }
@@ -63,9 +65,11 @@ function exact(obj, keys) {
   if(!obj || typeof obj!=='object' || Array.isArray(obj) || Object.keys(obj).sort().join()!==keys.sort().join()) fail('INVALID_INPUT');
 }
 async function operation(r) {
-  const keys={create:['master'],open:['master'],list:[],reveal:['entry_id'],create_entry:['channel','account','password'],update:['entry_id','expected_revision','channel','account','password'],delete:['entry_id','expected_revision'],change_master:['current','next']};
+  const keys={create:['master'],open:['master'],list:[],reveal:['entry_id'],create_entry:['channel','account','password','description'],update:['entry_id','expected_revision','channel','account','password','description'],delete:['entry_id','expected_revision'],change_master:['current','next']};
+  if((r.op==='create_entry'||r.op==='update')&&!Object.hasOwn(r,'description'))r.description='';
   if(!Object.hasOwn(keys,r.op)) fail('UNSUPPORTED');
-  exact(r,['v','id','op',...keys[r.op]]);
+  const operationKeys=r.op==='update'&&!Object.hasOwn(r,'password')?keys[r.op].filter(key=>key!=='password'):keys[r.op];
+  exact(r,['v','id','op',...operationKeys]);
   if(r.v!==1 || !Number.isSafeInteger(r.id) || r.id!==lastId+1) fail('UNSUPPORTED');
   lastId=r.id;
   if(r.op==='create'||r.op==='open') {
@@ -82,7 +86,7 @@ async function operation(r) {
     } else {
       const bytes=readActive();try {db=await load(bytes,cred);}finally{bytes.fill(0);}
       if(db.groups.length!==1 || db.getDefaultGroup().groups.length || db.binaries.getAll().length) fail('UNSUPPORTED');
-      entries().forEach(e=>{summary(e);validateText(field(e,'Title'));validateText(field(e,'UserName'));validateText(field(e,'Password'),true);});
+      entries().forEach(e=>{summary(e);validateText(field(e,'Title'));validateText(field(e,'UserName'));validateDescription(description(e));validateText(field(e,'Password'),true);});
       assertListBudget();
     }
     return r.op==='open'?{type:'unit'}:{type:'unit',staged_digest:stagedDigest};
@@ -112,7 +116,7 @@ async function operation(r) {
     if(!Number.isSafeInteger(r.expected_revision)||r.expected_revision!==summary(entry).revision) fail('CONFLICT');
   }
   if(r.op==='delete') { const value=summary(entry);db.getDefaultGroup().entries.splice(entries().indexOf(entry),1);await stage();return {type:'summary',value,staged_digest:stagedDigest}; }
-  validateText(r.channel);validateText(r.account);validateText(r.password,true);if(!r.channel.trim()||!r.account.trim())fail('INVALID_INPUT');
+  validateText(r.channel);validateText(r.account);validateDescription(r.description,true);(r.op==='create_entry'||Object.hasOwn(r,'password'))&&validateText(r.password,true);if(!r.channel.trim()||!r.account.trim())fail('INVALID_INPUT');
   if(r.op==='create_entry') {
     if(entries().length>=1000)fail('UNSUPPORTED');
     entry=db.createEntry(db.getDefaultGroup());
@@ -120,7 +124,8 @@ async function operation(r) {
     entry.customData=new Map();entry.customData.set('shixu.revision',{value:'1'});
   } else {entry.customData.set('shixu.revision',{value:String(summary(entry).revision+1)});entry.times.update();}
   for(const key of ['creationTime','lastModTime'])entry.times[key]=new Date(Math.floor(entry.times[key].getTime()/1000)*1000);
-  entry.fields.set('Title',kdbx.ProtectedValue.fromString(r.channel));entry.fields.set('UserName',kdbx.ProtectedValue.fromString(r.account));entry.fields.set('Password',kdbx.ProtectedValue.fromString(r.password));
+  entry.fields.set('Title',kdbx.ProtectedValue.fromString(r.channel));entry.fields.set('UserName',kdbx.ProtectedValue.fromString(r.account));if(r.op==='create_entry'||Object.hasOwn(r,'password'))entry.fields.set('Password',kdbx.ProtectedValue.fromString(r.password));
+  entry.fields.set('Notes',kdbx.ProtectedValue.fromString(r.description));
   await stage();return {type:'summary',value:summary(entry),staged_digest:stagedDigest};
 }
 function reply(r,result) {

@@ -31,7 +31,9 @@ pub const COMMANDS: &[&str] = &[
     "calendar_query",
     "calendar_edit",
     "calendar_undo",
-    "show_vault_window",
+    "set_vault_view_visible",
+    "get_vault_lock_state",
+    "ack_vault_view",
     "vault_create",
     "vault_change_master",
     "vault_copy",
@@ -42,6 +44,19 @@ pub const COMMANDS: &[&str] = &[
     "vault_reveal",
     "vault_lock",
 ];
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewArgs {
+    pub visible: bool,
+    pub revision: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewAckArgs {
+    pub revision: Option<String>,
+    #[serde(default)]
+    pub failed: bool,
+}
 pub struct CallingContext<'a> {
     pub label: &'a str,
     pub origin: &'a str,
@@ -66,7 +81,8 @@ pub fn authorize(context: &CallingContext<'_>, command: &str) -> AppResult<()> {
                 | "backup_vault"
                 | "calendar_edit"
                 | "calendar_undo"
-                | "show_vault_window"
+                | "set_vault_view_visible"
+                | "get_vault_lock_state"
                 | "calendar_create_manual"
                 | "calendar_details"
                 | "notification_list"
@@ -81,7 +97,7 @@ pub fn authorize(context: &CallingContext<'_>, command: &str) -> AppResult<()> {
                 | "set_model_consent"
                 | "set_autostart"
         ),
-        "vault" => command.starts_with("vault_"),
+        "vault" => command.starts_with("vault_") || command == "ack_vault_view",
         _ => false,
     };
     if permitted {
@@ -471,8 +487,20 @@ fn dispatch_other(
             let a: UndoArgs = decode(payload)?;
             serialized(wire::event(state.calendar()?.undo(a.request.into())?)?)
         }
-        "show_vault_window" => {
+        "set_vault_view_visible" => {
+            let args: ViewArgs = decode(payload)?;
+            wire::revision(&args.revision)?;
+            Ok(serde_json::Value::Null)
+        }
+        "get_vault_lock_state" => {
             let _: EmptyArgs = decode(payload)?;
+            serialized(state.vault().is_unlocked()?)
+        }
+        "ack_vault_view" => {
+            let args: ViewAckArgs = decode(payload)?;
+            if let Some(revision) = args.revision {
+                wire::revision(&revision)?;
+            }
             Ok(serde_json::Value::Null)
         }
         _ => Err(AppError::AuthFailed),
@@ -512,6 +540,8 @@ enum VaultMutationWire {
     Create {
         channel: String,
         account: String,
+        #[serde(default)]
+        description: String,
         password: zeroize::Zeroizing<Vec<u8>>,
     },
     Update {
@@ -519,12 +549,21 @@ enum VaultMutationWire {
         expected_revision: wire::Decimal,
         channel: String,
         account: String,
-        password: zeroize::Zeroizing<Vec<u8>>,
+        #[serde(default)]
+        description: String,
+        #[serde(default, deserialize_with = "replacement_password")]
+        password: Option<zeroize::Zeroizing<Vec<u8>>>,
     },
     Delete {
         id: String,
         expected_revision: wire::Decimal,
     },
+}
+// Omission preserves the existing secret; an explicit null is not a password.
+fn replacement_password<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>, D::Error> {
+    zeroize::Zeroizing::<Vec<u8>>::deserialize(deserializer).map(Some)
 }
 fn secret(value: &[u8]) -> AppResult<()> {
     let text = std::str::from_utf8(value).map_err(|_| AppError::InvalidInput)?;
@@ -579,14 +618,19 @@ fn dispatch_vault<T>(
                 VaultMutationWire::Create {
                     channel,
                     account,
+                    description,
                     password,
                 } => {
                     vault_text(&channel, false)?;
                     vault_text(&account, false)?;
+                    if description.len() > 4096 {
+                        return Err(AppError::InvalidInput);
+                    }
                     secret(&password)?;
                     VaultMutation::Create {
                         channel,
                         account,
+                        description,
                         password: take(password),
                     }
                 }
@@ -595,18 +639,25 @@ fn dispatch_vault<T>(
                     expected_revision,
                     channel,
                     account,
+                    description,
                     password,
                 } => {
                     validate_id(&id)?;
                     vault_text(&channel, false)?;
                     vault_text(&account, false)?;
-                    secret(&password)?;
+                    if description.len() > 4096 {
+                        return Err(AppError::InvalidInput);
+                    }
+                    if let Some(password) = &password {
+                        secret(password)?;
+                    }
                     VaultMutation::Update {
                         id: id.parse()?,
                         expected_revision: wire::revision(&String::from(expected_revision))?,
                         channel,
                         account,
-                        password: take(password),
+                        description,
+                        password: password.map(take),
                     }
                 }
                 VaultMutationWire::Delete {

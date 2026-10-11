@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const wasm = createRequire(import.meta.url)('../../resources/vault-linux-x64/helper/node_modules/hash-wasm');
-import { argon2Adapter } from '../../resources/vault-linux-x64/helper/crypto.mjs';
+const wasm = createRequire(import.meta.url)('../node_modules/hash-wasm');
+import { argon2Adapter } from '../crypto.mjs';
 test('upstream Argon2id vector and fixed adapter32byte regression', async () => {
   // https://github.com/Daninet/hash-wasm/blob/v4.12.0/test/argon2.test.ts
   assert.equal(await wasm.argon2id({password:'a',salt:'abcdefgh',parallelism:1,iterations:2,memorySize:16,hashLength:16,outputType:'hex'}), 'f94aa50873d67fdd589d6774b87c0634');

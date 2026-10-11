@@ -70,6 +70,7 @@ export interface VaultSummary {
   entry_id: string;
   channel: string;
   account: string;
+  description?: string;
   revision: Revision;
   created_at: UtcMillis;
   updated_at: UtcMillis;
@@ -80,6 +81,7 @@ export type VaultMutation =
       operation: "create";
       channel: string;
       account: string;
+      description?: string;
       password: Uint8Array;
     }
   | {
@@ -88,7 +90,8 @@ export type VaultMutation =
       expected_revision: Revision;
       channel: string;
       account: string;
-      password: Uint8Array;
+      description?: string;
+      password?: Uint8Array;
     }
   | { operation: "delete"; id: string; expected_revision: Revision };
 export type LockReason = "manual" | "timeout" | "exit";

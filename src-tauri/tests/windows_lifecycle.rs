@@ -103,7 +103,7 @@ fn receive(l: &Lifecycle, c: &SourceConfig) {
     l.supervisor.process_pending(299999).unwrap();
 }
 #[test]
-fn close_to_tray_vs_exit() {
+fn window_close_hides_without_revoking_vault() {
     let (db, c, v, d, l) = fixture();
     let session = {
         let mut vault = v.0.lock().unwrap();
@@ -114,8 +114,8 @@ fn close_to_tray_vs_exit() {
     };
     assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Unlocked);
     l.handle_lifecycle(LifecycleEvent::WindowClose, 10).unwrap();
-    assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Locked);
-    assert!(v.0.lock().unwrap().list(&session, 11).is_err());
+    assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Unlocked);
+    assert!(v.0.lock().unwrap().list(&session, 11).is_ok());
     receive(&l, &c);
     assert_eq!(
         EventService::new(db)
@@ -156,11 +156,11 @@ fn locked_vault_keeps_collection_running() {
     );
 }
 #[test]
-fn calendar_activity_does_not_refresh_vault_timer() {
+fn calendar_activity_does_not_lock_vault() {
     let (_, c, v, _, l) = fixture();
     receive(&l, &c);
     l.vault.tick(300000).unwrap();
-    assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Locked);
+    assert_eq!(v.0.lock().unwrap().status(), VaultStatus::Unlocked);
 }
 #[test]
 fn second_instance_only_focuses_existing() {
@@ -178,12 +178,12 @@ fn actual_windows_lifecycle_acceptance() {
 }
 
 #[test]
-fn close_to_tray_reports_lock_failure_and_keeps_background_running() {
+fn close_to_tray_does_not_require_vault_availability() {
     let (_, _, _, desktop, mut lifecycle) = fixture();
     lifecycle.vault = Arc::new(UnavailableVault);
     assert_eq!(
         lifecycle.handle_lifecycle(LifecycleEvent::WindowClose, 10),
-        Err(AppError::Unsupported)
+        Ok(())
     );
     assert_eq!(*desktop.0.lock().unwrap(), vec!["hide"]);
     assert!(lifecycle.supervisor.status().running);

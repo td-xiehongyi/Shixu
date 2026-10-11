@@ -58,6 +58,7 @@ pub struct VaultRecord {
     pub entry_id: EntryId,
     pub channel: String,
     pub account: String,
+    pub description: String,
     pub password: SecretBytes,
     pub revision: Revision,
     pub created_at: UtcMillis,
@@ -69,6 +70,8 @@ pub struct VaultSummary {
     pub entry_id: EntryId,
     pub channel: String,
     pub account: String,
+    #[serde(default)]
+    pub description: String,
     pub revision: Revision,
     pub created_at: UtcMillis,
     pub updated_at: UtcMillis,
@@ -79,6 +82,7 @@ impl From<&VaultRecord> for VaultSummary {
             entry_id: record.entry_id,
             channel: record.channel.clone(),
             account: record.account.clone(),
+            description: record.description.clone(),
             revision: record.revision,
             created_at: record.created_at,
             updated_at: record.updated_at,
@@ -99,6 +103,7 @@ pub enum VaultMutation {
     Create {
         channel: String,
         account: String,
+        description: String,
         password: SecretBytes,
     },
     Update {
@@ -106,7 +111,8 @@ pub enum VaultMutation {
         expected_revision: Revision,
         channel: String,
         account: String,
-        password: SecretBytes,
+        description: String,
+        password: Option<SecretBytes>,
     },
     Delete {
         id: EntryId,

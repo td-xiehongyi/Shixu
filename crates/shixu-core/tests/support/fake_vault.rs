@@ -85,12 +85,14 @@ impl VaultEngine for FakeVaultEngine {
             VaultMutation::Create {
                 channel,
                 account,
+                description,
                 password,
             } => {
                 let record = VaultRecord {
                     entry_id: EntryId::from_uuid(uuid::Uuid::from_u128(self.next_id)),
                     channel,
                     account,
+                    description,
                     password,
                     revision: 1,
                     created_at: 0,
@@ -105,6 +107,7 @@ impl VaultEngine for FakeVaultEngine {
                 id,
                 channel,
                 account,
+                description,
                 password,
                 ..
             } => {
@@ -115,7 +118,10 @@ impl VaultEngine for FakeVaultEngine {
                     .ok_or(AppError::InvalidInput)?;
                 record.channel = channel;
                 record.account = account;
-                record.password = password;
+                record.description = description;
+                if let Some(password) = password {
+                    record.password = password;
+                }
                 record.revision += 1;
                 record.updated_at += 1;
                 Ok(VaultSummary::from(&*record))

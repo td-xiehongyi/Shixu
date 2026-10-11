@@ -29,16 +29,13 @@ struct NativeDesktop(tauri::AppHandle);
 impl DesktopLifecycle for NativeDesktop {
     fn hide_main(&self) -> AppResult<()> {
         self.0
-            .get_webview_window("main")
+            .get_window("main")
             .ok_or(AppError::Unsupported)?
             .hide()
             .map_err(|_| AppError::Unsupported)
     }
     fn focus_main(&self) -> AppResult<()> {
-        let w = self
-            .0
-            .get_webview_window("main")
-            .ok_or(AppError::Unsupported)?;
+        let w = self.0.get_window("main").ok_or(AppError::Unsupported)?;
         w.show()
             .and_then(|_| w.set_focus())
             .map_err(|_| AppError::Unsupported)
@@ -104,8 +101,8 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
         .build(app)?;
     Ok(())
 }
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
-fn local_url(url: &tauri::Url) -> bool {
+use tauri::{Manager, WebviewBuilder, WebviewUrl, WindowBuilder};
+pub(crate) fn local_url(url: &tauri::Url) -> bool {
     url.origin().ascii_serialization() == "http://tauri.localhost"
         && matches!(url.path(), "/" | "/index.html")
 }
@@ -140,9 +137,15 @@ fn normal_state(app: &mut tauri::App) -> AppResult<AppState> {
     };
     let vault_root = root.join("vault");
     // Windows vault admission must create its private leaf atomically.
-    // The public constructor remains blocked pending native proof.
-    let state = if let Ok(resources) = app.path().resource_dir() {
-        state.with_vault(resources.join("vault-win-x64"), vault_root)
+    // Keep normal storage under the application-data root, independent of the
+    // EXE-adjacent fictional fixture. Native admission remains fail-closed.
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|_| AppError::Unsupported)
+        .and_then(|directory| shixu_native::vault::engine::bundled_resources_directory(&directory));
+    let state = if let Ok(resources) = resources {
+        state.with_vault(resources, vault_root)
     } else {
         state
     };
@@ -151,10 +154,18 @@ fn normal_state(app: &mut tauri::App) -> AppResult<AppState> {
 pub fn run(mode: crate::startup::Mode) {
     tauri::Builder::default()
         .setup(move |app| {
-            let (state, observation_root) = crate::startup::initialize(mode, || normal_state(app))?;
+            let (mut state, observation_root) = crate::startup::initialize(mode, || normal_state(app))?;
+            if mode == crate::startup::Mode::Fictional {
+                let root = observation_root.as_ref().ok_or(AppError::Unsupported)?;
+                state = state.with_fictional_vault(root.resources_directory()?, root.vault_directory());
+                eprintln!("SHIXU_VAULT_FICTIONAL production_store=untouched qq=disabled persistence=dedicated-native-vault release=BLOCKED");
+            }
             if let Some(root) = observation_root {
+                let fictional = root.is_fictional();
                 app.manage(root);
-                eprintln!("SHIXU_VAULT_OBSERVATION mode=fresh-synthetic-unavailable production_store=untouched");
+                if !fictional {
+                    eprintln!("SHIXU_VAULT_OBSERVATION mode=fresh-synthetic-unavailable production_store=untouched");
+                }
             }
             if let Ok(supervisor) = state.runtime() {
                 if std::env::args().any(|arg| arg == "--login-start") {
@@ -180,54 +191,45 @@ pub fn run(mode: crate::startup::Mode) {
             let handle = app.handle().clone();
             let redaction_signal = signal.clone();
             vault.set_lifecycle_handler(Arc::new(move |event| {
-                eprintln!("SHIXU_VAULT_LIFECYCLE deferred={event:?} production=Unsupported");
-                if event == NativeVaultEvent::Revoked
-                    && let Some(window) = handle.get_webview_window("vault")
-                {
-                    // Fixed empty native event; never a session/secret payload.
-                    if window.emit_to(tauri::EventTarget::webview_window("vault"), "vault_locked", ()).is_err() {
-                        redaction_signal.fail();
-                        eprintln!("SHIXU_VAULT_LIFECYCLE redaction_submit=failed availability=blocked");
-                    }
+                eprintln!("SHIXU_VAULT_LIFECYCLE deferred={event:?} release=BLOCKED");
+                if event == NativeVaultEvent::Revoked {
+                    if handle.get_webview("vault").is_some() && handle.emit_to(tauri::EventTarget::webview("vault"), "vault_locked", ()).is_err() { redaction_signal.fail(); }
+                    let _=handle.emit_to(tauri::EventTarget::webview("main"), "vault_lock_state", false);
                 }
             }))?;
             app.manage(state);
+            app.manage(crate::vault_view::VaultViewHost::default());
             install_tray(app)?;
-            let mut main_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()));
-            if let Some(root) = app.try_state::<crate::startup::ObservationRoot>() {
-                main_builder = main_builder.data_directory(root.webview_directory());
-            }
-            main_builder
-                .title("拾序")
-                .inner_size(1487.0, 1058.0)
-                .min_inner_size(760.0, 600.0)
-                .on_navigation(local_url)
-                .build()?;
-            eprintln!("SHIXU_VAULT_LIFECYCLE dispatcher=ready session_power=out_of_scope production=Unsupported");
+            let fictional = mode == crate::startup::Mode::Fictional;
+            let main_url=if fictional { "index.html?fictional=1" }else{ "index.html" };
+            let window=WindowBuilder::new(app,"main")
+                .title(if fictional { "拾序 · 虚构密码库验收" }else{ "拾序" })
+                .inner_size(1487.0,1058.0).min_inner_size(760.0,600.0).build()?;
+            let mut builder=WebviewBuilder::new("main",WebviewUrl::App(main_url.into())).on_navigation(local_url).auto_resize();
+            if let Some(root)=app.try_state::<crate::startup::ObservationRoot>() { builder=builder.data_directory(root.webview_directory()); }
+            window.add_child(builder,tauri::LogicalPosition::new(0.,0.),tauri::LogicalSize::new(1487.,1058.))?;
+            eprintln!("SHIXU_VAULT_LIFECYCLE dispatcher=ready session_power=out_of_scope release=BLOCKED");
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if window.label() == "main"
-                && let tauri::WindowEvent::CloseRequested { api, .. } = event
-            {
+        .on_window_event(|window,event| {
+            if window.label() != "main" { return; }
+            if let tauri::WindowEvent::CloseRequested { api, .. }=event {
                 api.prevent_close();
-                if let Some(state) = window.app_handle().try_state::<AppState>() {
-                    state
-                        .vault()
-                        .signal()
-                        .notify(NativeVaultEvent::WindowClosed);
-                }
-                let _ = window.hide();
+                let app=window.app_handle();
+                if app.state::<crate::vault_view::VaultViewHost>().redact_hidden(app).is_err() { app.state::<AppState>().vault().signal().notify(NativeVaultEvent::Revoked); }
+                let _=window.hide();
             }
-            if window.label() == "vault"
-                && matches!(event, tauri::WindowEvent::CloseRequested { .. })
-                && let Some(state) = window.app_handle().try_state::<AppState>()
-            {
-                state
-                    .vault()
-                    .signal()
-                    .notify(NativeVaultEvent::WindowClosed);
+            if matches!(event,tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged {..} | tauri::WindowEvent::Focused(true)) {
+                let app=window.app_handle().clone();
+                let focused=matches!(event,tauri::WindowEvent::Focused(true));
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Some(host)=app.try_state::<crate::vault_view::VaultViewHost>() {
+                        let result=if focused {host.resume(&app)}else{host.resize(&app)};
+                        if result.is_err() {app.state::<AppState>().vault().signal().notify(NativeVaultEvent::Revoked);}
+                    }
+                });
             }
+            if matches!(event,tauri::WindowEvent::Destroyed) && let Some(state)=window.app_handle().try_state::<AppState>() { state.vault().signal().notify(NativeVaultEvent::WindowClosed); }
         })
         .invoke_handler(|invoke| {
             // Window creation must run outside the synchronous Windows WebView callback.
@@ -255,26 +257,14 @@ pub fn run(mode: crate::startup::Mode) {
                         payload.clone(),
                         &state,
                         |value, check| {
-                            if command == "show_vault_window" {
-                                if let Some(window) = view.app_handle().get_webview_window("vault")
-                                {
-                                    window.show().map_err(|_| AppError::Unsupported)?;
-                                    window.set_focus().map_err(|_| AppError::Unsupported)?;
-                                } else {
-                                    let mut builder = WebviewWindowBuilder::new(
-                                        view.app_handle(),
-                                        "vault",
-                                        WebviewUrl::App("index.html?window=vault".into()),
-                                    );
-                                    if let Some(root) = view.app_handle().try_state::<crate::startup::ObservationRoot>() {
-                                        builder = builder.data_directory(root.webview_directory());
-                                    }
-                                    builder.title("拾序 · 密码库")
-                                    .inner_size(640.0, 620.0)
-                                    .on_navigation(local_url)
-                                    .build()
-                                    .map_err(|_| AppError::Unsupported)?;
-                                }
+                            if command == "set_vault_view_visible" {
+                                let args:commands::ViewArgs=serde_json::from_value(payload.clone()).map_err(|_|AppError::InvalidInput)?;
+                                view.state::<crate::vault_view::VaultViewHost>().set_visible(view.app_handle(),args.visible,crate::wire::revision(&args.revision)?)?;
+                            }
+                            if command == "ack_vault_view" {
+                                let args:commands::ViewAckArgs=serde_json::from_value(payload.clone()).map_err(|_|AppError::InvalidInput)?;
+                                let revision=args.revision.as_deref().map(crate::wire::revision).transpose()?;
+                                view.state::<crate::vault_view::VaultViewHost>().acknowledge(view.app_handle(),revision,args.failed)?;
                             }
                             // Catch serialization failure before consuming the resolver;
                             // this remains inside the original vault publication guard.
@@ -289,6 +279,10 @@ pub fn run(mode: crate::startup::Mode) {
                         },
                     )
                 })();
+                if let Ok(unlocked)=view.state::<AppState>().vault().is_unlocked() {
+                    let _=view.emit_to(tauri::EventTarget::webview("main"),"vault_lock_state",unlocked);
+                }
+                if result.is_err() && matches!(command,"set_vault_view_visible" | "ack_vault_view") { view.state::<AppState>().vault().signal().notify(NativeVaultEvent::Revoked); }
                 if let Err(error) = result
                     && let Some(resolver) = resolver.take()
                 {

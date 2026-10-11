@@ -158,17 +158,27 @@ export function decodeEvent(value: unknown): CalendarEvent {
   return d as unknown as CalendarEvent;
 }
 export function decodeSummary(value: unknown): VaultSummary {
-  const d = object(value, [
-    "entry_id",
-    "channel",
-    "account",
-    "revision",
-    "created_at",
-    "updated_at",
-  ]);
+  const d = object(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      !("description" in value)
+      ? { ...value, description: "" }
+      : value,
+    [
+      "entry_id",
+      "channel",
+      "account",
+      "description",
+      "revision",
+      "created_at",
+      "updated_at",
+    ],
+  );
   id(d.entry_id);
   vaultText(d.channel, 65536);
   vaultText(d.account, 65536);
+  if (d.description !== "") vaultText(d.description, 65536);
   canonicalRevision(d.revision);
   millis(d.created_at);
   millis(d.updated_at);
@@ -276,10 +286,19 @@ function mutation(value: VaultMutation): Record<string, unknown> {
             "expected_revision",
             "channel",
             "account",
-            "password",
+            "description",
+            ...(Object.hasOwn(value, "password") ? ["password"] : []),
           ]
-        : ["operation", "channel", "account", "password"];
-  const d = object(value, keys);
+        : ["operation", "channel", "account", "description", "password"];
+  const d = object(
+    value &&
+      typeof value === "object" &&
+      value.operation !== "delete" &&
+      !("description" in value)
+      ? { ...value, description: "" }
+      : value,
+    keys,
+  );
   enumeration(d.operation, ["create", "update", "delete"]);
   if (d.operation !== "create") {
     id(d.id);
@@ -288,6 +307,8 @@ function mutation(value: VaultMutation): Record<string, unknown> {
   if (d.operation !== "delete") {
     vaultText(d.channel);
     vaultText(d.account, 4096);
+    if (d.description !== "") vaultText(d.description, 4096);
+    if (d.operation === "update" && !Object.hasOwn(d, "password")) return d;
     return { ...d, password: Array.from(bytes(d.password)) };
   }
   return d;
@@ -863,8 +884,18 @@ export function createMainBridge(invoke: Invoke) {
         await call(invoke, "calendar_undo", { request: value }),
       );
     },
-    async showVaultWindow(): Promise<void> {
-      await call(invoke, "show_vault_window");
+    async setVaultViewVisible(
+      visible: boolean,
+      revision: string,
+    ): Promise<void> {
+      bool(visible);
+      canonicalRevision(revision);
+      await call(invoke, "set_vault_view_visible", { visible, revision });
+    },
+    async getVaultLockState(): Promise<boolean> {
+      const result = await call(invoke, "get_vault_lock_state");
+      bool(result);
+      return result as boolean;
     },
   });
 }
