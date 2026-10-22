@@ -3,6 +3,24 @@ import { expect, it } from "vitest";
 import { QQConnectionPanel } from "./QQConnectionPanel";
 import { port, render, id } from "../../test/d4";
 import { BridgeError } from "../../contracts/bridge";
+it("shows_login_wait_status_for_auto_start", async () => {
+  const r = await render(
+    <QQConnectionPanel
+      sourceId={id}
+      port={port({
+        qqConnectionRead: async () => ({
+          endpoint: "127.0.0.1:3001",
+          has_credential: true,
+          active: false,
+          last_error: null,
+          startup_state: "waiting_login",
+        }),
+      })}
+    />,
+  );
+  expect(r.host.textContent).toContain("等待 QQ 登录");
+  await r.close();
+});
 for (const failed of [false, true]) {
   it(`clears_owned_token_and_dom_on_${failed ? "failure" : "success"}_without_claiming_connected`, async () => {
     let captured: Uint8Array | undefined;
@@ -15,6 +33,7 @@ for (const failed of [false, true]) {
             has_credential: false,
             active: false,
             last_error: null,
+            startup_state: "idle",
           }),
           qqConnectionSave: async (_id, _endpoint, token) => {
             captured = token;
@@ -53,6 +72,7 @@ it("unmount_clears_owned_bytes_while_save_is_still_pending", async () => {
           has_credential: false,
           active: false,
           last_error: null,
+          startup_state: "idle",
         }),
         qqConnectionSave: async (_id, _endpoint, token) => {
           captured = token;

@@ -52,6 +52,23 @@ export function QQConnectionPanel({
       owned.current.clear();
     };
   }, [sourceId, port]);
+  useEffect(() => {
+    let live = true;
+    const timer = window.setInterval(() => {
+      void port
+        .qqConnectionRead(sourceId)
+        .then((v) => {
+          if (live) setMetadata(v);
+        })
+        .catch((e) => {
+          if (live) setMessage(connectionError(e));
+        });
+    }, 2000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [sourceId, port]);
   async function action(run: () => Promise<unknown>) {
     setBusy(true);
     setMessage("");
@@ -72,9 +89,28 @@ export function QQConnectionPanel({
         先保存获准账号与群白名单，再保存连接配置，最后点击连接。获准群的新文字通知自动入历，无需逐条确认。
       </p>
       <p role="status">
-        {metadata?.active ? "本机接收连接已建立（真实 QQ 尚未验收）" : "未连接"}{" "}
-        · {metadata?.has_credential ? "凭据已保存" : "尚无可用凭据"}
+        {metadata?.active ? "本机接收连接已建立" : "未连接"} ·{" "}
+        {metadata?.has_credential ? "凭据已保存" : "尚无可用凭据"}
       </p>
+      {metadata && metadata.startup_state !== "idle" && (
+        <p role="status">
+          {
+            (
+              {
+                waiting_login:
+                  "等待 QQ 登录，登录后自动连接；如出现二维码请扫码。",
+                connected: "启动自动连接已完成。",
+                no_source: "未找到已启用且保存连接凭据的来源，请先配置来源。",
+                choose_source:
+                  "存在多个来源且没有可用的上次连接记录，请选择来源并连接一次。",
+                timed_out:
+                  "等待 QQ 登录超时（5 分钟），请完成登录后点击连接此来源。",
+                failed: "启动自动连接已停止，请检查下方连接错误或账号配置。",
+              } as Record<string, string>
+            )[metadata.startup_state]
+          }
+        </p>
+      )}
       {metadata?.last_error && (
         <p role="status">
           上次连接控制：{connectionError(new BridgeError(metadata.last_error))}
@@ -145,7 +181,8 @@ export function QQConnectionPanel({
         刷新连接状态
       </button>
       <p>
-        当前仅支持一个活动来源。切换账号请先断开；冲突不会替换已连接来源。配置变更后须重新连接。保存不连接，重启不自动连接或重连。
+        当前仅支持一个活动来源。统一启动入口会等待 QQ
+        登录后连接上次成功使用的来源；仅有一个有效来源时直接使用。配置变更后须重新连接。断开后不会自动重连。
       </p>
       <p>
         令牌由当前 Windows

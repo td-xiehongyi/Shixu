@@ -132,7 +132,9 @@ fn normal_state(app: &mut tauri::App) -> AppResult<AppState> {
     let directory = root.join("calendar");
     // Product storage is only the existing Windows DPAPI/ACL adapter.
     let state = match shixu_native::protection::DpapiProtector::open_database(&directory) {
-        Ok(db) => AppState::from_database(Arc::new(db)).with_backups(&directory.join("backups"))?,
+        Ok(db) => AppState::from_database(Arc::new(db))
+            .with_backups(&directory.join("backups"))?
+            .with_model(&root)?,
         Err(_) => AppState::default(),
     };
     let vault_root = root.join("vault");
@@ -173,10 +175,17 @@ pub fn run(mode: crate::startup::Mode) {
                 } else {
                     supervisor.resume()?;
                 }
+                if mode == crate::startup::Mode::Normal
+                    && std::env::args().any(|arg| arg == "--qq-auto-connect")
+                {
+                    // Connection failure must remain visible without blocking the app or vault.
+                    let _ = state.qq()?.start_auto_connect(std::time::Duration::from_secs(300));
+                }
                 let workers = supervisor.spawn_workers(WorkerPorts {
                     receiver: Some(state.take_qq_receiver()?),
                     parser: Some(Arc::new(NativeParser)),
                     backup: state.backup().ok(),
+                    model: state.model_transport().ok().map(|v| v as Arc<dyn shixu_core::notifications::model::ModelTransport+Send+Sync>),
                     ..WorkerPorts::default()
                 })?;
                 app.manage(NativeWorkers(Mutex::new(Some(workers))));

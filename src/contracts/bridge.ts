@@ -7,6 +7,8 @@ import type {
   PartResult,
   SourceConfig,
   ModelConsent,
+  ModelSettings,
+  ModelProcessingStatus,
   SettingsSnapshot,
   AppErrorCode,
   CalendarEvent,
@@ -21,6 +23,7 @@ export type QQConnectionMetadata = {
   has_credential: boolean;
   active: boolean;
   last_error: AppErrorCode | null;
+  startup_state: string;
 };
 export type Invoke = (
   command: string,
@@ -699,6 +702,117 @@ function backupSummary(
 }
 export function createMainBridge(invoke: Invoke) {
   return Object.freeze({
+    async modelSettingsRead(): Promise<ModelSettings> {
+      const d = object(await call(invoke, "model_settings_read", {}), [
+        "configured",
+        "model",
+        "last_error",
+      ]);
+      bool(d.configured);
+      text(d.model, 128);
+      if (d.last_error !== null && !codes.includes(String(d.last_error)))
+        invalid();
+      return d as unknown as ModelSettings;
+    },
+    async modelKeySave(value: string): Promise<void> {
+      text(value, 8192);
+      if (!/^[\x21-\x7e]+$/.test(value)) invalid();
+      await call(invoke, "model_key_save", { key: value });
+    },
+    async modelKeyDelete(): Promise<void> {
+      await call(invoke, "model_key_delete", {});
+    },
+    async modelTestConnection(): Promise<void> {
+      await call(invoke, "model_test_connection", {});
+    },
+    async modelStatus(messageKey: string): Promise<ModelProcessingStatus> {
+      const d = object(
+        await call(invoke, "model_status", { message_key: id(messageKey) }),
+        ["message_key", "revision", "state", "reason", "attempts"],
+      );
+      id(d.message_key);
+      canonicalRevision(d.revision);
+      if (
+        ![
+          "not_scheduled",
+          "queued",
+          "running",
+          "applied",
+          "pending",
+          "non_event",
+          "failed",
+        ].includes(String(d.state))
+      )
+        invalid();
+      nullable(d.reason, (v) => text(v, 128));
+      if (
+        !Number.isSafeInteger(d.attempts) ||
+        (d.attempts as number) < 0 ||
+        (d.attempts as number) > 3
+      )
+        invalid();
+      return d as unknown as ModelProcessingStatus;
+    },
+    async modelRetry(messageKey: string): Promise<void> {
+      await call(invoke, "model_retry", { message_key: id(messageKey) });
+    },
+    async modelReviews(
+      messageKey: string,
+    ): Promise<import("./domain").ModelReview[]> {
+      const rows = await call(invoke, "model_reviews", {
+        message_key: id(messageKey),
+      });
+      array(rows, 16, (v) => {
+        const d = object(v, [
+          "candidate_key",
+          "review_token",
+          "action",
+          "title",
+          "time_text",
+          "location",
+          "evidence",
+          "reason",
+          "targets",
+        ]);
+        id(d.candidate_key);
+        if (
+          typeof d.review_token !== "string" ||
+          !/^[0-9a-f]{64}$/.test(d.review_token)
+        )
+          invalid();
+        enumeration(d.action, ["create", "reschedule", "cancel"]);
+        text(d.title, 256);
+        text(d.time_text, 16384);
+        nullable(d.location, (v) => text(v, 128));
+        text(d.evidence, 16384);
+        text(d.reason, 128);
+        array(d.targets, 100, decodeEvent);
+      });
+      return rows as import("./domain").ModelReview[];
+    },
+    async modelReviewResolve(
+      candidateKey: string,
+      reviewToken: string,
+      target: string | null,
+      expectedRevision: string,
+      timeText: string | null,
+      dismiss: boolean,
+    ): Promise<void> {
+      id(candidateKey);
+      if (!/^[0-9a-f]{64}$/.test(reviewToken)) invalid();
+      nullable(target, id);
+      canonicalRevision(expectedRevision);
+      nullable(timeText, (v) => text(v, 512));
+      bool(dismiss);
+      await call(invoke, "model_review_resolve", {
+        candidate_key: candidateKey,
+        review_token: reviewToken,
+        target,
+        expected_revision: expectedRevision,
+        time_text: timeText,
+        dismiss,
+      });
+    },
     async backupList(): Promise<BackupSummary[]> {
       const r = await call(invoke, "backup_list");
       array(r, 7, backupSummary);
@@ -792,12 +906,21 @@ export function createMainBridge(invoke: Invoke) {
       id(sourceId);
       const d = object(
         await call(invoke, "qq_connection_read", { source_id: sourceId }),
-        ["endpoint", "has_credential", "active", "last_error"],
+        ["endpoint", "has_credential", "active", "last_error", "startup_state"],
       );
       nullable(d.endpoint, (v) => text(v, 128));
       bool(d.has_credential);
       bool(d.active);
       nullable(d.last_error, (v) => enumeration(v, codes));
+      enumeration(d.startup_state, [
+        "idle",
+        "waiting_login",
+        "connected",
+        "no_source",
+        "choose_source",
+        "timed_out",
+        "failed",
+      ]);
       return d as unknown as QQConnectionMetadata;
     },
     async qqConnectionSave(

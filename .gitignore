@@ -163,3 +163,7 @@
 /resources/
 /vault-helper/node_modules/
 /vault-helper/kdbx-lib/
+
+# Local NapCat runtimes contain machine-specific configuration and credentials.
+/tools/NapCat.Shell/
+/tools/NapCat.Framework/

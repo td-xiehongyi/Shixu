@@ -1,3 +1,4 @@
+import { DeepSeekPanel } from "./DeepSeekPanel";
 import { QQConnectionPanel } from "./QQConnectionPanel";
 import { BackupPanel } from "./BackupPanel";
 import { useEffect, useState } from "react";
@@ -210,64 +211,7 @@ export function SettingsPage({
           />
         )}
       </section>
-      <section>
-        <h2>云端模型授权</h2>
-        <form
-          key={data.model.revision}
-          onSubmit={(e) => {
-            e.preventDefault();
-            const d = new FormData(e.currentTarget);
-            void change(() =>
-              port.setModelConsent({
-                enabled: d.has("enabled"),
-                provider_id: String(d.get("provider")) || null,
-                allowed_group_ids: String(d.get("groups"))
-                  .split(/[,，\n]/)
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-                allow_attachment_text: d.has("attachments"),
-                revision: data.model.revision,
-              }),
-            );
-          }}
-        >
-          <label>
-            <input
-              type="checkbox"
-              name="enabled"
-              defaultChecked={data.model.enabled}
-            />
-            启用云端模型授权
-          </label>
-          <label>
-            提供方标识
-            <input
-              name="provider"
-              maxLength={128}
-              defaultValue={data.model.provider_id ?? ""}
-            />
-          </label>
-          <label>
-            允许上传文本的群
-            <textarea
-              name="groups"
-              defaultValue={data.model.allowed_group_ids.join(",")}
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              name="attachments"
-              defaultChecked={data.model.allow_attachment_text}
-            />
-            另外允许附件提取文本（不含原件）
-          </label>
-          <button disabled={!ready || busy}>保存模型授权</button>
-        </form>
-        <p className="muted">
-          仅当前允许的群和单独授权的附件文本可发送。授权撤回立即生效；重启后模型授权默认关闭。
-        </p>
-      </section>
+      <DeepSeekPanel port={port} data={data} changed={async () => setData(await port.settingsRead())} />
       <section>
         <h2>启动与锁库</h2>
         <label>

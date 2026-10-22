@@ -82,6 +82,19 @@ export function port(
 ): typeof mainBridge {
   return {
     ...mainBridge,
+    modelSettingsRead: async () => ({
+      configured: false,
+      model: "deepseek-flash",
+      last_error: null,
+    }),
+    modelStatus: async (messageKey) => ({
+      message_key: messageKey,
+      revision: "1",
+      state: "not_scheduled",
+      reason: null,
+      attempts: 0,
+    }),
+    modelReviews: async () => [],
     calendarQuery: async () => [event],
     calendarDetails: async () => ({
       origin: "manual",

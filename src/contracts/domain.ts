@@ -297,6 +297,25 @@ export interface ModelConsent {
   allow_attachment_text: boolean;
   revision: Revision;
 }
+export interface ModelSettings {
+  configured: boolean;
+  model: string;
+  last_error: AppErrorCode | null;
+}
+export interface ModelProcessingStatus {
+  message_key: string;
+  revision: Revision;
+  state:
+    | "not_scheduled"
+    | "queued"
+    | "running"
+    | "applied"
+    | "pending"
+    | "non_event"
+    | "failed";
+  reason: string | null;
+  attempts: number;
+}
 export interface SourceSetting {
   config: SourceConfig;
   epoch: Revision;
@@ -355,4 +374,15 @@ export interface BackupSummary {
 }
 export interface BackupPreview extends BackupSummary {
   preview_id: string;
+}
+export interface ModelReview {
+  candidate_key: string;
+  review_token: string;
+  action: "create" | "reschedule" | "cancel";
+  title: string;
+  time_text: string;
+  location: string | null;
+  evidence: string;
+  reason: string;
+  targets: CalendarEvent[];
 }

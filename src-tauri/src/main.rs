@@ -26,7 +26,7 @@ fn release_command() -> Option<i32> {
     use shixu_desktop::release::{MAX_EVIDENCE_BYTES, compiled_manifest, hex, validate};
     use std::io::{Read, Write};
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.is_empty() {
+    if args.is_empty() || args == [std::ffi::OsString::from("--qq-auto-connect")] {
         return None;
     }
     if args[0] != "--release-manifest" && args[0] != "--verify-release" {

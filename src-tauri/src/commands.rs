@@ -6,6 +6,14 @@ use crate::{
 use serde::Deserialize;
 use shixu_core::contracts::{AppResult, calendar::EventQuery, error::AppError};
 pub const COMMANDS: &[&str] = &[
+    "model_settings_read",
+    "model_key_save",
+    "model_key_delete",
+    "model_test_connection",
+    "model_status",
+    "model_retry",
+    "model_reviews",
+    "model_review_resolve",
     "backup_previous",
     "backup_list",
     "backup_snapshot",
@@ -70,6 +78,14 @@ pub fn authorize(context: &CallingContext<'_>, command: &str) -> AppResult<()> {
         "main" => matches!(
             command,
             "calendar_query"
+                | "model_settings_read"
+                | "model_key_save"
+                | "model_key_delete"
+                | "model_test_connection"
+                | "model_status"
+                | "model_retry"
+                | "model_reviews"
+                | "model_review_resolve"
                 | "backup_previous"
                 | "backup_list"
                 | "backup_snapshot"
@@ -144,6 +160,11 @@ struct UndoArgs {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EmptyArgs {}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelKeyArgs {
+    key: zeroize::Zeroizing<String>,
+}
 fn serialized<T: serde::Serialize>(value: T) -> AppResult<serde_json::Value> {
     serde_json::to_value(value).map_err(|_| AppError::Unsupported)
 }
@@ -415,6 +436,82 @@ fn dispatch_other(
             state.qq()?.disconnect(a.source_id)?;
             Ok(serde_json::Value::Null)
         }
+        "model_settings_read" => {
+            let _: EmptyArgs = decode(payload)?;
+            serialized(
+                serde_json::json!({"configured":state.model_credentials()?.is_configured()?,"model":shixu_native::model_client::http::MODEL,"last_error":state.model_error()?.map(|e|e.code())}),
+            )
+        }
+        "model_key_save" => {
+            let a: ModelKeyArgs = decode(payload)?;
+            state
+                .model_credentials()?
+                .save(shixu_core::contracts::vault::SecretBytes::new(
+                    a.key.as_bytes().to_vec(),
+                ))?;
+            Ok(serde_json::Value::Null)
+        }
+        "model_key_delete" => {
+            let _: EmptyArgs = decode(payload)?;
+            if let Ok(runtime) = state.runtime() {
+                let mut c = state.consent.snapshot()?;
+                c.enabled = false;
+                runtime.set_model_consent(c.revision, c)?;
+            }
+            state.model_credentials()?.delete()?;
+            Ok(serde_json::Value::Null)
+        }
+        "model_test_connection" => {
+            let _: EmptyArgs = decode(payload)?;
+            state.test_model()?;
+            Ok(serde_json::Value::Null)
+        }
+        "model_status" => {
+            let a: PartsArgs = decode(payload)?;
+            let s = state.runtime()?.model_status(a.message_key)?;
+            serialized(
+                serde_json::json!({"message_key":s.message_key,"revision":s.revision.to_string(),"state":s.state,"reason":s.reason,"attempts":s.attempts}),
+            )
+        }
+        "model_retry" => {
+            let a: PartsArgs = decode(payload)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| AppError::InvalidInput)?
+                .as_millis() as i64;
+            state.runtime()?.retry_model(a.message_key, now)?;
+            Ok(serde_json::Value::Null)
+        }
+        "model_reviews" => {
+            let a: PartsArgs = decode(payload)?;
+            let items=state.calendar()?.model_reviews(a.message_key)?.into_iter().map(|r|{
+                let targets=r.targets.into_iter().map(wire::event).collect::<AppResult<Vec<_>>>()?;
+                Ok(serde_json::json!({"candidate_key":r.candidate_key,"review_token":r.review_token,"action":r.action,"title":r.title,"time_text":r.time_text,"location":r.location,"evidence":r.evidence,"reason":r.reason,"targets":targets}))
+            }).collect::<AppResult<Vec<_>>>()?;
+            serialized(items)
+        }
+        "model_review_resolve" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Args {
+                candidate_key: shixu_core::contracts::notification::CandidateKey,
+                review_token: String,
+                target: Option<shixu_core::contracts::calendar::EventId>,
+                expected_revision: String,
+                time_text: Option<String>,
+                dismiss: bool,
+            }
+            let a: Args = decode(payload)?;
+            state.calendar()?.resolve_model_review(
+                a.candidate_key,
+                &a.review_token,
+                a.target,
+                wire::revision(&a.expected_revision)?,
+                a.time_text.as_deref(),
+                a.dismiss,
+            )?;
+            Ok(serde_json::Value::Null)
+        }
         "settings_read" => {
             let _: EmptyArgs = decode(payload)?;
             let settings = state.settings()?;
@@ -444,7 +541,12 @@ fn dispatch_other(
             let a: ConsentArgs = decode(payload)?;
             state.settings()?;
             let consent = a.consent.into_core()?;
-            state.consent.replace(consent.revision, consent)?;
+            if consent.enabled && !state.model_credentials()?.is_configured()? {
+                return Err(AppError::AuthFailed);
+            }
+            state
+                .runtime()?
+                .set_model_consent(consent.revision, consent)?;
             Ok(serde_json::Value::Null)
         }
         "set_autostart" => {

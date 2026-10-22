@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ModelStatus } from "./ModelStatus";
 import { Bell } from "@phosphor-icons/react/dist/csr/Bell";
 import { Sparkle } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -104,6 +105,11 @@ function Notice({
           接收 {new Date(m.received_at).toLocaleString()} · 修订 {m.revision}
         </small>
         <p className="plain-text">{m.text}</p>
+        <ModelStatus
+          messageKey={m.message_key}
+          revoked={m.revoked}
+          port={port}
+        />
         <span className="notice-state">
           {m.revoked
             ? "来源已撤回（不等于日程取消）"

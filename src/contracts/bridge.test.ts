@@ -15,6 +15,14 @@ describe("strict native bridge contract", () => {
     expect(Object.keys(bridge).sort()).toEqual(
       [
         "backupDelete",
+        "modelSettingsRead",
+        "modelKeySave",
+        "modelKeyDelete",
+        "modelTestConnection",
+        "modelStatus",
+        "modelRetry",
+        "modelReviews",
+        "modelReviewResolve",
         "backupExport",
         "backupImport",
         "backupList",

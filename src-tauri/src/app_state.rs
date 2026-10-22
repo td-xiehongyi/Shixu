@@ -11,6 +11,9 @@ use shixu_core::{
 use std::sync::Arc;
 /// One database and live consent authority shared with the background runtime.
 pub struct AppState {
+    model_credentials: Option<Arc<shixu_native::model_client::credential::ModelCredentialStore>>,
+    model_transport: Option<Arc<shixu_native::model_client::http::DeepSeekTransport>>,
+    model_error: std::sync::Mutex<Option<AppError>>,
     vault: Arc<crate::vault::VaultController>,
     qq: Option<Arc<shixu_native::qq::connection::ConnectionController>>,
     qq_receiver: std::sync::Mutex<Option<Box<dyn shixu_core::runtime::workers::ReceivePort>>>,
@@ -23,6 +26,9 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            model_credentials: None,
+            model_transport: None,
+            model_error: std::sync::Mutex::new(None),
             vault: crate::vault::VaultController::unavailable(),
             qq: None,
             qq_receiver: std::sync::Mutex::new(None),
@@ -35,6 +41,34 @@ impl Default for AppState {
     }
 }
 impl AppState {
+    pub fn with_model(mut self, root: &std::path::Path) -> AppResult<Self> {
+        let credentials = Arc::new(
+            shixu_native::model_client::credential::ModelCredentialStore::new(root.into())?,
+        );
+        self.model_transport = Some(Arc::new(
+            shixu_native::model_client::http::DeepSeekTransport::new(credentials.clone())?,
+        ));
+        self.model_credentials = Some(credentials);
+        Ok(self)
+    }
+    pub fn model_credentials(
+        &self,
+    ) -> AppResult<Arc<shixu_native::model_client::credential::ModelCredentialStore>> {
+        self.model_credentials.clone().ok_or(AppError::Unsupported)
+    }
+    pub fn model_transport(
+        &self,
+    ) -> AppResult<Arc<shixu_native::model_client::http::DeepSeekTransport>> {
+        self.model_transport.clone().ok_or(AppError::Unsupported)
+    }
+    pub fn model_error(&self) -> AppResult<Option<AppError>> {
+        Ok(*self.model_error.lock().map_err(|_| AppError::Conflict)?)
+    }
+    pub fn test_model(&self) -> AppResult<()> {
+        let result = self.model_transport()?.test_connection();
+        *self.model_error.lock().map_err(|_| AppError::Conflict)? = result.as_ref().err().copied();
+        result
+    }
     pub fn new(calendar: EventService) -> Self {
         Self {
             calendar: Some(calendar),
@@ -50,6 +84,9 @@ impl AppState {
         Self {
             vault: crate::vault::VaultController::unavailable(),
             qq: Some(qq),
+            model_credentials: None,
+            model_transport: None,
+            model_error: std::sync::Mutex::new(None),
             qq_receiver: std::sync::Mutex::new(Some(receiver)),
             backup: None,
             runtime: Some(Arc::new(shixu_core::runtime::Supervisor::new(

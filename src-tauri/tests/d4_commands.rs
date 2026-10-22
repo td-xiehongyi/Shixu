@@ -187,8 +187,22 @@ fn actual_core_long_source_has_bounded_wire_without_losing_stored_proof() {
     }
 }
 #[test]
+#[cfg(windows)]
 fn native_settings_share_live_consent_and_defaults_are_off() {
-    let state = AppState::from_database(database());
+    let db = database();
+    SettingsStore::new(db.clone())
+        .save_source(config())
+        .unwrap();
+    let root = std::env::temp_dir().join(format!("shixu-model-consent-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let state = AppState::from_database(db).with_model(&root).unwrap();
+    state
+        .model_credentials()
+        .unwrap()
+        .save(shixu_core::contracts::vault::SecretBytes::new(
+            b"synthetic-token".to_vec(),
+        ))
+        .unwrap();
     let ctx = CallingContext {
         label: "main",
         origin: "http://tauri.localhost",
@@ -196,13 +210,28 @@ fn native_settings_share_live_consent_and_defaults_are_off() {
     let before = dispatch(&ctx, "settings_read", serde_json::json!({}), &state).unwrap();
     assert_eq!(before["autostart"], false);
     assert_eq!(before["model"]["enabled"], false);
-    dispatch(&ctx,"set_model_consent",serde_json::json!({"consent":{"enabled":true,"provider_id":"synthetic","allowed_group_ids":["g1"],"allow_attachment_text":false,"revision":"0"}}),&state).unwrap();
+    dispatch(&ctx,"set_model_consent",serde_json::json!({"consent":{"enabled":true,"provider_id":"deepseek","allowed_group_ids":["g1"],"allow_attachment_text":false,"revision":"0"}}),&state).unwrap();
     assert!(state.consent.snapshot().unwrap().enabled);
     assert_eq!(
         state.consent.replace(0, ModelConsent::default()),
         Err(AppError::Conflict)
     );
     assert_eq!(state.consent.snapshot().unwrap().revision, 1);
+    let reopened = AppState::from_database(database())
+        .with_model(&root)
+        .unwrap();
+    assert!(
+        reopened
+            .model_credentials()
+            .unwrap()
+            .is_configured()
+            .unwrap()
+    );
+    assert!(!reopened.consent.snapshot().unwrap().enabled);
+    dispatch(&ctx, "model_key_delete", serde_json::json!({}), &state).unwrap();
+    assert!(!state.consent.snapshot().unwrap().enabled);
+    assert!(!state.model_credentials().unwrap().is_configured().unwrap());
+    std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
 fn bounded_retry_reuses_current_task_without_duplicate_event_or_override_loss() {
